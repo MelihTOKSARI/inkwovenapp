@@ -1,0 +1,51 @@
+# XcodeGen spec (task A1). Regenerate after changing: xcodegen generate
+name: Inkbound
+options:
+  bundleIdPrefix: app.inkbound
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  InkboundCore:
+    path: Packages/InkboundCore
+targets:
+  Inkbound:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: InkboundCore
+        products: [InkCore, InkData, InkNet, InkRender, InkMoney, InkSafety, InkAnalytics]
+    info:
+      path: App/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSFaceIDUsageDescription: "Face ID keeps your notebook — and the Keeper's pages — private."
+        # Local echo proxy during core dev only; removed before TestFlight.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2" # iPad-first, iPhone companion
+        SUPPORTS_MACCATALYST: false
+        SWIFT_VERSION: "6.0"
+    scheme:
+      testTargets: [InkboundUITests]
+  InkboundUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Inkbound
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES

@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+DerivedData/
+*.xcodeproj
+!project.yml
+xcuserdata/
+node_modules/
+npm-debug.log*
+.env

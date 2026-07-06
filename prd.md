@@ -1,0 +1,154 @@
+# PRD: Inkbound (MVP) — the paper engine + 8 launch Books, all-in
+
+**Status:** Draft v3 (all-in launch) · **PM:** Maxime · **Build:** Claude Design (screens) + Claude Code (implementation)
+**Target ship date:** submit to App Review by **2026-07-12** (this week) · **Last updated:** 2026-07-06
+
+> **Scope decision (v3):** founder call — everything ships in the MVP. All former P1/P2 items, the three first-drop Books (8 Books total), moving pictures + credits, cross-page memory, the cosmetics/content store, and the iPhone companion are now launch scope, built AI-first in one week. This deliberately overrides the vision doc's "5 sharp Books" launch-discipline rule; the mitigations are in §8. The brand story stays the engine: *paper that answers.*
+
+---
+
+## 0. Pricing Model
+
+| Tier | Price | What's included |
+|---|---|---|
+| Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
+| Inkbound Plus | $9.99/mo or $59.99/yr (7-day trial on annual) | Unlimited ink replies · **20 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| Moving-picture credits | Packs of 10 / 30 / 100 | **Launch scope.** Consumable; never bundled unlimited (real video unit cost). 1 free credit at onboarding to seed the wow. |
+| Content IAP (the Bindery) | $1.99–$7.99 | Covers, inks, seasonal papers, Book packs — high margin, zero AI cost. **Launch scope.** |
+
+- **Paywall trigger:** 6th magic moment of a day, reopening a >30-day page, or invoking memory ("the notebook wants to remember this…") — always after a value moment, never at onboarding.
+- **Soft vs hard:** soft — free stays genuinely magical daily.
+- **Platform:** RevenueCat over StoreKit 2; 30%→15% small-business share.
+- **Rationale:** $9.99 matches proven AI-app WTP. All 8 Books free maximizes shelf discovery; we monetize volume (moments), memory, modality (video credits), and cosmetics — not doors.
+
+## 1. Context & Problem
+
+**Why now:** vision LLMs read handwriting off a canvas snapshot; image generation feels like a photo developing; video generation is now viable per-unit-priced; the open-source Riddle project proved fascination with the mechanic; no pen-first AI product exists. **New:** Claude Design + Claude Code collapse the build cost — a scope that was 12 weeks for 1–2 devs is now a one-week AI-assisted build, which is why the all-in launch is even on the table.
+**Problem:** AI lives in cold chat windows; Pencil owners have world-class ink but dumb paper; the demand pools (reflection, creativity, solo play, learning, correspondence) are served by typing-first single verticals.
+**Wedge:** one enchanted object, pen-first, multi-Book.
+
+## 2. Goals
+
+| Metric | Baseline | Target | Timeframe |
+|---|---|---|---|
+| Activation (first answered page) | 0 | 65% of installs | Launch +4 wk |
+| ≥2 Books opened in week 1 | 0 | 50% of activated | Launch +4 wk |
+| D7 / D30 retention | 0 | 30% / 20% | Launch +8 wk |
+| Free→paid conversion | 0 | 4% | Launch +8 wk |
+| Credit-pack attach rate (payers) | 0 | 15% | Launch +8 wk |
+| NSM: weekly magic moments / active user | 0 | ≥6 | Launch +8 wk |
+
+**Planning discipline:** budget infra and any spend against the conservative case (~25–30k installs / 12k MAU at 12 mo); 100k installs is the stretch headline, never a cost assumption. No ad spend until organic CAC/LTV data exists (~launch +8 wk, via app-analytics).
+
+**Non-goals (MVP):** Android, typed input, voice of the page, sealed letters, printed yearbook, creator-published Books, social features, localization (English only), therapy/clinical or education-curriculum claims.
+
+## 3. Users
+
+**Primary:** "Maya," 29, iPad Air + Pencil, AI-curious, journals sporadically, plays story games, shares delightful app moments.
+**Secondary:** "Dev," 34, solo-RPG player seeking a game master; "Sam," 38, parent conjuring illustrated bedtime stories; "Leo," 16, wants worked math solutions in ink; "June," 41, writes letters to Austen and gets answers.
+
+**Key user stories (additions in bold):**
+1. As a new user, I want to write on the page and watch it drink my ink and answer, so that I feel the magic inside 90 seconds.
+2. As a curious user, I want to switch among 8 Books from a shelf, so the same notebook becomes diary, storyteller, game, artist, oracle, **pen-pal, tutor, or parlor**.
+3. As a doodler, I want my sketch to develop into finished art, so I can create beyond my skill.
+4. As a solo player, I want the page to run my adventure and illustrate key moments.
+5. As a private writer, I want the Keeper locked behind Face ID with local pages, so I can be honest.
+6. **As a subscriber, I want the notebook to remember earlier pages, so the Keeper and Game Master feel alive across sessions.**
+7. **As a delight-seeker, I want a moving picture to bloom on the page (credits), so I have something no other app can show.**
+8. **As a collector, I want covers, inks, and seasonal papers from the Bindery, so my notebook feels mine.**
+9. **As an iPhone user, I want a read-only companion (plus the Oracle), so my notebook is with me between iPad sessions.**
+
+## 4. Requirements — all P0 (deliberate all-in launch; see §8)
+
+**The paper engine:**
+- PencilKit canvas: pressure ink, palm rejection, portrait/landscape; paper texture per Book. **Pencil recommended, not required — finger drawing works everywhere (widens the funnel to the full iPad base; nothing gates on Pencil detection).**
+- Idle-send state machine (~3s pen rest → snapshot → send; new stroke cancels); **speculative upload at ~2s (cancel on new stroke) so network cost is pre-paid at send-commit**; ink-absorption animation **starts the instant the send commits — 1.5–2s of in-fiction theater the model runs behind**.
+- Vision-LLM pipeline via thin serverless proxy (key custody, Book prompt injection, rate limits); **streaming-first: first ink strokes render from first tokens, never from a completed reply**. Snapshots downscaled hard; send only the region with new strokes since last exchange.
+- **Latency budget: first ink stroke ≤4s after send (p95, throttled-network test profile); image development starts ≤8s; violating this kills the fiction — treat as a launch-blocking bug. Instrument p50/p95 time-to-first-stroke.**
+- Reply modality router: model decides ink / image / **video** per page context; client renders all three.
+- Ink renderer: streamed cursive (Core Text glyph paths + stroke animation), per-Book hand/ink.
+- Image renderer: develops on-page like a darkroom photo, **preview-first — low-res/progressive preview begins developing immediately while full-res generates (the darkroom fiction is built for this)**; doodle-conditioning (image-to-image) for the Artist.
+- **Moving-picture renderer: credit-gated video request → develop-on-page player (Daily-Prophet style loop).**
+- In-fiction offline/error states; retry.
+
+**The 8 Books (content modules on the engine):**
+- Book framework: definition schema (prompt, hand, ink, paper, modality policy, starter page), shelf UI, switching; definitions served remotely.
+- The Storyteller · The Artist · The Game Master (session state on-page) · The Oracle · The Keeper (Face ID-gated, private-by-default) · **The Correspondent** (letters answered by historical/fictional hands — original or public-domain figures only) · **The Tutor** (worked solutions and corrections in ink; no curriculum claims) · **Parlor Games** (riddles, 20 questions, draw-and-guess).
+
+**Memory & pages:**
+- Remembered Pages: all pages persisted (SwiftData), on-device handwriting search (Vision), timeline per Book; CloudKit sync.
+- **Cross-page memory (Plus): per-Book memory summaries (Keeper reflections, GM campaign state) injected into context; user-visible and erasable ("tear out the memory").**
+
+**Safety & compliance:**
+- Crisis classifier on all Books (break character, care, resources — red-teamed, incl. Tutor frustration and GM dark scenarios).
+- Image AND video moderation (prompt + output) — App Review requirement.
+- Optional Sign in with Apple, in-app account deletion, export/delete-all, privacy labels, AI disclosure, subscription + credit terms, 13+ rating.
+
+**Monetization:**
+- RevenueCat paywall, purchase/restore, entitlement gating (daily moments, image allotment, archive window, memory).
+- **Credit wallet: buy/spend/refund-on-failure for moving pictures.**
+- **The Bindery: content IAP storefront (covers, inks, papers) — StoreKit products, no AI cost.**
+
+**Ritual & polish (former P1/P2, now launch scope):**
+- Onboarding vignette (the notebook introduces itself in ink); first answered page ≤90s.
+- Notification ritual per Book + quiet hours; reply length/tone settings; left-handed mode.
+- Haptics/sound on absorption & development; share-card export of a finished page (watermarked).
+
+**iPhone companion:**
+- Read-only Remembered Pages + full Oracle (finger or typed sigil — the one sanctioned non-Pencil surface); same binary, adaptive layout.
+
+**Analytics:** one SDK; NSM + funnel (install → first stroke → first answered page → second Book → D1 → paywall → purchase) + per-Book engagement + credit funnel + **unit-economics guardrail: model cost per subscriber per month, alert when p95 user exceeds 30% of $9.99** + p50/p95 time-to-first-stroke.
+
+## 5. Out of Scope (MVP)
+
+Voice of the page, sealed letters, printed yearbook, creator Books/marketplace, Android, typed input on iPad, localization, social features. Book definitions remain server-side so future drops ship without app review where possible.
+
+## 6. Design & UX
+
+**Workflow:** Claude Design generates the full screen inventory from this PRD (shelf ×8, page, paywall, Bindery, credit wallet, memory view, iPhone companion, onboarding); Claude Code implements against those specs in SwiftUI.
+Core flows: (1) onboarding vignette → first answered page ≤90s; (2) the page — write → rest → absorb → answer (ink flows / picture develops / moving picture blooms); zero chrome while writing; (3) the shelf — 8 Books, distinct paper/hand/ritual; (4) Remembered Pages — timeline + search + memory view; (5) paywall in-fiction ("bind the notebook to you"); (6) the Bindery; (7) iPhone companion.
+Tone: candlelit stationery, parchment grain, iron-gall ink; every animation serves the fiction.
+
+## 7. Technical Considerations
+
+Native **SwiftUI + PencilKit** (ink latency, glyph animation, and Pencil interaction *are* the product), implemented by **Claude Code**; iPad + iPhone (companion mode), iOS 17+. Local-first SwiftData + CloudKit. Serverless proxy: model routing per the table below (choice lives in the server-side Book definition — swappable without app release), remote Book definitions, per-user rate limits. RevenueCat/StoreKit 2 incl. consumables.
+
+**Model routing (July 2026 picks — costs verified, revisit monthly):**
+
+| Job | Model | Cost | Why |
+|---|---|---|---|
+| Ink replies, default (Oracle, Keeper, Storyteller, Artist, Correspondent, Parlor) | Gemini Flash-Lite class | ~$0.001–0.002/page | Top small-model handwriting accuracy; sub-second TTFT streamed |
+| Ink replies, heavy (Game Master, Tutor) | GPT-5 Mini / Gemini 3 Flash | ~$0.005–0.01/page | Best handwriting + reasoning at small-model price |
+| Images, default illustrations | Z-Image Turbo via fal.ai | ~$0.01/img, ~1s @1024² | Speed inside the develop animation; free-tier viable |
+| Images, Artist doodle img2img | FLUX.2 via fal.ai | ~$0.03–0.055/img | Quality where it's the whole point; fal = lowest prod latency |
+| Moving pictures (5s loop) | Kling 3.0 via fal.ai | ~$0.15–0.35/clip | Best quality-per-dollar; credit at ~$0.50 = healthy margin (Sora 2 fallback) |
+| Crisis + moderation | nano-class model | negligible | Runs parallel, never blocks the reply |
+
+Heavy-user math: Plus worst case (20 img/day soft cap) ≈ $6/mo model cost, realistic heavy user ≈ $1.50/mo vs $9.99 — guarded by the 30%-of-sub alert. If heavy users hurt margins, sell image top-up credits (wallet already exists) before ever raising price. Unit-test targets (Claude Code writes tests alongside): idle-send machine, modality router, entitlement + credit math, memory injection, crisis routing. Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet.
+
+## 8. Risks & Open Questions
+
+| Risk | L | I | Mitigation |
+|---|---|---|---|
+| **One-week all-in launch: compressed QA, no real beta, 8 surfaces to break** | H | H | Claude Code writes tests with every feature; day-5 red-team + device matrix; day-6 friends TestFlight; kill-switch flags per Book and per modality so anything broken can be disabled server-side without resubmission |
+| **App Review latency/rejection (AI images + video + credits all at once)** | M | H | Submit day 6; expedited-review request; conservative styles, no photoreal people; complete AI disclosure + credit terms; fallback: launch whenever approved, marketing holds |
+| Eight doors dilute the launch story | H | H | Brand = the engine; one hero demo; listing leads with "paper that answers"; per-Book videos roll out post-launch as the drip instead |
+| Latency breaks the fiction | M | H | §4 latency budget is launch-blocking; small/fast models, streaming, aggressive caching |
+| Video unit cost / moderation failure | M | H | Credits only, never unlimited; refund-on-failure; strictest moderation on video |
+| Cursive/development/video animations underwhelm | M | H | Day-1 spikes with go/no-go; any modality can slip to a flag-off state |
+| Crisis mishandled in any of 8 Books | M | H | Engine-level classifier; red-team incl. Tutor + GM scenarios |
+| Correspondent IP exposure | M | M | Public-domain/original figures only at launch; zero trademarked references |
+| Image costs at free tier | M | H | ~1 image/day free, caching, downscaled outputs |
+
+Open questions: (Eng) video model pick — cost/speed/loop quality; (Design) 8 distinct paper/hand directions in Claude Design without blending together; (PM) hero demo = engine ink moment or Artist doodle.
+
+## 9. Rollout Plan (this week)
+
+- **Day 1–4 — Build:** per tasks.md; engine → Books → money/safety → companion/polish.
+- **Day 5 — Alpha + red-team:** internal on-device pass (iPad mini/Air/Pro + iPhone), prompt tuning across 8 Books, crisis/image/video red-team, latency audit.
+- **Day 6 — TestFlight + submit:** friends-and-family smoke test; fix; submit to App Review with expedited request. Store listing: hero engine video + screenshots (per-Book videos become post-launch content). **Prepare and send the App Store featuring pitch + press kit — a Pencil-native PencilKit showcase is exactly what editorial features, and one feature outperforms months of organic.**
+- **Day 7+ — Launch on approval:** worldwide, English. ASO: "AI notebook," "Apple Pencil AI," "paper that answers." Post-launch: per-Book videos ship one per week — the drop cadence becomes a marketing cadence even though the Books are already in.
+
+## 10. Launch Checklist
+
+- [ ] Latency budget met on iPad Air (ink ≤4s, image ≤8s) · [ ] QA iPad mini/Air/Pro + iPhone, both orientations · [ ] All 8 Books answer correctly with distinct voices · [ ] Analytics funnel + per-Book + credit events verified · [ ] Paywall/restore/trial + credit purchase/refund tested · [ ] Crisis + image + video moderation red-team pass · [ ] Kill-switch flags verified per Book/modality · [ ] Store listing + hero video · [ ] Privacy labels, AI disclosure, account deletion verified

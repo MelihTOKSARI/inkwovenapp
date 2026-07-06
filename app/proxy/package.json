@@ -1,0 +1,17 @@
+{
+  "name": "inkbound-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Inkbound serverless proxy: key custody, remote Book definitions, model routing, rate limits, kill-switches, credit wallet.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1"
+  }
+}
