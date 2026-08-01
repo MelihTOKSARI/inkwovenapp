@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// The content shop: covers, inks, papers, and new hands. Purchases bind
-/// to StoreKit later; try-on is real — the notebook beside the shelves
-/// wears whatever is previewed, so the buyer never loses the context.
+/// The Bindery, presented for v1 as a try-on room, not a shop: its SKUs do
+/// not exist yet, and a storefront full of price tags where nothing can be
+/// bought is an incomplete feature by App Review's lights (2.1). Prices and
+/// ownership return together with the real StoreKit content IAPs (task G5).
+/// Try-on is real — the notebook beside the shelves wears whatever is
+/// previewed, so nothing here overpromises.
 struct BinderyView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
@@ -11,9 +14,7 @@ struct BinderyView: View {
 
     struct Item: Identifiable, Equatable {
         let name: String
-        let price: String
         let toneHex: UInt32
-        let owned: Bool
         /// Book packs bring their own hand; other wares leave these nil.
         var hand: String?
         var handScale: CGFloat = 1
@@ -36,30 +37,30 @@ struct BinderyView: View {
 
     private static let catalog: [(name: String, items: [Item])] = [
         ("Covers", [
-            Item(name: "Midnight Calf", price: "$2.99", toneHex: 0x2B2F3D, owned: false),
-            Item(name: "Foxed Vellum", price: "$2.99", toneHex: 0xC9B489, owned: true),
-            Item(name: "Sea-Green Buckram", price: "$2.99", toneHex: 0x3C5B52, owned: false),
-            Item(name: "Oxblood Morocco", price: "$3.99", toneHex: 0x5C211F, owned: false),
+            Item(name: "Midnight Calf", toneHex: 0x2B2F3D),
+            Item(name: "Foxed Vellum", toneHex: 0xC9B489),
+            Item(name: "Sea-Green Buckram", toneHex: 0x3C5B52),
+            Item(name: "Oxblood Morocco", toneHex: 0x5C211F),
         ]),
         ("Inks", [
-            Item(name: "Iron Gall", price: "Free", toneHex: 0x2E2418, owned: true),
-            Item(name: "Sepia Walnut", price: "$0.99", toneHex: 0x6B4A2B, owned: false),
-            Item(name: "Peacock", price: "$0.99", toneHex: 0x1F5A63, owned: false),
-            Item(name: "Oxblood", price: "$0.99", toneHex: 0x7A2E2B, owned: false),
+            Item(name: "Iron Gall", toneHex: 0x2E2418),
+            Item(name: "Sepia Walnut", toneHex: 0x6B4A2B),
+            Item(name: "Peacock", toneHex: 0x1F5A63),
+            Item(name: "Oxblood", toneHex: 0x7A2E2B),
         ]),
         ("Papers", [
-            Item(name: "Winter Laid", price: "$1.99", toneHex: 0xEEF0E8, owned: false),
-            Item(name: "Autumn Foxed", price: "$1.99", toneHex: 0xE7D3AC, owned: false),
-            Item(name: "Spring Deckle", price: "$1.99", toneHex: 0xF3EAD6, owned: false),
+            Item(name: "Winter Laid", toneHex: 0xEEF0E8),
+            Item(name: "Autumn Foxed", toneHex: 0xE7D3AC),
+            Item(name: "Spring Deckle", toneHex: 0xF3EAD6),
         ]),
         ("Book Packs", [
-            Item(name: "The Cartographer", price: "$4.99", toneHex: 0x4A6B6E, owned: false,
+            Item(name: "The Cartographer", toneHex: 0x4A6B6E,
                  hand: "Fondamento-Regular", handScale: 1.05,
                  line: "North of the salt marsh, the road forgets itself."),
-            Item(name: "The Confessor", price: "$4.99", toneHex: 0x6E3B34, owned: false,
+            Item(name: "The Confessor", toneHex: 0x6E3B34,
                  hand: "HomemadeApple-Regular", handScale: 1.0,
                  line: "Tell me only what the night should keep."),
-            Item(name: "The Botanist", price: "$4.99", toneHex: 0x5A6B3A, owned: false,
+            Item(name: "The Botanist", toneHex: 0x5A6B3A,
                  hand: "Caveat-Regular", handScale: 1.15,
                  line: "The foxglove opened a day early this year."),
         ]),
@@ -103,7 +104,7 @@ struct BinderyView: View {
                 Text("The Bindery")
                     .font(InkFont.display(34))
                     .foregroundStyle(room.heading)
-                Text("Covers, inks, papers and new hands. Try any on the notebook before it is yours.")
+                Text("Covers, inks, papers and new hands. Try any on the notebook — the binder takes commissions with a later edition.")
                     .font(InkFont.bodyItalic(16))
                     .foregroundStyle(room.dim)
                     .multilineTextAlignment(.center)
@@ -174,13 +175,6 @@ struct BinderyView: View {
                         .frame(width: 16)
                     Spacer()
                 }
-                if item.owned {
-                    SmallCapsLabel(text: "owned", size: 10, tracking: 1.1, color: Color(hex: 0xEEF3E6))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(Ink.successHerb.opacity(0.92)))
-                        .padding(10)
-                }
             }
             .aspectRatio(4 / 5, contentMode: .fit)
 
@@ -190,9 +184,6 @@ struct BinderyView: View {
                     .foregroundStyle(room.heading)
                     .lineLimit(2)
                 HStack {
-                    Text(item.price)
-                        .font(InkFont.display(18))
-                        .foregroundStyle(room.heading)
                     Spacer()
                     previewButton(item)
                 }

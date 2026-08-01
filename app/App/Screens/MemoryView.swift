@@ -2,11 +2,16 @@ import SwiftUI
 
 /// "What the notebook remembers" — Plus feature. Memory entries as inked
 /// marginalia; tear any out to make it forget. Free users see the bind
-/// pitch. InkCore's MemoryInjection store binds here; sample notes until.
+/// pitch. Off every navigation path for v1: cross-page memory (task D5) is
+/// not built, so nothing writes notes and no screen may promise otherwise.
+/// When the MemoryInjection store binds, this reads from it and returns to
+/// the shelf's rooms.
 struct MemoryView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
-    @State private var notes = DemoContent.memoryNotes
+    /// Empty until the real memory store binds — the notebook honestly
+    /// remembers nothing, and the demo notes this once showed are gone.
+    @State private var notes: [String] = []
     @State private var tearing: String?
 
     var body: some View {
@@ -38,12 +43,22 @@ struct MemoryView: View {
                                 .foregroundStyle(Color(hex: 0x7A6A4D))
                                 .padding(.top, 6)
 
-                            VStack(spacing: 2) {
-                                ForEach(notes, id: \.self) { note in
-                                    memoryRow(note)
+                            if notes.isEmpty {
+                                Text("Nothing is kept in the margins yet — the notebook is only beginning to know you.")
+                                    .font(InkFont.bodyItalic(17))
+                                    .foregroundStyle(Color(hex: 0x7A6A4D))
+                                    .multilineTextAlignment(.center)
+                                    .lineSpacing(6)
+                                    .frame(maxWidth: 400)
+                                    .padding(.top, 44)
+                            } else {
+                                VStack(spacing: 2) {
+                                    ForEach(notes, id: \.self) { note in
+                                        memoryRow(note)
+                                    }
                                 }
+                                .padding(.top, 32)
                             }
-                            .padding(.top, 32)
                         } else {
                             freeState
                                 .padding(.top, 40)

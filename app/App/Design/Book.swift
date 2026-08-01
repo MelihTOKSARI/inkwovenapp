@@ -67,8 +67,11 @@ extension Book {
         Book(id: .keeper, name: "The Keeper", monogram: "K",
              accentHex: 0x6E3B34, paperHex: 0xEDE1C6,
              hand: "HomemadeApple-Regular", handScale: 1.0,
+             // A lock-claim only: the seal is real (Face ID, sealed archive),
+             // but Keeper pages still travel to be answered like any Book's —
+             // "yours alone" would promise more than the wire keeps.
              whisper: "Only your hand may open this.",
-             opener: "These pages are yours alone. I keep nothing you do not ask me to keep.",
+             opener: "These pages keep behind the seal, and open only to your hand.",
              starterPrompt: "Today I finally told her the truth.",
              develops: false, locked: true, suggested: false, resting: false),
         Book(id: .correspondent, name: "The Correspondent", monogram: "C",

@@ -14,7 +14,6 @@ struct PageView: View {
     @State private var interactor: PageInteractor
     @State private var canvasAbsorbed = false
     @State private var developStep = 0
-    @State private var isMoving = false
     @State private var restSettled = false
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
@@ -501,41 +500,15 @@ struct PageView: View {
 
     private var developSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            DevelopFrame(book: book, step: developStep, isMoving: isMoving, imageURL: interactor.imageURL)
+            // isMoving stays false for v1: the moving-picture modality is
+            // flag-off (no video provider is bound), so nothing may charge a
+            // vial for it. DevelopFrame keeps the capability for its return.
+            DevelopFrame(book: book, step: developStep, isMoving: false, imageURL: interactor.imageURL)
                 .frame(maxWidth: 420)
-            HStack {
-                Text("developed from your page")
-                    .font(InkFont.bodyItalic(13))
-                    .foregroundStyle(Ink.inkFaded)
-                Spacer()
-                if developStep >= 3 && !isMoving {
-                    Button {
-                        if model.spendMovingCredit() {
-                            withAnimation { isMoving = true }
-                        } else {
-                            model.go(.wallet)
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            VialView(width: 14, height: 20, fill: 0.6)
-                            Text("make it move · 1 vial")
-                                .font(InkFont.body(13))
-                                .foregroundStyle(Ink.wax)
-                        }
-                        .padding(.horizontal, 13)
-                        .frame(minHeight: 38)
-                        .background(
-                            Capsule()
-                                .fill(Ink.wax.opacity(0.09))
-                                .overlay(Capsule().stroke(Ink.wax.opacity(0.3), lineWidth: 1))
-                        )
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .accessibilityLabel("Make it move")
-                    .accessibilityHint("Spends one sealed vial to set the picture drifting.")
-                }
-            }
-            .frame(maxWidth: 420)
+            Text("developed from your page")
+                .font(InkFont.bodyItalic(13))
+                .foregroundStyle(Ink.inkFaded)
+                .frame(maxWidth: 420, alignment: .leading)
         }
         .onAppear { runDevelop() }
         .onChange(of: interactor.imageURL) { _, url in
@@ -543,6 +516,10 @@ struct PageView: View {
             withAnimation(.easeInOut(duration: reduceMotion ? 0.3 : 1.1)) { developStep = 3 }
         }
     }
+
+    /// Darkroom reveal pacing while fal paints: (seconds to wait, develop
+    /// step to reach). Step 3 never comes from here — see runDevelop.
+    private static let developScript: [(delay: Double, step: Int)] = [(0.9, 1), (1.0, 2), (1.2, 3)]
 
     /// The darkroom drifts to step 2 on its own while fal paints; the full
     /// reveal (step 3) is gated on the real picture arriving.
@@ -557,7 +534,7 @@ struct PageView: View {
             return
         }
         Task {
-            for (delay, step) in DemoContent.developScript where step < 3 {
+            for (delay, step) in Self.developScript where step < 3 {
                 try? await Task.sleep(for: .seconds(delay))
                 guard developStep < step else { continue }
                 withAnimation(.easeInOut(duration: 1.1)) { developStep = step }
@@ -580,7 +557,6 @@ struct PageView: View {
         case .sending:
             // A fresh exchange gets a fresh darkroom.
             developStep = 0
-            isMoving = false
             withAnimation(.easeIn(duration: reduceMotion ? 0.3 : 0.9)) {
                 canvasAbsorbed = true
             }

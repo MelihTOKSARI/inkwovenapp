@@ -2,8 +2,8 @@ import Foundation
 import InkCore
 
 /// Where the page's cross-Book memory comes from. Nothing writes summaries yet
-/// (task D5 — the Memory screen still tears entries out of `DemoContent`), so
-/// the live binding is empty and the notebook honestly remembers nothing.
+/// (task D5), so the live binding is empty and the notebook honestly
+/// remembers nothing.
 ///
 /// The seam is here, on the client, because `MemoryInjection` has to run before
 /// the request is built: a torn-out memory must never leave the device, and a

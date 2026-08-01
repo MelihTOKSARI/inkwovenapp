@@ -89,9 +89,9 @@ struct ShelfView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                roomButton(label: "Vials", destination: .wallet) {
-                    VialView(width: 22, height: 34, fill: 0.4)
-                }
+                // The Vials door is off the shelf for v1: the moving-picture
+                // modality ships flag-off, and a credit shop for a hidden
+                // feature is a shop selling nothing (PRD kill-switch rule).
                 roomButton(label: "Bindery", destination: .bindery) { binderyDoorIcon }
                 roomButton(label: "Drawer", destination: .drawer) { drawerIcon }
             }
