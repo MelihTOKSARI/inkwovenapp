@@ -1,4 +1,4 @@
-# PRD: Inkbound (MVP) — the paper engine + 8 launch Books, all-in
+# PRD: Inkwoven (MVP) — the paper engine + 8 launch Books, all-in
 
 **Status:** Draft v3 (all-in launch) · **PM:** Maxime · **Build:** Claude Design (screens) + Claude Code (implementation)
 **Target ship date:** submit to App Review by **2026-07-12** (this week) · **Last updated:** 2026-07-06
@@ -12,7 +12,7 @@
 | Tier | Price | What's included |
 |---|---|---|
 | Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
-| Inkbound Plus | $9.99/mo or $59.99/yr (7-day trial on annual) | Unlimited ink replies · **20 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| Inkwoven Plus | $9.99/mo or $59.99/yr (7-day trial on annual) | Unlimited ink replies · **20 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
 | Moving-picture credits | Packs of 10 / 30 / 100 | **Launch scope.** Consumable; never bundled unlimited (real video unit cost). 1 free credit at onboarding to seed the wow. |
 | Content IAP (the Bindery) | $1.99–$7.99 | Covers, inks, seasonal papers, Book packs — high margin, zero AI cost. **Launch scope.** |
 
@@ -69,10 +69,15 @@
 - Ink renderer: streamed cursive (Core Text glyph paths + stroke animation), per-Book hand/ink.
 - Image renderer: develops on-page like a darkroom photo, **preview-first — low-res/progressive preview begins developing immediately while full-res generates (the darkroom fiction is built for this)**; doodle-conditioning (image-to-image) for the Artist.
 - **Moving-picture renderer: credit-gated video request → develop-on-page player (Daily-Prophet style loop).**
+- **Exchange lifecycle (tested, not implied):** on reply completion → user strokes archived to the page record and REMOVED from the live canvas (absorption ends in removal, never minimum-opacity ghosting); on send failure → strokes retained with in-fiction retry. Canvas is always ready for the next exchange after a successful reply.
+- **Canvas tool tray (in-fiction, top corner, dormant while pen moves):** undo, eraser (+ Pencil double-tap), **hold ("the page waits" — pauses idle-send for long writing/drawing)**, cancel send, turn page. Never grows into a toolbar.
+- **Pen-first input everywhere, onboarding included:** name and all onboarding responses written in ink; a keyboard appearing on iPad is a launch-blocking bug.
+- **Occlusion rule:** no informative UI (status, errors, cards, banners) in the bottom region of the page — the writing hand covers it. All status renders as top-margin marginalia; placement flips with left-handed mode.
 - In-fiction offline/error states; retry.
 
 **The 8 Books (content modules on the engine):**
 - Book framework: definition schema (prompt, hand, ink, paper, modality policy, starter page), shelf UI, switching; definitions served remotely.
+- **Shelf curation (MVP = hide/show only): hide/show Books (never uninstall — hidden Books restorable from a "closed cabinet" affordance); shelf arrangement adapts automatically to visible-Book count (8 = full shelves, 2 = desk pair). No user-facing layout setting. Drag-to-reorder = future.**
 - The Storyteller · The Artist · The Game Master (session state on-page) · The Oracle · The Keeper (Face ID-gated, private-by-default) · **The Correspondent** (letters answered by historical/fictional hands — original or public-domain figures only) · **The Tutor** (worked solutions and corrections in ink; no curriculum claims) · **Parlor Games** (riddles, 20 questions, draw-and-guess).
 
 **Memory & pages:**
@@ -101,7 +106,7 @@
 
 ## 5. Out of Scope (MVP)
 
-Voice of the page, sealed letters, printed yearbook, creator Books/marketplace, Android, typed input on iPad, localization, social features. Book definitions remain server-side so future drops ship without app review where possible.
+Voice of the page, sealed letters, printed yearbook, creator Books/marketplace, Android, typed input on iPad, localization, social features, shelf drag-to-reorder. Book definitions remain server-side so future drops ship without app review where possible.
 
 ## 6. Design & UX
 

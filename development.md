@@ -1,4 +1,4 @@
-# Inkbound — Core Development Spec (engine only)
+# Inkwoven — Core Development Spec (engine only)
 
 **Scope:** the engine and platform core per tasks.md Epics A–D, F, G + proxy. **Explicitly excluded:** all UI styling, screens, animations-as-aesthetics, Book content/prompts, store assets — those arrive from the Claude Design handoff and the Book definitions. Everything here must compile and pass tests with placeholder UI.
 **Stack:** Swift 5.10+, SwiftUI app shell, iPad-first + iPhone companion, iOS 17+. SwiftData + CloudKit. Serverless proxy in Node/Fastify. RevenueCat.
@@ -8,10 +8,10 @@
 
 ## 1. Project structure
 
-`Inkbound.xcodeproj` — app target `Inkbound` (iPad + iPhone), test target `InkboundTests`. Core logic lives in local SPM packages so Claude Code can build/test them without simulator UI:
+`Inkwoven.xcodeproj` — app target `Inkwoven` (iPad + iPhone), test target `InkwovenTests`. Core logic lives in local SPM packages so Claude Code can build/test them without simulator UI:
 
 ```
-Inkbound/
+Inkwoven/
 ├── App/                     # SwiftUI entry, DI container, routing shell (thin)
 ├── Packages/
 │   ├── InkCore/             # domain types, idle-send FSM, modality router (pure, no UIKit)
@@ -22,7 +22,7 @@ Inkbound/
 │   ├── InkSafety/           # crisis routing, moderation gates
 │   └── InkAnalytics/        # event schema + SDK adapter
 ├── proxy/                   # Node 20 + Fastify serverless (separate deploy)
-└── InkboundTests/           # + each package has its own test target
+└── InkwovenTests/           # + each package has its own test target
 ```
 
 Rules: `InkCore` imports Foundation only. No package imports `App`. All cross-package boundaries are protocols; live implementations injected in `App/DI.swift`. CI: `xcodebuild test` (app) + `swift test` (packages) on every commit.
@@ -34,6 +34,8 @@ Rules: `InkCore` imports Foundation only. No package imports `App`. All cross-pa
 @Model final class BookState {                 // per-user state of a Book (definition itself is server-side)
     var bookID: String                          // "oracle", "keeper", ...
     var lastOpenedAt: Date?; var isLocked: Bool // Keeper => always true
+    var isHidden: Bool                          // shelf curation (MVP): hidden ≠ deleted, synced
+    var shelfOrder: Int                         // schema-ready for future drag-to-reorder; MVP uses default order
     var pages: [Page]; var memory: [MemoryEntry]
 }
 @Model final class Page {
@@ -60,13 +62,18 @@ CloudKit: private database, automatic SwiftData mirroring; `strokeData` + image/
 Pure `IdleSendMachine` — no timers inside; the shell feeds it clock + stroke events, making every AC deterministic:
 
 ```swift
-enum SendState { case idle, inking, resting(since: Date), speculating(since: Date), committed, cancelled }
-enum SendEvent { case strokeBegan, strokeEnded(at: Date), tick(now: Date), uploadStarted, uploadFinished }
+enum SendState { case idle, inking, resting(since: Date), speculating(since: Date), committed, cancelled, held }
+enum SendEvent { case strokeBegan, strokeEnded(at: Date), tick(now: Date), uploadStarted, uploadFinished,
+                 holdToggled, cancelRequested }
 // Transitions: strokeEnded → resting; tick ≥2.0s → speculating (emit .beginSpeculativeUpload)
 // tick ≥3.0s → committed (emit .commitSend); strokeBegan from resting/speculating → cancelled (emit .abortUpload)
+// holdToggled → held ("the page waits": no tick transitions until holdToggled again → idle)
+// cancelRequested from resting/speculating → cancelled (emit .abortUpload; ink retained)
 ```
 
-ACs (unit tests): stroke at 2.9s → `.cancelled` + `.abortUpload` emitted, no send billed; rest to 3.0s → exactly one `.commitSend`; double-commit impossible.
+ACs (unit tests): stroke at 2.9s → `.cancelled` + `.abortUpload` emitted, no send billed; rest to 3.0s → exactly one `.commitSend`; double-commit impossible; `.held` never commits at any rest duration; cancel during `.speculating` aborts upload with ink retained.
+
+**Exchange lifecycle (ReplyAssembler contract):** `.done` → emit `.exchangeComplete` → shell archives strokes to `Page.strokeData` and REMOVES them from the live canvas (absorption animation ends in removal — never minimum-opacity ghosting). Any `ProxyError` → `.exchangeFailed` → strokes retained fully visible, in-fiction retry. Both paths unit-tested; the retain-on-error path is deliberate (user words never vanish into a failed send).
 
 **Snapshot pipeline (B4):** `SnapshotProcessor.process(drawing: PKDrawing, previousDigest: String?) -> SnapshotPayload` — crops to bounding box of strokes added since last exchange, grayscale + contrast normalize, downscale (long edge ≤1024px, JPEG q0.7), returns payload + digest. Digest match ⇒ skip send (dedupe re-rolls).
 

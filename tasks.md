@@ -1,4 +1,4 @@
-# Inkbound — MVP Tasks & Build Plan (all-in, one week)
+# Inkwoven — MVP Tasks & Build Plan (all-in, one week)
 
 **MVP goal:** *A new user opens any of the 8 Books, writes or doodles, and watches the page drink the ink and answer — in flowing script, a developing picture, or a moving picture — within 90 seconds of install.*
 **Assumptions:** solo founder driving **Claude Design** (all screens/specs) + **Claude Code** (all implementation + tests); native SwiftUI + PencilKit; iPad-first, iPhone companion; iOS 17+; SwiftData + CloudKit; serverless proxy (model routing + remote Book definitions); RevenueCat incl. consumables.
@@ -32,8 +32,12 @@
 - [ ] B1 PencilKit canvas: pressure ink, palm rejection, both orientations, per-Book paper texture; **finger-drawing fallback (Pencil recommended, never required)** — **M**
 - [ ] B2 Idle-send state machine (~3s rest → snapshot; stroke cancels) + **speculative upload at ~2s (cancel on new stroke)** + unit tests — **M**
   - AC: stroke at 2.9s → send cancelled AND speculative upload aborted; no model call billed.
-- [ ] B3 Ink-absorption animation — **S**
+- [x] B3 Ink-absorption animation — **ends in stroke removal: strokes archived to Page.strokeData then removed from live canvas; opacity is the animation, never the end state** — **S**
+  - AC: after reply completes, zero user strokes remain on canvas at any opacity; archived page shows them in Remembered Pages. On send failure, strokes retained fully visible + in-fiction retry.
 - [ ] B4 Snapshot pipeline: crop, contrast, downscale — **S**
+- [x] B5 Canvas tool tray (in-fiction, top corner, dormant while pen moves): undo/redo (PKCanvasView undoManager), eraser + Pencil double-tap, **hold ("the page waits" → IdleSendMachine .held state, idle-send paused)**, cancel send, turn page — **M**
+  - AC: hold active → no send at any rest duration; release → normal 3s cadence resumes; cancel during .speculating → upload aborted, ink retained.
+- [x] B6 Occlusion audit: no informative UI in bottom page region while canvas active; all status/error cards render as top-margin marginalia (QuietBanner); placement flips for left-handed mode — **S**
 
 ### Epic C — The page answers (D2)
 - [ ] C1 Vision-LLM call via proxy; streaming-first (first ink strokes from first tokens); **latency budget enforced: first ink stroke ≤4s p95 on throttled-network profile, image start ≤8s (launch-blocking); p50/p95 time-to-first-stroke instrumented** — **M**
@@ -55,6 +59,8 @@
 
 ### Epic E — The 8 Books (D3)
 - [ ] E1 Book framework: schema (prompt, hand, ink, paper, modality policy, starter page), shelf UI ×8, switching — **L**
+- [ ] E1b Shelf curation: hide/show per Book (BookState.isHidden; hidden ≠ deleted; "closed cabinet" restore) + count-responsive shelf arrangement (drag-to-reorder = future) — **S**
+  - AC: hiding 6 of 8 Books → shelf renders the 2-Book arrangement; hidden Book's pages remain in Remembered Pages; restore returns it with state intact.
 - [ ] E2 The Oracle (validates framework) — **S**
 - [ ] E3 The Keeper (private-by-default, reflective) — **S**
 - [ ] E4 The Storyteller (continuation + illustration policy) — **S**
@@ -82,7 +88,7 @@
 - [ ] G5 **The Bindery: content IAP storefront (covers, inks, seasonal papers); apply-to-notebook** — **M**
 
 ### Epic H — Ritual & launch (D5–D6)
-- [ ] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s — **M**
+- [x] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s; **fully pen-driven — name written in ink on the flyleaf, zero keyboard on iPad anywhere in onboarding (launch-blocking)** — **M**
 - [ ] H2 Notification ritual per Book + quiet hours — **M**
 - [ ] H3 Settings: hand/ink, reply length, fade timing, left-handed mode — **S**
 - [ ] H4 Haptics/sound on absorb & develop; perf pass iPad mini→Pro — **M**
@@ -114,4 +120,4 @@
 
 ## Out of scope for MVP
 
-Voice of the page, sealed letters, printed yearbook, creator Books/marketplace, Android, typed input on iPad, localization, social features.
+Voice of the page, sealed letters, printed yearbook, creator Books/marketplace, Android, typed input on iPad, localization, social features, shelf drag-to-reorder.

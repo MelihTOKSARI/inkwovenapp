@@ -1,15 +1,15 @@
-# Inkbound — Screen Inventory (from PRD v3)
+# Inkwoven — Screen Inventory (from PRD v3)
 
 All screens iPad-first (portrait + landscape) unless marked iPhone. Every screen must survive: empty, loading (in-fiction), error (in-fiction), offline.
 
 ## 1. Onboarding vignette
-The notebook introduces itself in ink (streamed cursive), asks your name, AI disclosure woven in-fiction ("a spirit of ink, not a person"), one free moving-picture credit granted. Exit: first answered page ≤90s from install. States: skip path, disclosure acknowledged.
+The notebook introduces itself in ink (streamed cursive), asks your name — **answered in ink on the flyleaf, never a keyboard; every onboarding input is pen-first** — AI disclosure woven in-fiction ("a spirit of ink, not a person"), one free moving-picture credit granted. **The disclosure/AI card sits in the top margin, aesthetic marginalia styling — never a bottom banner.** Exit: first answered page ≤90s from install. States: skip path, disclosure acknowledged.
 
 ## 2. The Shelf (home)
-Dark leather/candlelit room; 8 Books standing on shelves, each with distinct spine/cover, paper tone, and one-line whisper on focus. Bindery door (store) and a small settings drawer. Locked state overlay for Keeper (Face ID). States: first-run (Oracle glows as suggested first open), Book flagged-off (spine "resting").
+Dark leather/candlelit room; 8 Books standing on shelves, each with distinct spine/cover, paper tone, and one-line whisper on focus. Bindery door (store) and a small settings drawer. Locked state overlay for Keeper (Face ID). **Curation (MVP): long-press → hide (Book moves to a "closed cabinet", restorable); shelf arrangement adapts to visible count (8 = full shelves, 3 = mantel, 2 = desk pair). Drag-to-reorder = future.** States: first-run (Oracle glows as suggested first open), Book flagged-off (spine "resting"), cabinet open (hidden Books), 2-Book desk arrangement.
 
 ## 3. The Page (core surface — one screen, many states)
-Zero chrome while writing. Per-Book paper texture, hand, ink color.
+Zero chrome while writing — but not zero control: **in-fiction tool tray (inkwell/blotter, top corner, dormant while pen moves): undo, eraser, hold ("the page waits"), cancel send, turn page.** **Occlusion rule: nothing informative in the bottom page region (writing hand covers it); all status/error cards are top-margin marginalia, flipped in left-handed mode.** Per-Book paper texture, hand, ink color.
 - **Starter page:** Book's opening line already inked.
 - **Writing:** pure canvas; pressure ink; finger fallback.
 - **Absorbing:** ink drinks into the paper (starts at send-commit).

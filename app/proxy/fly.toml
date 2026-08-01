@@ -1,0 +1,65 @@
+# fly.toml — Inkwoven proxy (deployment.md §3.2)
+# Hand-maintained: `fly launch` regenerates this file with wrong defaults
+# (internal_port 3000, min_machines_running 0, no PORT env). If you rerun
+# launch, re-check this file against deployment.md before deploying.
+
+app = "inkwoven-proxy"
+primary_region = "iad"        # US East — near model provider endpoints (ttfs)
+
+[build]
+  # uses the Dockerfile in this directory
+
+[env]
+  # Must match the server's listen port (src/index.js, PORT ?? 8787) —
+  # nothing else in the image sets PORT, so a mismatch leaves the app
+  # unreachable by fly-proxy.
+  PORT = "8787"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"   # never scale to zero — cold starts hurt ttfs
+  auto_start_machines = true
+  min_machines_running = 1     # always-on; 0 re-enables idle stop
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200            # SSE holds connections open; keep limits high
+    hard_limit = 250
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"             # explicit — launch's 1GB default costs 4x
+
+# UNRESOLVED — memory headroom vs. concurrency. Left as-is deliberately;
+# changing either number is a capacity decision, not a config cleanup.
+#   A /v1/preupload request holds the parsed Buffer AND the base64 string the
+#   server allocates from it (~1.33x) live at the same time. A typical page
+#   snapshot (long edge <=1024, grayscale, JPEG q0.7) is ~180KB => ~420KB
+#   in flight; fastify's default bodyLimit is 1MB => ~2.3MB at the ceiling.
+#   At soft_limit = 200: 200 x 420KB = ~84MB typical on top of a ~50-70MB
+#   node+fastify+ioredis+pg baseline, i.e. ~150MB of a 256MB VM. At the 1MB
+#   ceiling: 200 x 2.3MB = ~466MB, nearly 2x the whole VM.
+#   An OOM kill here is not graceful: auto_stop_machines is off with
+#   min_machines_running = 1, so every in-flight SSE exchange dies with it.
+#   Pick one before load: an explicit bodyLimit (~512KB) on the fastify
+#   instance, soft_limit down to ~60-80, or memory up to 512mb.
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8787
+    # Must probe dependencies, not a constant. /v1/config returns a frozen
+    # object literal and touches no socket, so a machine with dead Redis or a
+    # dead Postgres pool answered it in <5ms and stayed in the pool while every
+    # credit and rate-limit call 500'd. /health/ready touches the stores and
+    # returns 503 when they are unreachable.
+    #
+    # The path must match a route registered in src/server.js AND appear in its
+    # HEALTH_ROUTES set — anything else falls through to the auth hook, which
+    # 401s the check and restart-loops every machine once attestation is on.
+    path = "/health/ready"
+    interval = "30s"
+    timeout = "5s"             # the route's own probe timeout must be lower
+    grace_period = "10s"       # let ioredis/pg finish their first connect

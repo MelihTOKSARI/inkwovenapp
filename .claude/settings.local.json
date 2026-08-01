@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "Bash(cp -R /Users/melih/Desktop/projects/fancyTrendyApps/Inkwoven/app/Packages/InkwovenCore/Sources/InkNet /private/tmp/claude-501/-Users-melih-Desktop-projects-fancyTrendyApps-Inkwoven-app/2d05937b-56c7-488f-80bc-fd031f3f4463/scratchpad/isolate/Sources/)",
+      "Bash(cp -R /Users/melih/Desktop/projects/fancyTrendyApps/Inkwoven/app/Packages/InkwovenCore/Tests/InkNetTests /private/tmp/claude-501/-Users-melih-Desktop-projects-fancyTrendyApps-Inkwoven-app/2d05937b-56c7-488f-80bc-fd031f3f4463/scratchpad/isolate/Tests/)",
+      "Bash(swift test *)"
+    ]
+  }
+}

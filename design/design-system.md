@@ -1,4 +1,4 @@
-# Inkbound — Design System ("Candlelit Stationery")
+# Inkwoven — Design System ("Candlelit Stationery")
 
 **Platform note:** implemented in SwiftUI (deliberate deviation from RN default — see PRD §7). Tokens map 1:1 to SwiftUI: colors → Asset Catalog, type → custom fonts + Dynamic Type, spacing → 4pt grid.
 
@@ -6,7 +6,8 @@
 1. **The fiction is the interface.** No chrome while writing; every control is diegetic (wax seals, ribbons, marginalia). If a UI element couldn't exist on a desk in 1890, redesign it.
 2. **Paper is light, room is dark.** Pages are warm parchment; everything around them (shelf, stores, settings) is a candlelit room — dark leather, brass, low glow.
 3. **Motion serves the fiction.** Absorption, development, and script animation are the product; standard iOS transitions only where unnoticed.
-4. **Accessible magic.** WCAG AA contrast on all text, ≥44pt hit targets, Dynamic Type on UI text (handwriting replies exempt but user-scalable), color never the only signal, Reduce Motion honored with cross-fades.
+4. **The hand owns the bottom of the page.** Occlusion rule: no informative UI (status, errors, cards, banners) in the bottom region while the canvas is active — the writing hand covers it. Status renders as top-margin marginalia (QuietBanner); placement flips with left-handed mode. Absorption ends in stroke *removal*, never low-opacity ghosting.
+5. **Accessible magic.** WCAG AA contrast on all text, ≥44pt hit targets, Dynamic Type on UI text (handwriting replies exempt but user-scalable), color never the only signal, Reduce Motion honored with cross-fades.
 
 ## Color
 
@@ -50,6 +51,7 @@ Contrast pairs verified AA: ink on parchment 10.9:1; parchment on room 12.4:1; c
 - **RibbonTab** — navigation/filter (timeline, store categories).
 - **VialChip** — credit balance/pack unit.
 - **MarginNote** — memory entries; tear-out affordance (perforation on long-press).
+- **ToolTray** — inkwell/blotter cluster, top corner: undo, eraser, hold ("the page waits"), cancel, turn page; dormant (near-invisible) while pen moves.
 - **CandleSheet** — modal sheet on dark room background.
 - **QuietBanner** — in-fiction status (offline, cooldown): italic, ink-faded, no red.
 - **CrisisCard** — the one deliberately *plain* component: system font, high contrast, no texture. Breaking the fiction is the design.

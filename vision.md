@@ -1,4 +1,4 @@
-# Inkbound — Product Vision
+# Inkwoven — Product Vision
 
 **One-liner:** An enchanted notebook for iPad — write with your Pencil, the page drinks your ink, and it answers in flowing script, a developing picture, or a moving photograph. Paper that answers.
 **Status:** Vision v2 (platform) · MVP stage
@@ -8,9 +8,9 @@
 
 ## The concept (source of truth)
 
-Inkbound is **a medium, not a single-purpose app**. The product is the *paper engine* — handwriting in, magic out in three grammars: **ink** (a reply written back in a flowing hand), **pictures** (an image that develops on the page like a photograph in a tray), and **moving pictures** (short living images, Daily-Prophet style). What the paper is *for* is decided by which **Book** you open. Books are content modules on one shared engine — the journal is one book on the shelf, not the identity of the product.
+Inkwoven is **a medium, not a single-purpose app**. The product is the *paper engine* — handwriting in, magic out in three grammars: **ink** (a reply written back in a flowing hand), **pictures** (an image that develops on the page like a photograph in a tray), and **moving pictures** (short living images, Daily-Prophet style). What the paper is *for* is decided by which **Book** you open. Books are content modules on one shared engine — the journal is one book on the shelf, not the identity of the product.
 
-This is the anti-chatbot: every AI product is a cold chat window with a keyboard; Inkbound is an enchanted object with a pen. That contrast is the brand, the demo, and the moat.
+This is the anti-chatbot: every AI product is a cold chat window with a keyboard; Inkwoven is an enchanted object with a pen. That contrast is the brand, the demo, and the moat.
 
 ## The opportunity
 
@@ -24,7 +24,7 @@ No competitor serves any of these through handwriting, and none can pivot to it 
 ## Positioning statement
 
 > For iPad + Apple Pencil owners who find AI chatbots cold and single-purpose apps limiting,
-> **Inkbound** is the enchanted notebook whose pages answer your handwriting — with ink, pictures, or moving pictures — and become whatever you need: a diary, a storyteller, a game master, an artist, an oracle,
+> **Inkwoven** is the enchanted notebook whose pages answer your handwriting — with ink, pictures, or moving pictures — and become whatever you need: a diary, a storyteller, a game master, an artist, an oracle,
 > unlike ChatGPT/Rosebud/GoodNotes, which are keyboards, single verticals, or dumb paper.
 
 ## The hard truth we hold ourselves to (launch discipline)
@@ -87,7 +87,7 @@ Input metrics: D1 activation (first answered page), Books opened per user in wee
 ## Monetization
 
 - **Free:** the notebook + all 8 Books, 5 magic moments/day (occasional image included), 30-day page archive. Enough to gasp; a ceiling you feel.
-- **Inkbound Plus — $9.99/mo or $59.99/yr:** unlimited ink replies, generous image allotment, full archive, cross-page memory, all Spirits/hands, unlimited notebooks.
+- **Inkwoven Plus — $9.99/mo or $59.99/yr:** unlimited ink replies, generous image allotment, full archive, cross-page memory, all Spirits/hands, unlimited notebooks.
 - **Credits (consumable):** moving pictures sold in packs — video unit costs never bundled unlimited.
 - **Content IAP:** Book packs, covers, inks, seasonal editions — high margin, zero AI cost.
 - **Later:** creator marketplace rev-share; education licensing (Tutor).
@@ -101,4 +101,4 @@ Input metrics: D1 activation (first answered page), Books opened per user in wee
 
 ## What winning looks like (12 mo)
 
-100k installs driven by per-Book demo videos; 40k MAU; 5% paid (~$240k ARR run-rate before credits/content IAP); D30 ≥ 25% because five doors in means five reasons to return; a Book-drop cadence where each release is a self-funding marketing event — and "paper that answers" starting to mean Inkbound the way "wiki" means Wikipedia.
+100k installs driven by per-Book demo videos; 40k MAU; 5% paid (~$240k ARR run-rate before credits/content IAP); D30 ≥ 25% because five doors in means five reasons to return; a Book-drop cadence where each release is a self-funding marketing event — and "paper that answers" starting to mean Inkwoven the way "wiki" means Wikipedia.

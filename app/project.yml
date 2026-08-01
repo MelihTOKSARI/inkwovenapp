@@ -1,23 +1,35 @@
 # XcodeGen spec (task A1). Regenerate after changing: xcodegen generate
-name: Inkbound
+name: Inkwoven
 options:
-  bundleIdPrefix: app.inkbound
+  bundleIdPrefix: com.empath
   deploymentTarget:
     iOS: "17.0"
 packages:
-  InkboundCore:
-    path: Packages/InkboundCore
+  InkwovenCore:
+    path: Packages/InkwovenCore
 targets:
-  Inkbound:
+  Inkwoven:
     type: application
     platform: iOS
-    sources: [App]
+    sources:
+      # PrivacyInfo.xcprivacy is excluded from the glob and re-added explicitly
+      # so it lands in the resources build phase — it must be copied into the
+      # bundle root, not compiled, or App Store Connect rejects with ITMS-91053.
+      - path: App
+        excludes:
+          - PrivacyInfo.xcprivacy
+      - path: App/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
-      - package: InkboundCore
+      - package: InkwovenCore
         products: [InkCore, InkData, InkNet, InkRender, InkMoney, InkSafety, InkAnalytics]
     info:
       path: App/Info.plist
       properties:
+        # Explicit, because XcodeGen otherwise re-emits its own literal "1.0"/"1"
+        # defaults on regeneration and silently undoes the build-setting indirection.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -29,23 +41,73 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSFaceIDUsageDescription: "Face ID keeps your notebook — and the Keeper's pages — private."
+        UIAppFonts:
+          - CormorantGaramond-500.ttf
+          - CormorantGaramond-500Italic.ttf
+          - CormorantGaramond-600.ttf
+          - CormorantGaramond-600Italic.ttf
+          - EBGaramond-400.ttf
+          - EBGaramond-400Italic.ttf
+          - EBGaramond-500.ttf
+          - EBGaramond-500Italic.ttf
+          - EBGaramond-600.ttf
+          - Tangerine-400.ttf
+          - Tangerine-700.ttf
+          - Caveat-400.ttf
+          - Caveat-600.ttf
+          - Caveat-700.ttf
+          - Fondamento-400.ttf
+          - Fondamento-400Italic.ttf
+          - PinyonScript-400.ttf
+          - HomemadeApple-400.ttf
+          - HerrVonMuellerhoff-400.ttf
+          - PetitFormalScript-400.ttf
+          - KaushanScript-400.ttf
         # Local echo proxy during core dev only; removed before TestFlight.
+        # STILL PRESENT — this must go, together with the DEBUG guard on the
+        # env-var base URL in App/DI.swift. Ship them in one change or a release
+        # build can be pointed at a cleartext local endpoint.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # SHA-256 (InkCore/Snapshot.swift) and HTTPS via the standard OS stack
+        # are both exempt, so this is `false`. Declaring it here stops every
+        # TestFlight upload from stalling on the manual export-compliance prompt.
+        # Re-check if custom crypto is ever added.
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.empath.inkwoven
+        # Single source of truth for release metadata. Info.plist references
+        # these via $(MARKETING_VERSION)/$(CURRENT_PROJECT_VERSION); bumping the
+        # number in Xcode's UI instead gets reverted by the next `xcodegen
+        # generate` and the upload is rejected for a non-increasing build number.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2" # iPad-first, iPhone companion
         SUPPORTS_MACCATALYST: false
         SWIFT_VERSION: "6.0"
     scheme:
-      testTargets: [InkboundUITests]
-  InkboundUITests:
+      testTargets: [InkwovenTests, InkwovenUITests]
+  InkwovenTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: Inkwoven
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.empath.inkwoven.tests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+  InkwovenUITests:
     type: bundle.ui-testing
     platform: iOS
     sources: [UITests]
     dependencies:
-      - target: Inkbound
+      - target: Inkwoven
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.empath.inkwoven.uitests
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: YES

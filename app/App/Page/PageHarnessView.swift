@@ -8,13 +8,17 @@ struct PageHarnessView: View {
     @State private var interactor: PageInteractor
 
     init(di: AppDI) {
-        _interactor = State(initialValue: PageInteractor(proxy: di.proxy, analytics: di.analytics))
+        // Ephemeral accounting: a dev harness must never spend the user's real
+        // daily allowance.
+        _interactor = State(initialValue: PageInteractor(
+            proxy: di.proxy, analytics: di.analytics, entitlements: .ephemeral()
+        ))
     }
 
     var body: some View {
         VStack(spacing: 0) {
             statusBar
-            InkCanvasView(interactor: interactor)
+            InkCanvasView(interactor: interactor, pencilActive: PenPresence.shared.pencilActive)
                 .background(Color(red: 0.98, green: 0.96, blue: 0.91)) // placeholder parchment
                 .accessibilityElement()
                 .accessibilityIdentifier("ink-canvas")
@@ -56,7 +60,9 @@ struct PageHarnessView: View {
         case .sending: "the page drinks the ink"
         case .answering: "answering"
         case .answered: "answered"
+        case .held: "the page waits"
         case .paywall(let trigger): "paywall: \(trigger.rawValue)"
+        case .cooldown(let seconds): "the ink must rest (\(Int(seconds))s)"
         case .declined(let reason): reason
         case .crisis: "crisis flow"
         }

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from '../src/server.js';
+import { PNG_BYTES, digestOf } from './helpers.js';
 
 const USER = { 'x-ink-user': 'user-1' };
 
@@ -44,8 +45,12 @@ test('preupload issues a ticket; abort is 204 even when unknown', async () => {
   const created = await app.inject({
     method: 'POST',
     url: '/v1/preupload',
-    headers: { ...USER, 'x-ink-digest': 'abc', 'content-type': 'application/octet-stream' },
-    payload: Buffer.from([1, 2, 3]),
+    headers: {
+      ...USER,
+      'x-ink-digest': digestOf(PNG_BYTES),
+      'content-type': 'application/octet-stream',
+    },
+    payload: PNG_BYTES,
   });
   assert.equal(created.statusCode, 200);
   const ticket = created.json();

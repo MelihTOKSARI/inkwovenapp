@@ -1,0 +1,659 @@
+import SwiftUI
+import PencilKit
+import InkCore
+
+/// The core surface: one screen, many states. Zero chrome while writing —
+/// per-Book paper, hand and ink; the engine (PageInteractor) drives the
+/// write → rest → absorb → answer loop underneath.
+///
+/// The tool tray, the history thread and the develop frame live in their own
+/// files (`PageToolTray`, `PageHistoryThread`, `Design/DevelopFrame`); what
+/// remains here is layout, status reactions, and the handoff between them.
+struct PageView: View {
+    @Bindable var model: AppModel
+    @State private var interactor: PageInteractor
+    @State private var canvasAbsorbed = false
+    @State private var developStep = 0
+    @State private var isMoving = false
+    @State private var restSettled = false
+    @State private var restSettleTask: Task<Void, Never>?
+    @State private var openerHeight: CGFloat = 0
+    @Environment(\.room) private var room
+    @Environment(\.reduceInkMotion) private var reduceMotion
+
+    private let book: Book
+    private let archive: PageArchive
+    private var net: Reachability { .shared }
+
+    init(model: AppModel, di: AppDI) {
+        self.model = model
+        let book = model.activeBook
+        self.book = book
+        self.archive = di.archive
+        _interactor = State(initialValue: PageInteractor(
+            proxy: di.proxy, analytics: di.analytics, book: book.id, archive: di.archive
+        ))
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let spread = geo.size.width > geo.size.height && model.spreadLayout
+            ZStack(alignment: .topLeading) {
+                paperBackground
+
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    if spread {
+                        HStack(alignment: .top, spacing: 0) {
+                            writingPage
+                                .padding(.trailing, 48)
+                            Rectangle()
+                                .fill(Ink.ink.opacity(0.13))
+                                .frame(width: 1)
+                            rightPage
+                                .padding(.leading, 48)
+                        }
+                        .frame(maxHeight: .infinity)
+                    } else {
+                        // One page, all of it writable: the reply floats over
+                        // the foot of the canvas instead of carving off half
+                        // the surface, and only takes touches when it has
+                        // something to show.
+                        writingPage
+                            .overlay(alignment: .bottomLeading) {
+                                rightPage
+                                    .frame(maxHeight: geo.size.height * 0.44)
+                                    .allowsHitTesting(replySideActive)
+                            }
+                    }
+                }
+                .padding(EdgeInsets(top: 64, leading: 56, bottom: 40, trailing: 56))
+
+                backPill
+                rememberedRibbon
+            }
+        }
+        .onChange(of: interactor.status) { _, status in
+            react(to: status)
+        }
+        .onAppear { consumeRevisit() }
+    }
+
+    /// Which side the writing hand rests on. Left-handed mode used to move
+    /// only the status marginalia — the one element already out of the way —
+    /// while the tray, the back pill and the ribbon stayed under the reaching
+    /// arm. Everything the writer touches flips together now.
+    private var writingEdge: Alignment {
+        model.leftHanded ? .trailing : .leading
+    }
+
+    private var chromeEdge: Alignment {
+        model.leftHanded ? .topTrailing : .topLeading
+    }
+
+    /// A remembered card was tapped: put that exchange back on the page —
+    /// the ink on the canvas, the reply on the right — then clear the
+    /// handoff so ordinary visits start blank.
+    private func consumeRevisit() {
+        guard let entry = model.revisit else { return }
+        model.revisit = nil
+        // Typed exchanges archive an empty drawing; the reply still returns.
+        let drawing = (try? PKDrawing(data: entry.strokeData)) ?? PKDrawing()
+        interactor.revisit(drawing: drawing, replyText: entry.replyText, entryID: entry.id)
+    }
+
+    // MARK: - Paper & chrome
+
+    private var paperBackground: some View {
+        RadialGradient(
+            stops: [
+                .init(color: .mix(book.paperHex, 0.96, 0xFFFFFF), location: 0),
+                .init(color: book.paper, location: 0.46),
+                .init(color: .mix(book.paperHex, 0.84, 0x6B5A43), location: 1),
+            ],
+            center: UnitPoint(x: 0.22, y: 0),
+            startRadius: 0,
+            endRadius: 1300
+        )
+        .ignoresSafeArea()
+    }
+
+    private var backPill: some View {
+        Button { model.go(.shelf) } label: {
+            HStack(spacing: 7) {
+                Text("‹").font(InkFont.body(15)).foregroundStyle(Ink.inkFaded)
+                SmallCapsLabel(text: "the shelf", size: 13, tracking: 1.5, color: Ink.inkFaded)
+            }
+            .padding(.leading, 11)
+            .padding(.trailing, 14)
+            .frame(minHeight: 38)
+            .background(
+                Capsule()
+                    .fill(Ink.ink.opacity(0.06))
+                    .overlay(Capsule().stroke(Ink.ink.opacity(0.14), lineWidth: 1))
+            )
+        }
+        .buttonStyle(PressScaleStyle())
+        .padding(.top, 18)
+        .padding(model.leftHanded ? .trailing : .leading, 20)
+        .frame(maxWidth: .infinity, alignment: model.leftHanded ? .trailing : .leading)
+    }
+
+    private var rememberedRibbon: some View {
+        Button { model.go(.remembered) } label: {
+            RibbonShape()
+                .fill(
+                    LinearGradient(
+                        colors: [book.accent, .mix(book.accentHex, 0.65, 0x000000)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 34, height: 92)
+                .shadow(color: .black.opacity(0.25), radius: 5, y: 4)
+                .overlay(alignment: .center) {
+                    SmallCapsLabel(text: "remembered", size: 9, tracking: 1.1, color: Ink.parchment)
+                        .fixedSize()
+                        .rotationEffect(.degrees(90))
+                        .offset(y: -7)
+                        // Rotated inside a fixed 34×92 ribbon: this label is
+                        // the one piece of type that physically cannot grow
+                        // with the rest. Capped rather than allowed to run
+                        // off the page — the button keeps its 44pt target and
+                        // VoiceOver reads the full word regardless.
+                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                }
+        }
+        .buttonStyle(PressScaleStyle())
+        .frame(maxWidth: .infinity, alignment: model.leftHanded ? .leading : .trailing)
+        .padding(model.leftHanded ? .leading : .trailing, 46)
+        .ignoresSafeArea(edges: .top)
+        .accessibilityLabel("Remembered pages")
+        .accessibilityHint("Every page you have filled in \(book.name).")
+    }
+
+    /// Cancel is only meaningful while a send is pending, but surfacing it
+    /// the instant the pen lifts made every between-words pause flash a
+    /// button. It waits for the same settle beat as the rest seal.
+    private var showCancelSend: Bool {
+        interactor.canCancelSend && restSettled
+    }
+
+    private var header: some View {
+        HStack(spacing: 16) {
+            if model.leftHanded {
+                PageToolTray(interactor: interactor, showCancelSend: showCancelSend)
+                headerTitle
+            } else {
+                headerTitle
+                PageToolTray(interactor: interactor, showCancelSend: showCancelSend)
+            }
+        }
+        .padding(.bottom, 26)
+        .padding(model.leftHanded ? .leading : .trailing, 52)
+    }
+
+    private var headerTitle: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            SmallCapsLabel(text: book.name, size: 13, tracking: 2.6, color: book.ink)
+            LinearGradient(colors: [Ink.ink.opacity(0.22), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(height: 1)
+            SmallCapsLabel(text: Self.todayLabel, size: 12, tracking: 1.8, color: Ink.inkFaded)
+        }
+    }
+
+    // MARK: - Writing page (your hand, edge to edge)
+
+    /// The whole page is the writing surface. The opener, starter hint and
+    /// status notes float OVER the canvas (hit-testing off) rather than
+    /// stacking with it — so ink can land anywhere on the page, and no
+    /// layout change can resize PKCanvasView mid-stroke and cancel a stroke.
+    private var writingPage: some View {
+        ZStack(alignment: .topLeading) {
+            // ONE surface, two hands: ink when the pen is about, the
+            // keyboard's script otherwise — never two inputs. The typed hand
+            // starts below the opener; the pen may cross it freely.
+            InkCanvasView(
+                interactor: interactor,
+                pencilActive: PenPresence.shared.pencilActive,
+                inkColor: UIColor(Color(hex: model.inkColorHex)),
+                typedTopInset: openerHeight + 14
+            )
+            .opacity(canvasAbsorbed ? 0.18 : 1)
+            .blur(radius: canvasAbsorbed ? 2 : 0)
+            // `.contain`, never the bare `.accessibilityElement()`: the
+            // no-argument form ignores children, which hid the typed hand's
+            // UITextView outright — on an iPad with no Pencil that is the
+            // ONLY input, so VoiceOver users could not write at all.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("ink-canvas")
+            .accessibilityLabel("Writing surface. Write with pencil or finger anywhere on the page — or with the keyboard when no pencil is at hand; rest to send.")
+            .accessibilityValue(spokenStatus)
+
+            Text(book.opener)
+                .font(book.handFont(26))
+                .foregroundStyle(book.ink)
+                .opacity(0.92)
+                .lineSpacing(6)
+                .allowsHitTesting(false)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { openerHeight = $0 }
+
+            starterFooter
+                .opacity(showStarter ? 1 : 0)
+                .inkAnimation(.easeOut(duration: 0.4), value: showStarter, reduce: reduceMotion)
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        // Occlusion rule (task B6): the writing hand owns the bottom of
+        // the page, so every status note is TOP-margin marginalia — just
+        // under the opener; the side flips with left-handed mode.
+        .overlay(alignment: chromeEdge) {
+            statusNote
+                .frame(maxWidth: 440, alignment: writingEdge)
+                .padding(.top, openerHeight + 12)
+                .allowsHitTesting(false)
+                .inkAnimation(.easeOut(duration: 0.35), value: interactor.status, reduce: reduceMotion)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Whether the reply side has anything to show (and therefore may take
+    /// touches when it overlays the single-page canvas).
+    private var replySideActive: Bool {
+        if !displayedReply.isEmpty || interactor.developing || !history.isEmpty { return true }
+        switch interactor.status {
+        case .cooldown, .declined: return true
+        default: return false
+        }
+    }
+
+    /// The reply appears the way the ink disappeared — whole, rising out of
+    /// the page — never streaming in token by token. While the Book is still
+    /// answering, the buffered text stays below the surface; the moment the
+    /// exchange completes, the full reply surfaces in one breath.
+    private var displayedReply: String {
+        interactor.status == .answering ? "" : interactor.streamedText
+    }
+
+    private var showStarter: Bool {
+        interactor.status == .idle && interactor.streamedText.isEmpty && interactor.typedDraft.isEmpty
+    }
+
+    /// What VoiceOver reads as the canvas's value. It used to be
+    /// `String(describing:)` on a status with associated values, so the page
+    /// literally spoke "cooldown(3600.0)" and "paywall(dailyLimit)". The
+    /// in-fiction copy is the same copy the sighted page shows.
+    private var spokenStatus: String {
+        switch interactor.status {
+        case .idle:
+            return net.isOffline
+                ? "A blank page. The road is dark just now — nothing can carry it yet."
+                : "A blank page, waiting."
+        case .inking: return "Writing."
+        case .resting: return "The page waits — nothing sends while the ink is still settling."
+        case .sending, .answering: return "The ink drinks into the page. \(book.name) is answering."
+        case .answered: return "\(book.name) has answered. The reply is on the facing page."
+        case .held: return "The page is held — nothing sends until you lift the hold."
+        case .paywall: return "The ink has run dry for today."
+        case .cooldown: return "The ink has run hot today, and must rest a while."
+        case .declined: return declineCopy
+        case .crisis: return "Opening help."
+        }
+    }
+
+    /// Top-margin marginalia: the quiet in-flight statuses, styled per
+    /// QuietBanner (italic, ink-faded, no red). Errors live on the reply
+    /// side (`errorNote`); nothing informative ever renders in the bottom
+    /// region while writing.
+    @ViewBuilder
+    private var statusNote: some View {
+        switch interactor.status {
+        case .resting:
+            // The settle bounce is the promise: the page waits while the dots
+            // still dance — finish the thought, nothing sends yet. Dots only:
+            // every between-words pause lands here, so any caption or button
+            // would nag on every breath. The send commits on its own; the
+            // mechanic is taught once, in onboarding.
+            SettleBounce()
+                .transition(.opacity)
+        case .sending, .answering:
+            // The banner holds through the whole exchange: the reply no
+            // longer streams, so the wait needs a voice until it surfaces.
+            QuietBanner(text: "the ink drinks into the page…")
+                .transition(.opacity)
+        case .held:
+            QuietBanner(text: "the page waits — nothing sends until you lift the hold")
+                .transition(.opacity)
+        default:
+            // Said BEFORE the ink is committed: a writer with no road spent
+            // the whole rest window and a send attempt to be told the spirit
+            // was distant, with a retry that could never succeed.
+            if net.isOffline {
+                QuietBanner(text: "the road is dark — write on; the page carries when the way opens")
+                    .transition(.opacity)
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    /// Cooldown and decline cards render where the answer would have:
+    /// the right page in a spread, the unused lower half on a single
+    /// screen — never over the ink the writer just laid down.
+    @ViewBuilder
+    private var errorNote: some View {
+        switch interactor.status {
+        case .cooldown:
+            VStack(alignment: .leading, spacing: 12) {
+                QuietBanner(text: "The ink has run hot today, and must rest a while. Come back when it has settled — or bind the notebook, and write without pause.")
+                WaxSealButton(label: "bind to write without pause", diameter: 30, labelFont: InkFont.body(14)) {
+                    model.go(.paywall)
+                }
+            }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+            .background(parchmentCard)
+            .transition(.opacity)
+        case .declined:
+            VStack(alignment: .leading, spacing: 12) {
+                QuietBanner(text: declineCopy)
+                Button {
+                    interactor.retry()
+                } label: {
+                    Text("try again")
+                        .font(InkFont.body(14))
+                        .foregroundStyle(Ink.inkFaded)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 40)
+                        .background(
+                            Capsule()
+                                .fill(Ink.ink.opacity(0.06))
+                                .overlay(Capsule().stroke(Ink.ink.opacity(0.18), lineWidth: 1))
+                        )
+                }
+                .buttonStyle(PressScaleStyle())
+                .accessibilityHint(net.isOffline
+                    ? "The road is still dark; this will not carry until the connection returns."
+                    : "Ask the Book again.")
+            }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+            .background(parchmentCard)
+            .transition(.opacity)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// A failed send says one of two different things. The decline card used
+    /// to speak the raw `String(describing:)` of the mapped state as its
+    /// VoiceOver hint — "pageIsQuiet" — while the sighted copy was mystical
+    /// about a problem that was simply airplane mode.
+    private var declineCopy: String {
+        net.isOffline
+            ? "The road is dark tonight — no page can travel it. Your ink is safe here, and will go when the way opens."
+            : "The spirit is distant tonight. Your page is safe — I will answer when the candle steadies."
+    }
+
+    private var starterFooter: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Rectangle()
+                .fill(.clear)
+                .frame(height: 1)
+                .overlay(
+                    Line().stroke(Ink.ink.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                )
+            SmallCapsLabel(text: "take up your pen", size: 12, tracking: 2.2, color: Ink.inkFaded)
+            Text(book.starterPrompt)
+                .font(InkFont.hand("Caveat-Regular", 26))
+                .foregroundStyle(Ink.ink.opacity(0.4))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .frame(maxWidth: 620, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Ink.ink.opacity(0.03))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Ink.ink.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                        )
+                )
+        }
+        .padding(.top, 20)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Take up your pen. For instance: \(book.starterPrompt)")
+    }
+
+    // MARK: - Right page (the Book's reply)
+
+    /// Every past exchange in this Book, oldest first — the running thread
+    /// above the live reply. The exchange currently standing on the reply
+    /// pane is skipped so it never renders twice.
+    private var history: [PageArchive.Entry] {
+        archive.entries(for: book.id)
+            .filter { $0.id != interactor.displayedEntryID }
+            .reversed()
+    }
+
+    private var rightPage: some View {
+        // Hoisted: `history` is three O(n) array allocations per access, and
+        // the body read it three times (twice here, once from
+        // `replySideActive`) on every render pass.
+        let thread = history
+        return ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                if !thread.isEmpty {
+                    PageHistoryThread(entries: thread, book: book)
+                        .padding(.top, 30)
+                }
+                errorNote
+                    .frame(maxWidth: 440, alignment: .leading)
+                    .padding(.top, 30)
+                if !displayedReply.isEmpty {
+                    reply
+                        .padding(.top, 30)
+                        .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
+                }
+                // The server decides modality: the frame appears when an
+                // image slot opens (darkroom running), stays for the finished
+                // picture, and quietly withdraws if the develop failed.
+                if interactor.developing
+                    && (interactor.imageURL != nil || interactor.status == .answering) {
+                    developSection
+                        .padding(.top, 30)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Mirror of the absorb veil (0.9s easeIn out of sight): the
+            // reply surfaces over the same beat, blurred-and-faint to sharp.
+            .animation(
+                .easeOut(duration: reduceMotion ? 0.3 : 0.9),
+                value: displayedReply.isEmpty
+            )
+        }
+        // The thread reads like a chat: the newest words wait at the foot of
+        // the page, the past scrolls up behind them.
+        .defaultScrollAnchor(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var reply: some View {
+        HStack(alignment: .top, spacing: 20) {
+            LinearGradient(
+                colors: [Ink.ink.opacity(0.05), Ink.ink.opacity(0.22), Ink.ink.opacity(0.05)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(width: 2)
+
+            // No `.accessibilityLabel` here on purpose: the reply text IS the
+            // element's label, and that is what both VoiceOver and the
+            // reply-pane UITest read.
+            Text(displayedReply)
+                .font(book.handFont(24))
+                .foregroundStyle(book.ink)
+                .lineSpacing(7)
+                .frame(maxWidth: 720, alignment: .leading)
+                .accessibilityIdentifier("reply-pane")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: - Develop frame (Artist)
+
+    private var developSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DevelopFrame(book: book, step: developStep, isMoving: isMoving, imageURL: interactor.imageURL)
+                .frame(maxWidth: 420)
+            HStack {
+                Text("developed from your page")
+                    .font(InkFont.bodyItalic(13))
+                    .foregroundStyle(Ink.inkFaded)
+                Spacer()
+                if developStep >= 3 && !isMoving {
+                    Button {
+                        if model.spendMovingCredit() {
+                            withAnimation { isMoving = true }
+                        } else {
+                            model.go(.wallet)
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            VialView(width: 14, height: 20, fill: 0.6)
+                            Text("make it move · 1 vial")
+                                .font(InkFont.body(13))
+                                .foregroundStyle(Ink.wax)
+                        }
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: 38)
+                        .background(
+                            Capsule()
+                                .fill(Ink.wax.opacity(0.09))
+                                .overlay(Capsule().stroke(Ink.wax.opacity(0.3), lineWidth: 1))
+                        )
+                    }
+                    .buttonStyle(PressScaleStyle())
+                    .accessibilityLabel("Make it move")
+                    .accessibilityHint("Spends one sealed vial to set the picture drifting.")
+                }
+            }
+            .frame(maxWidth: 420)
+        }
+        .onAppear { runDevelop() }
+        .onChange(of: interactor.imageURL) { _, url in
+            guard url != nil else { return }
+            withAnimation(.easeInOut(duration: reduceMotion ? 0.3 : 1.1)) { developStep = 3 }
+        }
+    }
+
+    /// The darkroom drifts to step 2 on its own while fal paints; the full
+    /// reveal (step 3) is gated on the real picture arriving.
+    private func runDevelop() {
+        guard developStep == 0 else { return }
+        if reduceMotion {
+            developStep = interactor.imageURL != nil ? 3 : 2
+            return
+        }
+        if interactor.imageURL != nil {
+            developStep = 3
+            return
+        }
+        Task {
+            for (delay, step) in DemoContent.developScript where step < 3 {
+                try? await Task.sleep(for: .seconds(delay))
+                guard developStep < step else { continue }
+                withAnimation(.easeInOut(duration: 1.1)) { developStep = step }
+            }
+        }
+    }
+
+    private var parchmentCard: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(Ink.ink.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.ink.opacity(0.14), lineWidth: 1))
+    }
+
+    // MARK: - Status reactions
+
+    private func react(to status: PageInteractor.PageStatus) {
+        settleRestAffordances(for: status)
+        announce(status)
+        switch status {
+        case .sending:
+            // A fresh exchange gets a fresh darkroom.
+            developStep = 0
+            isMoving = false
+            withAnimation(.easeIn(duration: reduceMotion ? 0.3 : 0.9)) {
+                canvasAbsorbed = true
+            }
+        case .inking:
+            withAnimation(.easeOut(duration: 0.2)) {
+                canvasAbsorbed = false
+            }
+        case .answered:
+            // The interactor has archived and removed the strokes; lift the
+            // absorption veil so the (now empty) canvas is ready to write on.
+            withAnimation(.easeOut(duration: 0.25)) {
+                canvasAbsorbed = false
+            }
+        case .declined, .cooldown:
+            // Failed send: the ink must come back at FULL strength — an error
+            // may never leave the page ghosted.
+            withAnimation(.easeOut(duration: 0.2)) {
+                canvasAbsorbed = false
+            }
+        case .paywall:
+            canvasAbsorbed = false
+            model.go(.paywall)
+        case .crisis:
+            canvasAbsorbed = false
+            model.go(.crisis)
+        default:
+            break
+        }
+    }
+
+    /// The reply surfaces silently. A VoiceOver user rested their pen, heard
+    /// nothing for eight seconds, and had no signal that the Book had
+    /// answered at all — they had to go hunting for changed content.
+    private func announce(_ status: PageInteractor.PageStatus) {
+        switch status {
+        case .answered, .declined, .cooldown:
+            AccessibilityNotification.Announcement(spokenStatus).post()
+        default:
+            break
+        }
+    }
+
+    /// The cancel button used to pop in the instant the pen lifted — a flash
+    /// on every between-words pause. It now fades in only once the rest has
+    /// held for a beat (commit fires at 4s, so 1.1s still leaves a usable
+    /// window), and vanishes the moment any other status lands. The settle
+    /// bounce, by contrast, shows for the whole rest window.
+    private func settleRestAffordances(for status: PageInteractor.PageStatus) {
+        restSettleTask?.cancel()
+        guard status == .resting else {
+            restSettled = false
+            return
+        }
+        restSettleTask = Task {
+            try? await Task.sleep(for: .milliseconds(1100))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.35)) { restSettled = true }
+        }
+    }
+
+    // MARK: - Date
+
+    private static let ordinals = [
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+        "ninth", "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth",
+        "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth", "twenty-first",
+        "twenty-second", "twenty-third", "twenty-fourth", "twenty-fifth", "twenty-sixth",
+        "twenty-seventh", "twenty-eighth", "twenty-ninth", "thirtieth", "thirty-first",
+    ]
+
+    private static var todayLabel: String {
+        let day = Calendar.current.component(.day, from: .now)
+        let month = Date.now.formatted(.dateTime.month(.wide)).lowercased()
+        return "the \(ordinals[day - 1]) of \(month)"
+    }
+}

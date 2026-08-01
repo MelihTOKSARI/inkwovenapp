@@ -1,24 +1,89 @@
-# CI (task A1): swift test across all core packages + proxy tests on every push.
+# CI (task A1): swift test across all core packages + proxy tests on every push,
+# plus the supply-chain gates that keep provider keys and unvetted deps out.
 name: CI
 on:
   push:
   pull_request:
 
+# Least privilege. Without this block GITHUB_TOKEN is issued with write access to
+# contents/packages/issues, and both `npm ci` (lifecycle scripts) and `swift test`
+# (SPM manifests and plugins) execute third-party code with it in the environment.
+# Widen per-job, never here.
+permissions:
+  contents: read
+
+# `push` + `pull_request` with no branch filter means every PR push starts two
+# runs; macos-15 bills at 10x Linux and has a small concurrent-runner ceiling, so
+# superseded runs were queueing ahead of the ones anyone was waiting on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Third-party actions are pinned by commit SHA, not tag: a `v4` tag is a pointer
+# the action's maintainer can repoint at any commit (this is exactly how
+# tj-actions/changed-files was compromised). Bump the SHA and the comment together.
+
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Scan tracked files for credential shapes
+        run: |
+          # High-confidence shapes only — this gate must never cry wolf, or it
+          # gets bypassed. Placeholder URLs in deployment.md (rediss://user:...@)
+          # deliberately do not match: a real password segment is >=12 chars of
+          # [A-Za-z0-9_+=-] with no dots. Binary files are skipped via -I.
+          # This is a floor, not a ceiling — enable GitHub secret scanning and
+          # push protection on the repo for history and partner-pattern coverage.
+          if git grep -nEI \
+            'AIza[0-9A-Za-z_-]{35}|sk-[A-Za-z0-9]{32,}|gh[pousr]_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(postgres|postgresql|rediss?|mongodb)://[A-Za-z0-9_-]+:[A-Za-z0-9_+=-]{12,}@' \
+            -- . ':(exclude)*.ttf'; then
+            echo "::error::Possible credential committed to the repo (see matches above). Rotate the key before removing it — it is already in git history."
+            exit 1
+          fi
+          echo "No credential shapes found in tracked files."
+
   swift-core:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - name: Select latest Xcode
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Select Xcode
+        run: |
+          # project.yml pins SWIFT_VERSION 6.0, so prefer a known-good toolchain
+          # instead of "whatever GitHub added to the image this week" — a silent
+          # compiler bump lands its diagnostics on an unrelated PR. Falls back to
+          # the newest installed Xcode so a runner-image rotation degrades to the
+          # old behaviour rather than failing the build outright.
+          for v in 16.4 16.3 16.2 16.1; do
+            if [ -d "/Applications/Xcode_$v.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_$v.app/Contents/Developer"
+              break
+            fi
+          done
+          if [ "$(xcode-select -p)" = "/Library/Developer/CommandLineTools" ] || [ ! -d "$(xcode-select -p)" ]; then
+            sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          fi
+          xcodebuild -version
+          swift --version
       - name: swift test (all seven modules)
-        run: swift test --package-path app/Packages/InkboundCore
+        run: swift test --package-path app/Packages/InkwovenCore --enable-code-coverage
+      - name: Coverage summary
+        # Informational only — no threshold gate until the number is stable.
+        continue-on-error: true
+        run: |
+          COV=$(swift test --package-path app/Packages/InkwovenCore --show-codecov-path)
+          python3 - "$COV" <<'PY'
+          import json, sys
+          totals = json.load(open(sys.argv[1]))["data"][0]["totals"]["lines"]
+          print(f"line coverage: {totals['percent']:.1f}% ({totals['covered']}/{totals['count']})")
+          PY
 
   proxy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
       - name: npm ci + test
@@ -26,3 +91,61 @@ jobs:
         run: |
           npm ci
           npm test
+      - name: Dependency audit (report)
+        # Non-blocking: the pinned fastify 4.x tree currently carries 5 high
+        # advisories (fast-uri path traversal / host confusion, fastify
+        # sendWebStream DoS, Content-Type validation bypass, and X-Forwarded-*
+        # spoofing — the last one compounds the missing trustProxy config).
+        # Clearing them needs a fastify 5 major bump, which is a code change, not
+        # a CI change. Flip this step to the gate below once that lands.
+        continue-on-error: true
+        working-directory: app/proxy
+        run: npm audit --audit-level=high
+      - name: Dependency audit (gate)
+        # Blocking at `critical` so the pipeline says something today rather than
+        # nothing. Tighten to `high` the moment the fastify bump is in.
+        working-directory: app/proxy
+        run: npm audit --audit-level=critical
+
+  proxy-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build image
+        # The Dockerfile was previously only exercised by `fly deploy`, so a
+        # broken build surfaced during a release window with the old machine
+        # already torn down.
+        working-directory: app/proxy
+        run: docker build -t inkwoven-proxy:ci .
+      - name: Assert non-root runtime user
+        run: |
+          RUNTIME_UID=$(docker run --rm inkwoven-proxy:ci node -e 'process.stdout.write(String(process.getuid()))')
+          echo "runtime uid: $RUNTIME_UID"
+          [ "$RUNTIME_UID" != "0" ] || { echo "::error::container runs as root"; exit 1; }
+      - name: Assert devDependencies absent
+        run: |
+          if docker run --rm inkwoven-proxy:ci test -d node_modules/@flydotio; then
+            echo "::error::devDependencies leaked into the runtime image"
+            exit 1
+          fi
+          echo "runtime image carries production deps only."
+      - name: Boot smoke test
+        run: |
+          # NODE_ENV=development on purpose: the image sets production, and the
+          # server is expected to fail closed at boot in production when
+          # REDIS_URL/DATABASE_URL are absent. CI has neither and must not depend
+          # on secrets, so this proves the image boots and serves — not that it
+          # is production-configured.
+          docker run -d --name proxy-smoke -p 8787:8787 -e NODE_ENV=development inkwoven-proxy:ci
+          for i in $(seq 1 30); do
+            if curl -fsS -H 'x-ink-user: healthcheck' http://127.0.0.1:8787/v1/config > /dev/null; then
+              echo "proxy answered /v1/config after ${i}s"
+              docker rm -f proxy-smoke > /dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::proxy never answered /v1/config within 30s"
+          docker logs proxy-smoke
+          docker rm -f proxy-smoke > /dev/null
+          exit 1

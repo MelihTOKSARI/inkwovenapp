@@ -1,0 +1,37 @@
+# Deny-by-default is not possible here (the image needs src/ + package*.json),
+# so this list must grow whenever a new kind of file lands in proxy/. The rule:
+# if it is not required at runtime, it does not belong in a published layer.
+
+# VCS and local dependency tree (rebuilt inside the build stage)
+/.git
+/.gitignore
+/node_modules
+
+# Build/deploy inputs — consumed by the builder, never needed inside the image
+.dockerignore
+Dockerfile
+fly.toml
+/.github
+
+# Secrets and local environment. `.env` alone missed .env.local/.env.production
+# and every other dotenv variant; this covers the family.
+.env
+.env.*
+*.pem
+*.key
+*.p8
+*.p12
+secrets.json
+
+# Tests and fixtures — ~16KB today, but fixtures are exactly where a real API
+# key eventually gets pasted, and none of it is reachable at runtime.
+/test
+/tests
+*.test.js
+/coverage
+
+# Docs and scratch output
+*.md
+/docs
+npm-debug.log*
+.DS_Store

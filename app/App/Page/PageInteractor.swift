@@ -6,6 +6,18 @@ import InkMoney
 import InkSafety
 import InkAnalytics
 
+/// Seam for exchange-lifecycle tests (dev spec §3): `ProxyClient` is the
+/// live conformer; tests script the stream to drive both resolution paths.
+protocol ExchangeProxying: Sendable {
+    func exchange(
+        payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?
+    ) -> AsyncThrowingStream<ReplyChunk, Error>
+    func preupload(_ payload: SnapshotPayload) async throws -> UploadTicket
+    func abort(_ ticket: UploadTicket) async
+}
+
+extension ProxyClient: ExchangeProxying {}
+
 /// The shell around the pure engine: feeds clock + stroke events into
 /// `IdleSendMachine`, executes its effects (speculative upload, commit,
 /// abort), runs the gate before any model call, and streams the reply through
@@ -21,39 +33,135 @@ final class PageInteractor {
         case sending
         case answering
         case answered
+        case held
         case paywall(PaywallTrigger)
+        case cooldown(TimeInterval)
         case declined(String)
         case crisis(String)
     }
 
     private(set) var status: PageStatus = .idle
     private(set) var streamedText = ""
+    /// The archived entry currently standing on the reply page (the exchange
+    /// that just completed, or a revisited one) — the history thread skips it
+    /// so the same reply never renders twice.
+    private(set) var displayedEntryID: UUID?
     private(set) var ttfsMS: Int?
+    /// Develop pass (Artist): the server opened an image slot this exchange.
+    private(set) var developing = false
+    /// The finished picture, once the darkroom delivers it.
+    private(set) var imageURL: URL?
 
-    private let proxy: ProxyClient
+    private let proxy: any ExchangeProxying
     private let analytics: Analytics
     private let book: BookID
+    private let archive: (any PageArchiving)?
+    /// Tier + durable daily counters. Both halves come from one accounting, so
+    /// the gate can never read a count the completed exchange never records.
+    private let entitlements: PageEntitlements
+    private let memory: any MemoryProviding
 
-    private var machine = IdleSendMachine()
+    // Gentler than the machine defaults (2s/3s): writing is thought, and the
+    // pause between words must never feel like a countdown. The settle bounce
+    // in the page margin shows the window is open.
+    private var machine = IdleSendMachine(speculateAfter: 2.5, commitAfter: 4.0)
     private weak var canvas: PKCanvasView?
     private var tickTask: Task<Void, Never>?
     private var exchangeTask: Task<Void, Never>?
+    /// The gate hop between `commitSend` and the model call. Cancelled by
+    /// anything that abandons the pending send, so a denied or superseded
+    /// commit can never start an exchange behind the user's back.
+    private var gateTask: Task<Void, Never>?
 
-    private var speculativePayload: SnapshotPayload?
-    private var ticket: UploadTicket?
+    /// The typed page committed to the current exchange — captured at commit
+    /// so the archive can file it even after the draft field clears.
+    private var sentTypedText: String?
     private var sentStrokeCount = 0
     private var previousDigest: String?
-    // Harness-local moment counter; production reconciles from the proxy.
-    private var momentsUsedToday = 0
+    /// The exchange this page last completed — the Book's only continuity with
+    /// what the user can still see on the right-hand page.
+    private var lastTurn: PageContextBuilder.Turn?
 
-    init(proxy: ProxyClient, analytics: Analytics, book: BookID = .oracle) {
+    // Lazy so the callback can capture `self`; `@Observable` does not wrap
+    // lazy storage, and nothing observes the upload window anyway.
+    @ObservationIgnored
+    private lazy var upload = SpeculativeUpload(
+        proxy: proxy,
+        onStateChange: { [weak self] event in
+            guard let self else { return }
+            self.perform(self.machine.handle(event))
+        }
+    )
+
+    init(
+        proxy: any ExchangeProxying,
+        analytics: Analytics,
+        book: BookID = .oracle,
+        archive: (any PageArchiving)? = nil,
+        entitlements: PageEntitlements = LiveCommerce.page,
+        memory: any MemoryProviding = EmptyMemoryProvider()
+    ) {
         self.proxy = proxy
         self.analytics = analytics
         self.book = book
+        self.archive = archive
+        self.entitlements = entitlements
+        self.memory = memory
     }
 
     func attach(canvas: PKCanvasView) {
         self.canvas = canvas
+        if let drawing = pendingRestore {
+            pendingRestore = nil
+            restore(drawing)
+        }
+    }
+
+    // MARK: - Revisiting a remembered page
+
+    /// A remembered exchange waiting for the canvas to attach — revisit can
+    /// arrive before the page's PKCanvasView exists.
+    private var pendingRestore: PKDrawing?
+
+    /// REMEMBERED — reopen an archived exchange on the page: the user's ink
+    /// returns to the canvas and the Book's reply stands on the right page,
+    /// exactly as the exchange ended. The restored ink already belongs to its
+    /// archived exchange, so nothing re-sends and nothing re-archives; fresh
+    /// strokes on top of it start a new exchange as usual.
+    func revisit(drawing: PKDrawing, replyText: String, entryID: UUID? = nil) {
+        tickTask?.cancel()
+        gateTask?.cancel()
+        exchangeTask?.cancel()
+        upload.abort()
+        machine.reset()
+        typedDraft = ""
+        streamedText = replyText
+        displayedEntryID = entryID
+        // Reopening a remembered exchange gives the Book continuity with it.
+        lastTurn = PageContextBuilder.Turn(written: nil, reply: replyText)
+        ttfsMS = nil
+        developing = false
+        imageURL = nil
+        status = .answered
+        if canvas != nil {
+            restore(drawing)
+        } else {
+            pendingRestore = drawing
+        }
+    }
+
+    private func restore(_ drawing: PKDrawing) {
+        guard let canvas else { return }
+        canvas.drawing = drawing
+        // The delegate saw the restore land as grown stroke count and may
+        // have armed the rest cadence; disarm it — restored ink is not
+        // unsent ink.
+        tickTask?.cancel()
+        machine.reset()
+        sentStrokeCount = drawing.strokes.count
+        previousDigest = nil
+        canvas.undoManager?.removeAllActions()
+        status = .answered
     }
 
     // MARK: - Stroke events from the canvas
@@ -66,6 +174,8 @@ final class PageInteractor {
 
     func strokeEnded() {
         perform(machine.handle(.strokeEnded(at: Date())))
+        // A held page absorbs stroke events without arming the send timer.
+        guard machine.state != .held else { return }
         status = .resting
         startTicking()
     }
@@ -87,22 +197,147 @@ final class PageInteractor {
         }
     }
 
+    /// Design affordance ("press to let the ink rest"): skip the remaining
+    /// rest window by feeding the machine a tick past `commitAfter`. Only
+    /// meaningful while resting/speculating; a no-op otherwise.
+    func commitNow() {
+        tickTask?.cancel()
+        perform(machine.handle(.tick(now: Date(timeIntervalSinceNow: 10))))
+    }
+
+    /// After a decline (offline, cooldown elapsed), ready the page again.
+    func retry() {
+        machine.reset()
+        // The dedupe guards accidental re-sends of ink still on the page; a
+        // deliberate "try again" on the very same ink is not one of those, and
+        // must not land on a silently dead page.
+        previousDigest = nil
+        status = .idle
+    }
+
+    // MARK: - The typed hand (no-pencil fallback)
+
+    /// What the keyboard has written on the page. When no pencil is about,
+    /// the keys stand in for the pen: every keystroke feeds the same rest
+    /// cadence as a stroke, so a pause in typing lets the page drink the
+    /// words exactly like ink.
+    var typedDraft = ""
+
+    func typedDraftChanged() {
+        guard machine.state != .held else { return }
+        if typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // The draft was erased entirely; nothing waits to send.
+            tickTask?.cancel()
+            gateTask?.cancel()
+            if canCancelSend {
+                perform(machine.handle(.cancelRequested))
+            } else {
+                machine.reset()
+            }
+            status = .idle
+            return
+        }
+        strokeBegan()
+        strokeEnded()
+    }
+
+    // MARK: - Tool tray (task B5)
+
+    /// Eraser toggle — the canvas view swaps the PKCanvasView tool; Pencil
+    /// double-tap flips this too.
+    var eraserOn = false
+
+    var isHeld: Bool { machine.state == .held }
+
+    /// True while a send is pending but uncommitted — the window where
+    /// cancel is meaningful.
+    var canCancelSend: Bool {
+        switch machine.state {
+        case .resting, .speculating: true
+        default: false
+        }
+    }
+
+    private var hasUnsentInk: Bool {
+        (canvas?.drawing.strokes.count ?? 0) > sentStrokeCount
+            || !typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// HOLD — "the page waits": pauses idle-send entirely. Releasing resumes
+    /// the normal rest cadence when unsent ink is waiting on the page.
+    func toggleHold() {
+        tickTask?.cancel()
+        perform(machine.handle(.holdToggled))
+        if machine.state == .held {
+            status = .held
+        } else if hasUnsentInk {
+            perform(machine.handle(.strokeBegan))
+            perform(machine.handle(.strokeEnded(at: Date())))
+            status = .resting
+            startTicking()
+        } else {
+            status = .idle
+        }
+    }
+
+    /// CANCEL SEND — aborts the pending (uncommitted) send; ink stays.
+    func cancelSend() {
+        guard canCancelSend else { return }
+        tickTask?.cancel()
+        gateTask?.cancel()
+        perform(machine.handle(.cancelRequested))
+        status = .idle
+    }
+
+    /// TURN PAGE — manual archive-and-clear to start fresh, no reply needed.
+    func turnPage() {
+        tickTask?.cancel()
+        gateTask?.cancel()
+        exchangeTask?.cancel()
+        upload.abort()
+        completeExchange()
+        streamedText = ""
+        displayedEntryID = nil
+        ttfsMS = nil
+        developing = false
+        imageURL = nil
+        machine.reset()
+        status = .idle
+    }
+
+    func undo() {
+        canvas?.undoManager?.undo()
+    }
+
+    func redo() {
+        canvas?.undoManager?.redo()
+    }
+
     // MARK: - Machine effects
 
     private func perform(_ effects: [SendEffect]) {
         for effect in effects {
             switch effect {
             case .beginSpeculativeUpload:
-                beginSpeculativeUpload()
+                if let payload = snapshotPayload() { upload.begin(payload) }
             case .commitSend:
                 commitSend()
             case .abortUpload:
-                abortUpload()
+                upload.abort()
             }
         }
     }
 
     private func snapshotPayload() -> SnapshotPayload? {
+        // The typed hand takes precedence: when the keys wrote the page, the
+        // snapshot is a rendering of that text, same pipeline downstream.
+        let typed = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty {
+            guard let payload = TypedInkRasterizer.payload(
+                text: typed, pageWidth: canvas?.bounds.width ?? 720
+            ), payload.digest != previousDigest else { return nil }
+            return payload
+        }
         guard let drawing = canvas?.drawing, let canvasBounds = canvas?.bounds else { return nil }
         let newStrokes = drawing.strokes.dropFirst(sentStrokeCount)
         let processor = SnapshotProcessor(rasterizer: PKDrawingRasterizer(drawing: drawing))
@@ -115,69 +350,86 @@ final class PageInteractor {
         return payload
     }
 
-    private func beginSpeculativeUpload() {
-        guard let payload = snapshotPayload() else { return }
-        speculativePayload = payload
-        perform(machine.handle(.uploadStarted))
-        Task {
-            // Network cost pre-paid at ~2s; the server never bills an
-            // uncommitted ticket.
-            ticket = try? await proxy.preupload(payload)
-            perform(machine.handle(.uploadFinished))
-        }
-    }
-
-    private func abortUpload() {
-        speculativePayload = nil
-        guard let ticket else { return }
-        self.ticket = nil
-        Task { await proxy.abort(ticket) }
-    }
-
     private func commitSend() {
-        guard let payload = speculativePayload ?? snapshotPayload() else {
+        guard let payload = upload.payload ?? snapshotPayload() else {
             machine.reset()
             status = .idle
             return
         }
-
-        // Gate order: canSend runs BEFORE any model call.
-        let snapshot = EntitlementSnapshot(tier: .free, momentsUsedToday: momentsUsedToday)
-        switch SendGate.canSend(modality: .ink, snapshot: snapshot) {
-        case .paywall(let trigger):
-            status = .paywall(trigger)
-            Task { await analytics.track(.paywallShown(trigger: trigger.rawValue)) }
-            machine.reset()
-            return
-        case .cooldown(let seconds):
-            status = .declined("the ink must rest (\(Int(seconds))s)")
-            Task { await analytics.track(.cooldownHit(seconds: seconds)) }
-            machine.reset()
-            return
-        case .allow:
-            break
-        }
-
-        status = .sending
-        streamedText = ""
-        ttfsMS = nil
-        Task { await analytics.track(.pageSent(book: book)) }
-
-        let committedTicket = ticket
-        ticket = nil
-        speculativePayload = nil
-        exchangeTask = Task { [weak self] in
-            await self?.runExchange(payload: payload, ticket: committedTicket)
+        // Freeze what this exchange carries before the gate suspends, so a
+        // keystroke landing during the hop cannot change what was gated.
+        let typed = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        gateTask?.cancel()
+        gateTask = Task { [weak self] in
+            guard let self else { return }
+            // The tier and the day's counters both come from durable
+            // accounting; the counter this replaces lived on this object,
+            // which SwiftUI rebuilds on every Book switch and every
+            // shelf→page round trip — so the free cap reset itself, and
+            // navigating to the paywall was the reset.
+            let snapshot = await self.entitlements.snapshot()
+            guard !Task.isCancelled else { return }
+            // Gate order (must-test invariant): canSend runs to completion and
+            // returns BEFORE any model call.
+            switch SendGate.canSend(modality: .ink, snapshot: snapshot) {
+            case .paywall(let trigger):
+                self.status = .paywall(trigger)
+                self.machine.reset()
+                self.upload.abort()
+                await self.analytics.track(.paywallShown(trigger: trigger.rawValue))
+            case .cooldown(let seconds):
+                self.status = .cooldown(seconds)
+                self.machine.reset()
+                self.upload.abort()
+                await self.analytics.track(.cooldownHit(seconds: seconds))
+            case .allow:
+                self.beginExchange(
+                    payload: payload, typed: typed, memoryEnabled: snapshot.memoryEnabled
+                )
+            }
         }
     }
 
-    private func runExchange(payload: SnapshotPayload, ticket: UploadTicket?) async {
+    private func beginExchange(payload: SnapshotPayload, typed: String, memoryEnabled: Bool) {
+        status = .sending
+        streamedText = ""
+        displayedEntryID = nil
+        sentTypedText = typed.isEmpty ? nil : typed
+        ttfsMS = nil
+        developing = false
+        imageURL = nil
+        // The dedupe was dead code: `previousDigest` was only ever assigned
+        // nil, so `SnapshotResult.skipDuplicate` was unreachable and an
+        // unchanged page could commit the same exchange — and the same bill —
+        // twice. An explicit `retry()` clears it again.
+        previousDigest = payload.digest
+        // Memory, prior words and the session's last reply: all three fields
+        // used to leave as their empty defaults, so the Book answered with no
+        // memory of the exchange still standing on the facing page.
+        let context = PageContextBuilder.context(
+            book: book,
+            lastTurn: lastTurn,
+            memories: memory.summaries(for: book),
+            memoryEnabled: memoryEnabled
+        )
+        let committedTicket = upload.takeCommitted()
+        Task { await analytics.track(.pageSent(book: book)) }
+        exchangeTask = Task { [weak self] in
+            await self?.runExchange(payload: payload, context: context, ticket: committedTicket)
+        }
+    }
+
+    private func runExchange(
+        payload: SnapshotPayload, context: PageContext, ticket: UploadTicket?
+    ) async {
         var timer = ExchangeTimer()
         var assembler = ReplyAssembler()
         var chunks: [ReplyChunk] = []
+        var completed = false
+        var preempted = false
 
         let stream = CrisisInterceptor.intercept(
-            proxy.exchange(payload: payload, book: book, context: PageContext(), ticket: ticket)
+            proxy.exchange(payload: payload, book: book, context: context, ticket: ticket)
         )
         do {
             for try await chunk in stream {
@@ -190,29 +442,130 @@ final class PageInteractor {
                     switch output {
                     case .appendInk(let delta):
                         streamedText += delta
+                    case .openDevelopSlot:
+                        developing = true
+                    case .renderImageFinal(let url):
+                        // `developing` stays true — PageView keeps the frame up
+                        // for the finished picture and only withdraws it when
+                        // the slot closes.
+                        imageURL = url
+                    case .closeDevelopSlot:
+                        // The develop failed server-side. The ink still stands,
+                        // so the page just stops waiting for a picture.
+                        developing = false
                     case .crisis(let payload):
+                        preempted = true
                         status = .crisis(payload.message)
                         await analytics.track(.crisisFlow(book: book))
                     case .completed:
-                        status = .answered
+                        completed = true
+                        // A preempted exchange is never billed and never spends
+                        // a daily moment (`MomentBilling` excludes any stream
+                        // carrying a crisis chunk).
                         if MomentBilling.isBillable(chunks) {
-                            momentsUsedToday += 1
+                            // An exchange that actually developed a picture
+                            // ticks the image counter too — that counter is
+                            // what drives the Plus soft-cap cooldown. Keyed on
+                            // the arrived URL, not the develop flag: a slot
+                            // that opened and failed is not an image.
+                            await entitlements.record(imageURL == nil ? .ink : .image)
                         }
                         if let ttfsMS {
                             await analytics.track(.pageAnswered(book: book, modality: .ink, ttfsMS: ttfsMS))
                         }
-                    default:
+                    case .requestVideoCredit, .releaseVideoCredit:
+                        releaseVideoCredit()
+                    case .renderImagePreview, .playVideo:
                         break // image/video renderers bind in the design pass
                     }
                 }
             }
-            previousDigest = payload.digest
-            sentStrokeCount = canvas?.drawing.strokes.count ?? sentStrokeCount
+            // Exchange lifecycle (dev spec §3): only a stream that reached
+            // `.done` is a completed exchange. Crisis preemption keeps the
+            // user's ink; a stream that fell silent is a failed send.
+            if completed {
+                completeExchange()
+                status = .answered
+            } else if !preempted {
+                status = Self.declineStatus(for: .badResponse)
+            }
         } catch let error as ProxyError {
-            status = .declined(String(describing: DeclineMapper.map(error)))
+            // Failed send: strokes stay on the page, fully visible — the
+            // user's words never vanish into a failed exchange.
+            for output in assembler.abandon() {
+                if case .releaseVideoCredit = output { releaseVideoCredit() }
+            }
+            status = Self.declineStatus(for: error)
         } catch {
-            status = .declined("ink ran dry")
+            for output in assembler.abandon() {
+                if case .releaseVideoCredit = output { releaseVideoCredit() }
+            }
+            status = .declined("inkRanDry")
         }
         machine.reset()
+    }
+
+    /// The video path is unbound end to end — the proxy has no video provider
+    /// and nothing here ever takes a `CreditReservation` — so there is nothing
+    /// to hold and nothing to release. This exists as a real arm rather than a
+    /// `default:` so that wiring video cannot silently drop the release and
+    /// strand a credit the user can then never spend.
+    private func releaseVideoCredit() {}
+
+    /// A 429 carries a cooldown the page already knows how to render.
+    /// Stringifying the mapped state threw the seconds away and offered a "try
+    /// again" button that re-429s immediately.
+    private static func declineStatus(for error: ProxyError) -> PageStatus {
+        switch DeclineMapper.map(error) {
+        case .inkMustRest(let seconds): .cooldown(seconds ?? 60)
+        case .pageDeclines: .declined("pageDeclines")
+        case .pageIsQuiet: .declined("pageIsQuiet")
+        case .inkRanDry: .declined("inkRanDry")
+        }
+    }
+
+    /// `.exchangeComplete`: archive the strokes to the page record, then
+    /// REMOVE them from the live canvas — absorption ends in removal, never
+    /// minimum-opacity ghosting. The canvas is ready for the next exchange.
+    private func completeExchange() {
+        // The typed page is absorbed the same way ink is: the draft clears
+        // and the field stands empty for the next exchange — but it files to
+        // the archive first, so typed exchanges are remembered like ink ones.
+        let draft = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = sentTypedText ?? (draft.isEmpty ? nil : draft)
+        sentTypedText = nil
+        typedDraft = ""
+        let drawing = canvas?.drawing ?? PKDrawing()
+        // Strokes at or below `sentStrokeCount` were restored from the
+        // archive by a revisit — turning that page unchanged must not file
+        // the same exchange twice.
+        let hasFreshInk = drawing.strokes.count > sentStrokeCount
+        // ONE exchange files ONE entry carrying both hands. The two branches
+        // used to run unconditionally, so a page with ink and typed words filed
+        // two entries with the same reply — and since `snapshotPayload` gives
+        // the typed hand absolute precedence, the ink entry claimed the Book
+        // had answered strokes it never saw.
+        if typed != nil || hasFreshInk {
+            displayedEntryID = archive?.archive(
+                book: book,
+                drawing: hasFreshInk ? drawing : PKDrawing(),
+                typedText: typed,
+                replyText: streamedText
+            )
+            lastTurn = PageContextBuilder.Turn(written: typed, reply: streamedText)
+        }
+        guard let canvas else { return }
+        canvas.drawing = PKDrawing()
+        sentStrokeCount = 0
+        // The digest dedupe only guards re-sends of ink still on the page;
+        // once absorbed, writing the very same thing again is a new
+        // utterance — a stale digest here left the page silently dead.
+        previousDigest = nil
+        // "Only I can bring it back": one undo step returns the absorbed
+        // page to the canvas (where it behaves like freshly written ink).
+        canvas.undoManager?.removeAllActions()
+        canvas.undoManager?.registerUndo(withTarget: canvas) { target in
+            MainActor.assumeIsolated { target.drawing = drawing }
+        }
     }
 }

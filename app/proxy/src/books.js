@@ -3,8 +3,15 @@
 // /v1/books route strips it. Kill-switch flags live here: per Book and per
 // modality; the client treats flag-off as "resting", no resubmission needed.
 //
+// `flags` is the ONE authority on what a Book may do. Each Book used to carry
+// a parallel `modalityPolicy` object that read like the policy, shipped to
+// every client via /v1/books, and was consulted by exactly nothing — flipping
+// it off changed no behaviour. It is deleted rather than wired up: two
+// structures meaning the same thing is how an incident kill-switch gets
+// flipped on the wrong one. Every flag below is enforced in server.js.
+//
 // Model routing per PRD §7 (July 2026 picks, revisit monthly):
-//   default ink: gemini-flash-lite · heavy (gm/tutor): gpt-5-mini
+//   default ink: gemini-flash-lite-latest · heavy (gm/tutor): gpt-5.4-mini
 //   images: z-image-turbo (fal) · artist img2img: flux-2 (fal) · video: kling-3 (fal)
 
 const DEFAULT_FLAGS = { enabled: true, ink: true, image: true, video: true };
@@ -17,9 +24,8 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'vellum',
     starterText: 'Ask, and the page will answer. Plainly or in riddles — that is for the ink to decide.',
-    modalityPolicy: { ink: true, image: true, video: true },
-    models: { text: 'gemini-flash-lite', image: 'z-image-turbo', video: 'kling-3' },
-    prompt: 'You are the Oracle: cryptic or plain answers, riddles, a daily card drawn in ink. [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo', video: 'kling-3' },
+    prompt: "You are the Oracle, an old book that answers what is written on its pages. Answer the writer's question plainly or in a riddle — your choice, but choose one and commit. You may draw them a single card of your own invention when the moment calls for it. Speak with quiet certainty, never hedging.",
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -29,9 +35,8 @@ export const BOOKS = [
     ink: 'midnight-blue',
     paper: 'linen',
     starterText: 'This page is yours alone. Write what the day left behind.',
-    modalityPolicy: { ink: true, image: false, video: false },
-    models: { text: 'gemini-flash-lite' },
-    prompt: 'You are the Keeper: a private diary that writes back, reflective, never clinical. [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest' },
+    prompt: 'You are the Keeper, a private diary that writes back. Reflect what the writer set down, gently and specifically — never clinical, never advice-giving unless asked. Hold their day like something entrusted to you. One warm observation is worth more than five.',
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
   },
   {
@@ -41,9 +46,8 @@ export const BOOKS = [
     ink: 'sepia',
     paper: 'parchment',
     starterText: 'Begin a tale — a line is enough. The page will carry it on.',
-    modalityPolicy: { ink: true, image: true, video: true },
-    models: { text: 'gemini-flash-lite', image: 'z-image-turbo', video: 'kling-3' },
-    prompt: 'You are the Storyteller: continue the tale in ink; illustrate scenes as paintings. [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo', video: 'kling-3' },
+    prompt: 'You are the Storyteller. Whatever the writer begins, carry the tale onward a few sentences — vivid, concrete, always ending at a place that invites their pen back. Never finish the story; it is theirs.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -53,9 +57,12 @@ export const BOOKS = [
     ink: 'charcoal',
     paper: 'cold-press',
     starterText: 'Doodle anything. The page will develop it into finished art.',
-    modalityPolicy: { ink: true, image: true, video: true },
-    models: { text: 'gemini-flash-lite', image: 'flux-2', video: 'kling-3' },
-    prompt: 'You are the Artist: develop doodles into finished art in the chosen style (img2img). [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest', image: 'flux-2', video: 'kling-3' },
+    // Every Artist page develops: the sketch itself is the image input.
+    alwaysDevelop: true,
+    imagePrompt:
+      'Develop this rough ink sketch into a finished, painterly artwork. Keep the original composition and subject faithfully; render it in warm candlelit tones on aged paper. No text or lettering.',
+    prompt: "You are the Artist, sharing a page with the writer at the easel. Look at their sketch and say, in a sentence or two, what you see in it and what you will draw out of it — warm, specific, a fellow artist's eye. The picture develops on the page by itself; never describe tools, steps, or specifications, and never write anything that is not plain prose.",
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -65,9 +72,8 @@ export const BOOKS = [
     ink: 'oxblood',
     paper: 'ledger',
     starterText: 'Name your hero and where they stand. The adventure begins when your pen rests.',
-    modalityPolicy: { ink: true, image: true, video: true },
-    models: { text: 'gpt-5-mini', image: 'z-image-turbo', video: 'kling-3' },
-    prompt: 'You are the Game Master: run a solo adventure with a rolling on-page session summary. [tuning pass E10]',
+    models: { text: 'gpt-5.4-mini', image: 'z-image-turbo', video: 'kling-3' },
+    prompt: 'You are the Game Master of a solo pen-and-paper adventure. Continue the scene from what the writer wrote, offer real stakes and one clear moment of choice, and keep a light touch of dice-fate in your telling. You may run to one short paragraph, never more.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -77,9 +83,8 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'laid',
     starterText: 'Address a letter to a hand from history — public-domain or invented — and seal it with your rest.',
-    modalityPolicy: { ink: true, image: false, video: false },
-    models: { text: 'gemini-flash-lite' },
-    prompt: 'You are the Correspondent: letters answered in period hands, public-domain/original figures ONLY. [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest' },
+    prompt: 'You are the Correspondent: letters answered in the hand and voice of figures from history or invention — public-domain and original figures only, never living people. Answer as the addressed figure would, in period voice, warmly and briefly.',
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
   },
   {
@@ -89,9 +94,8 @@ export const BOOKS = [
     ink: 'slate',
     paper: 'grid',
     starterText: 'Work a problem in your own hand. The page will work it back, step by step.',
-    modalityPolicy: { ink: true, image: false, video: false },
-    models: { text: 'gpt-5-mini' },
-    prompt: 'You are the Tutor: worked solutions and corrections in ink, no curriculum claims; frustration → encouragement. [tuning pass E10]',
+    models: { text: 'gpt-5.4-mini' },
+    prompt: "You are the Tutor. Work the writer's problem back to them step by step in your own hand, in prose — short lines, one thought each. Correct mistakes kindly and plainly. If frustration shows in their writing, steady them first. Make no curriculum claims.",
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
   },
   {
@@ -101,9 +105,8 @@ export const BOOKS = [
     ink: 'emerald',
     paper: 'card',
     starterText: 'Riddles, twenty questions, draw-and-guess — write "deal me in" to begin.',
-    modalityPolicy: { ink: true, image: true, video: false },
-    models: { text: 'gemini-flash-lite', image: 'z-image-turbo' },
-    prompt: 'You are Parlor Games: riddles, 20 questions, draw-and-guess; keep game state on-page. [tuning pass E10]',
+    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo' },
+    prompt: 'You are Parlor Games, keeper of riddles, twenty questions, and draw-and-guess. Keep the state of the game on the page in your own words, play fair, and keep every turn brisk — a line or two, then back to the writer.',
     flags: { ...DEFAULT_FLAGS, video: false },
   },
 ];

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Privacy manifest (App Store required-reason APIs, enforced since May 2024).
+  Without this file the upload is accepted and then bounced by App Store Connect
+  with ITMS-91053, so the build never reaches TestFlight.
+
+  Declare only what the code actually does. Audited at the time of writing:
+    - UserDefaults: App/DI.swift, App/AppModel.swift, App/Design/PenPresence.swift
+    - File timestamp / disk space / boot time / active keyboard APIs: NONE.
+      App/Page/PageArchive.swift uses FileManager.urls(for:in:) and
+      createDirectory, neither of which is on Apple's required-reason list.
+      Do not add NSPrivacyAccessedAPICategoryFileTimestamp speculatively —
+      declaring a reason the binary cannot justify invites review questions.
+  Re-audit this file whenever a package gains a new Foundation dependency.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1: read/write only this app's own container. No App
+				     Group, no shared suite — UserDefaults.standard throughout. -->
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<!-- Page snapshots. InkNet/ProxyClient.swift uploads a rasterized
+			     crop of the user's handwriting to the proxy, which forwards it
+			     to the model provider. That is off-device transmission, so it
+			     is collection even though nothing is retained for advertising. -->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- The pseudonymous token minted in App/DI.swift, persisted in
+			     UserDefaults and sent as the x-ink-user header. Linked = false
+			     because it is device-local and tied to no account. If Sign in
+			     with Apple (task F4) ever ships, this becomes Linked = true. -->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,4 +1,4 @@
-# Inkbound — app workspace
+# Inkwoven — app workspace
 
 Core engineering per `../development.md`. Prime directive: every subsystem is a
 pure-logic module with unit tests; the UI binds to it, never the reverse.
@@ -9,7 +9,7 @@ pure-logic module with unit tests; the UI binds to it, never the reverse.
 app/
 ├── App/                         # SwiftUI entry, DI, echo-mode harness (thin; replaced by design handoff)
 ├── project.yml                  # XcodeGen spec for the app target (xcodegen generate)
-├── Packages/InkboundCore/       # one SPM package, seven module targets + test targets
+├── Packages/InkwovenCore/       # one SPM package, seven module targets + test targets
 │   ├── InkCore                  # BookID/Modality/ReplyChunk, IdleSendMachine, SnapshotProcessor, ReplyAssembler, MemoryInjection
 │   ├── InkData                  # SwiftData models (CloudKit-ready), InkStore
 │   ├── InkNet                   # SSEParser, ChunkDecoder, ProxyClient, RetryPolicy, ExchangeTimer (ttfs)
@@ -28,14 +28,14 @@ imports Foundation/CoreGraphics only; nothing imports `App`.
 
 ```sh
 # Swift core (all seven modules)
-cd Packages/InkboundCore && swift test
+cd Packages/InkwovenCore && swift test
 
 # Proxy
 cd proxy && npm install && npm test
 cd proxy && npm start                      # echo mode on :8787
 
 # App project (needs xcodegen; or create in Xcode and add App/ + the package)
-xcodegen generate && open Inkbound.xcodeproj
+xcodegen generate && open Inkwoven.xcodeproj
 ```
 
 ## Wire format (proxy ↔ InkNet)

@@ -1,4 +1,4 @@
-# Claude Design instruction — Inkbound
+# Claude Design instruction — Inkwoven
 
 Design every screen in `../screens.md` using `tokens.json` and `../design-system.md`. iPad-first (1194×834 landscape + portrait), plus two iPhone screens (companion timeline, Oracle).
 
