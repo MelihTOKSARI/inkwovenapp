@@ -30,7 +30,10 @@ targets:
         # defaults on regeneration and silently undoes the build-setting indirection.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        # Cold start paints the candlelit room's tone instead of a bare white
+        # system sheet (the color set lives in Assets.xcassets).
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -71,6 +74,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.empath.inkwoven
+        # Signing lives here, not in Xcode's UI, for the same reason as the
+        # version numbers below: the next `xcodegen generate` reverts anything
+        # set by hand, and an archive with no team cannot upload.
+        DEVELOPMENT_TEAM: 77G7KM4549
+        CODE_SIGN_STYLE: Automatic
         # Single source of truth for release metadata. Info.plist references
         # these via $(MARKETING_VERSION)/$(CURRENT_PROJECT_VERSION); bumping the
         # number in Xcode's UI instead gets reverted by the next `xcodegen
@@ -83,6 +91,10 @@ targets:
         SWIFT_VERSION: "6.0"
     scheme:
       testTargets: [InkwovenTests, InkwovenUITests]
+      # Local StoreKit catalog mirroring the App Store Connect products, so
+      # purchase/restore/trial flows are exercisable in the simulator before
+      # the ASC records exist. Release builds ignore it.
+      storeKitConfiguration: Inkwoven.storekit
   InkwovenTests:
     type: bundle.unit-test
     platform: iOS

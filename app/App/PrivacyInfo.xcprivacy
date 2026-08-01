@@ -52,10 +52,11 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- The pseudonymous token minted in App/DI.swift, persisted in
-			     UserDefaults and sent as the x-ink-user header. Linked = false
-			     because it is device-local and tied to no account. If Sign in
-			     with Apple (task F4) ever ships, this becomes Linked = true. -->
+			<!-- The pseudonymous token minted in App/DI.swift, held in the
+			     Keychain (with a legacy UserDefaults migration path) and sent
+			     as the x-ink-user header. Linked = false because it is
+			     device-local and tied to no account. If Sign in with Apple
+			     (task F4) ever ships, this becomes Linked = true. -->
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeUserID</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
