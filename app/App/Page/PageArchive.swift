@@ -93,6 +93,42 @@ final class PageArchive: PageArchiving {
         return entries.filter { $0.bookID == book.rawValue }
     }
 
+    /// "Delete all pages." Tears out every page in every Book: the open
+    /// shelf's store, the Keeper's file (without unsealing it — the bytes go,
+    /// the contents are never read), and any quarantined corrupt store, which
+    /// is still the user's ink. The write-holds clear only when every file is
+    /// verifiably gone; a partial wipe keeps them, and the caller must say so
+    /// rather than let the dialog's promise stand broken.
+    @discardableResult
+    func deleteAll() -> Bool {
+        entries.removeAll()
+        keeperEntries.removeAll()
+
+        let fm = FileManager.default
+        var targets = [openFileURL, keeperFileURL]
+        if let siblings = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+            targets += siblings.filter { url in
+                let name = url.lastPathComponent
+                return name.hasPrefix("remembered-pages.json.corrupt-")
+                    || name.hasPrefix("keeper-pages.json.corrupt-")
+            }
+        }
+        var allRemoved = true
+        for url in targets where fm.fileExists(atPath: url.path(percentEncoded: false)) {
+            do {
+                try fm.removeItem(at: url)
+            } catch {
+                Self.log.error("delete-all could not remove a store: \(error.localizedDescription, privacy: .public)")
+                allRemoved = false
+            }
+        }
+        if allRemoved {
+            openWritesBlocked = false
+            keeperWritesBlocked = false
+        }
+        return allRemoved
+    }
+
     // MARK: - The Keeper's seal
 
     /// Called once the gate has opened. Reads the Keeper's file for the first

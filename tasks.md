@@ -76,7 +76,7 @@
 - [ ] F2 Image **and video** moderation: prompt + output; conservative styles; no photoreal people — **M**
 - [ ] F3 Red-team: crisis, GM dark scenarios, Tutor distress, Correspondent impersonation, image/video abuse, minors — **M**
 - [ ] F4 Sign in with Apple (optional) + in-app account deletion — **M**
-- [ ] F5 Export (PDF/text) + delete-all — **S**
+- [x] F5 Export (PDF/text) + delete-all — **S**
 - [x] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
 
 ### Epic G — Monetization (D4)

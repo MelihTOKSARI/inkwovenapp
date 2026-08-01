@@ -1,11 +1,23 @@
 import SwiftUI
-import AuthenticationServices
+import StoreKit
 
 /// The Drawer: settings kept in the room's fiction. Hand, voice, options,
-/// books & shelf curation, ritual & account.
+/// books & shelf curation, account.
 struct DrawerView: View {
     @Bindable var model: AppModel
+    let archive: PageArchive
     @Environment(\.room) private var room
+
+    /// A generated export, ready for the share sheet.
+    private struct ExportItem: Identifiable {
+        let url: URL
+        var id: URL { url }
+    }
+
+    @State private var exportItem: ExportItem?
+    /// Marginalia for the rare failures: nothing to export, a wipe that
+    /// could not finish. Never a raw error string.
+    @State private var drawerNote: String?
 
     private let inkChoices: [UInt32] = [0x2E2418, 0x6B4A2B, 0x1F5A63, 0x7A2E2B]
 
@@ -67,27 +79,34 @@ struct DrawerView: View {
 
                         booksAndShelf
 
-                        section("Ritual & Account") {
-                            row("Quiet hours", divider: true) {
-                                Text("10pm – 8am").font(InkFont.body(15)).foregroundStyle(room.dim)
-                            }
-                            SignInWithAppleButton(.signIn) { _ in } onCompletion: { _ in
-                                // Optional account upgrade (task F4) binds here.
-                            }
-                            .signInWithAppleButtonStyle(.black)
-                            .frame(height: 44)
-                            .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
-                            .overlay(alignment: .bottom) { hairline }
-                            row("Export") {
+                        // No account section: v1 has no sign-in of any kind —
+                        // the notebook works anonymously, and a Sign in with
+                        // Apple button with nothing behind it (task F4) may
+                        // not ship as furniture.
+                        section("The Pages") {
+                            row("Export", divider: drawerNote != nil) {
                                 HStack(spacing: 8) {
-                                    exportButton("PDF")
-                                    exportButton("Text")
+                                    exportButton("PDF") { try PageExporter.pdfFile(entries: archive.entries) }
+                                    exportButton("Text") { try PageExporter.textFile(entries: archive.entries) }
                                 }
+                            }
+                            if let note = drawerNote {
+                                QuietBanner(text: note, size: 13.5)
+                                    .padding(EdgeInsets(top: 0, leading: 18, bottom: 12, trailing: 18))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
 
                         section(nil) {
-                            Button { model.go(.paywall) } label: {
+                            Button {
+                                // A bound user gets StoreKit's manage sheet —
+                                // the paywall is a place to buy, not cancel.
+                                if model.bound {
+                                    model.showManageSubs = true
+                                } else {
+                                    model.go(.paywall)
+                                }
+                            } label: {
                                 HStack {
                                     Text("Subscription").font(InkFont.body(16)).foregroundStyle(room.text)
                                     Spacer()
@@ -114,13 +133,23 @@ struct DrawerView: View {
                             .buttonStyle(.plain)
                         }
 
-                        Text("Inkwoven writes fiction on your behalf with a spirit of ink — not a person, and not advice. Read the privacy note and AI disclosure any time.")
-                            .font(InkFont.bodyItalic(13))
-                            .foregroundStyle(room.dim)
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(4)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 20)
+                        VStack(spacing: 10) {
+                            Text("Inkwoven writes fiction on your behalf with a spirit of ink — not a person, and not advice.")
+                                .font(InkFont.bodyItalic(13))
+                                .foregroundStyle(room.dim)
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(4)
+                            Button { model.showPolicies = true } label: {
+                                Text("Read the privacy note, terms & AI disclosure")
+                                    .font(InkFont.body(13))
+                                    .foregroundStyle(room.accent)
+                                    .underline()
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
                     }
                     .frame(maxWidth: 600)
                     .padding(EdgeInsets(top: 32, leading: 44, bottom: 60, trailing: 44))
@@ -131,6 +160,13 @@ struct DrawerView: View {
             if model.showDeleteConfirm {
                 deleteConfirm
             }
+            if model.showPolicies {
+                PolicySheet { model.showPolicies = false }
+            }
+        }
+        .manageSubscriptionsSheet(isPresented: $model.showManageSubs)
+        .sheet(item: $exportItem) { item in
+            ShareSheet(items: [item.url])
         }
     }
 
@@ -193,9 +229,18 @@ struct DrawerView: View {
         }
     }
 
-    private func exportButton(_ label: String) -> some View {
+    /// Generates the file on tap and hands it to the share sheet. The Keeper's
+    /// pages never pass through here: `archive.entries` is the open shelf only.
+    private func exportButton(_ label: String, generate: @escaping () throws -> URL) -> some View {
         Button {
-            // PDF/text export (task E2) binds here.
+            do {
+                exportItem = ExportItem(url: try generate())
+                drawerNote = nil
+            } catch PageExporter.ExportError.nothingToExport {
+                drawerNote = "There are no pages to carry out yet — the Keeper's stay behind their seal."
+            } catch {
+                drawerNote = "The pages would not gather this time. Try again in a moment."
+            }
         } label: {
             Text(label)
                 .font(InkFont.body(14))
@@ -209,6 +254,7 @@ struct DrawerView: View {
                 )
         }
         .buttonStyle(PressScaleStyle(scale: 0.96))
+        .accessibilityLabel("Export pages as \(label)")
     }
 
     // MARK: - Books & Shelf
@@ -326,8 +372,12 @@ struct DrawerView: View {
                     }
                     .buttonStyle(PressScaleStyle())
                     Button {
-                        // InkData wipe (task E3) binds here.
+                        let clean = archive.deleteAll()
+                        model.revisit = nil
                         model.showDeleteConfirm = false
+                        drawerNote = clean
+                            ? nil
+                            : "Some pages resisted the tearing. Open the Drawer and try once more."
                     } label: {
                         Text("Delete all")
                             .font(InkFont.body(15))
@@ -353,4 +403,16 @@ struct DrawerView: View {
         }
         .transition(.opacity)
     }
+}
+
+/// UIActivityViewController, contained in a SwiftUI sheet so the iPad
+/// popover-anchor requirement is satisfied by the sheet itself.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

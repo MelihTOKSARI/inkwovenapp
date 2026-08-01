@@ -42,7 +42,7 @@ struct RootView: View {
             case .bindery:
                 BinderyView(model: model).transition(.opacity)
             case .drawer:
-                DrawerView(model: model).transition(.opacity)
+                DrawerView(model: model, archive: di.archive).transition(.opacity)
             case .keeperGate:
                 keeperGate
             case .crisis:
