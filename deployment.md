@@ -82,6 +82,7 @@ primary_region = "iad"        # US East (Ashburn) — close to OpenAI/Google/fal
   auto_stop_machines = "off"   # never scale to zero — protects ttfs
   auto_start_machines = true
   min_machines_running = 1
+  processes = ["app"]
 
   [http_service.concurrency]
     type = "requests"
@@ -96,13 +97,13 @@ primary_region = "iad"        # US East (Ashburn) — close to OpenAI/Google/fal
   [checks.health]
     type = "http"
     port = 8787
-    path = "/v1/config"         # cheap authenticated-optional GET; see note below
+    path = "/health/ready"      # unauthenticated readiness probe — no header needed
     interval = "30s"
     timeout = "5s"
-    headers = { x-ink-user = "healthcheck" }
+    grace_period = "10s"        # let ioredis/pg finish their first connect
 ```
 
-> **Health check note:** every route currently requires `x-ink-user`, so the check sends a dummy token. If you'd rather not, add an unauthenticated `GET /healthz` route and point the check there — cleaner.
+> **Health check note:** `/health` and `/health/ready` are the only unauthenticated routes — `src/server.js` exempts them from the auth hook via its `HEALTH_ROUTES` set, so the check sends no `x-ink-user` header. `/health/ready` touches the stores and answers 503 when Redis/Postgres are unreachable, which is what actually pulls a broken machine from the pool. If you ever change the path, it must both be a registered route **and** appear in `HEALTH_ROUTES`; anything else falls through to the auth hook, which 401s the check and restart-loops every machine once attestation is on. (The checked-in `app/proxy/fly.toml` is the source of truth; this sample mirrors it.)
 
 ---
 
@@ -263,7 +264,24 @@ Tests keep running against the in-memory store; production gets durable counters
 
 Defer this until wiring the server-side entitlement gate; echo mode and text routing don't need it.
 
-### 6.5 Store everything in Fly
+### 6.5 `INK_ATTESTATION_MODE` — identity mode (set it, or production 401s everything)
+
+Not an API key, but it lives with the secrets because it gates all of them. The auth seam (`app/proxy/src/attest.js`) resolves every request's `x-ink-user` header through a pluggable verifier and **fails closed**: with `NODE_ENV=production` (the Dockerfile sets it) and `INK_ATTESTATION_MODE` unset, the mode defaults to `required` — and since no App Attest verifier is bound yet, that rejects **every request with a 401**. The iOS app has no App Attest client either, so a production deploy without this variable is a proxy nobody can talk to (only the unauthenticated health routes answer).
+
+The two modes:
+
+- **`anonymous`** — pass-through: the `x-ink-user` token is taken at face value as the identity. Always the default outside production, and correct for local dev. In production it means identity is client-claimed, so abuse control rests on the rate limits (per-user and per-IP) and on the budget caps at each model provider.
+- **`required`** — fail closed: reject everything until a real App Attest verifier is bound in code (the `REQUIRES A HUMAN` list at the top of `attest.js`). This is the production default *on purpose* — a missing secret can never silently downgrade identity to whatever string the client typed.
+
+**v1 launch ships with:**
+
+```sh
+fly secrets set INK_ATTESTATION_MODE=anonymous
+```
+
+plus **hard budget caps at each model provider** (§6.1–6.3, §8) as the backstop until App Attest lands. Once the verifier is bound and the app sends attestations, remove the secret (`fly secrets unset INK_ATTESTATION_MODE`) and production snaps back to fail-closed.
+
+### 6.6 Store everything in Fly
 
 **Always single-quote values** — URLs contain `?` and `&`, which zsh otherwise mangles (`no matches found`):
 
@@ -337,7 +355,10 @@ Scaling later is one command each: `fly scale memory 512`, `fly scale count 2`, 
 - [ ] Upstash + Neon provisioned (us-east), secrets set
 - [ ] `createRedisStores` swap implemented (rate limits, tickets, idempotency, wallet → durable)
 - [ ] Server-side entitlement gate (daily moment/image counters in Redis) — closes the client-only enforcement gap
+- [ ] `INK_ATTESTATION_MODE=anonymous` set (§6.5) — without it, production 401s every request
 - [ ] Model provider keys set; real routing on for one Book; cost logs visible in `fly logs`
+- [ ] `fly secrets list` shows GEMINI_API_KEY, OPENAI_API_KEY, and FAL_API_KEY actually present — a missing key silently drops that Book to echo mode
 - [ ] Budget caps set at Fly + all three model providers
+- [ ] One real exchange verified from a **release build** against the production URL before App Store submission
 - [ ] App Attest verification on the auth hook
 - [ ] CI deploy job green

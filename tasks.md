@@ -72,7 +72,7 @@
 - [ ] E10 Starter pages + prompt tuning pass ×8 — **M**
 
 ### Epic F — Safety & compliance (D5, all launch-blocking)
-- [ ] F1 Engine-level crisis classifier (all 8 Books) → break character, care, resources; routing unit-tested — **L**
+- [x] F1 Engine-level crisis classifier (all 8 Books) → break character, care, resources; routing unit-tested — **L**
 - [ ] F2 Image **and video** moderation: prompt + output; conservative styles; no photoreal people — **M**
 - [ ] F3 Red-team: crisis, GM dark scenarios, Tutor distress, Correspondent impersonation, image/video abuse, minors — **M**
 - [ ] F4 Sign in with Apple (optional) + in-app account deletion — **M**

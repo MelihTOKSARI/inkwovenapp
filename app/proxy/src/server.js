@@ -19,6 +19,8 @@ import {
   sniffImageMime,
   sniffImageMimeBase64,
   ProviderError,
+  CRISIS_SENTINEL,
+  CRISIS_PAYLOAD,
 } from './models.js';
 
 const ECHO_REPLY =
@@ -396,6 +398,59 @@ export function build(options = {}) {
       const send = (event, data) => writeRaw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+      // -- crisis gate -------------------------------------------------------
+      // The safety override (models.js) makes the model OPEN with
+      // CRISIS_SENTINEL when the writer's page reads as genuine self-harm
+      // risk. The sentinel can arrive split across deltas, so ink is held
+      // back until the head of the reply either provably is not the sentinel
+      // (flush, stream normally) or completes it — then ONE `crisis` event
+      // goes out and the rest of the generation is discarded. Only the very
+      // start of the reply is checked; echo mode never passes through here.
+      let crisisServed = false;
+      let gateOpen = false; // once true, deltas stream straight through
+      let gateHeld = '';
+
+      /** Routes one ink delta through the gate. Returns false once the exchange must stop. */
+      const sendInk = async (text) => {
+        if (gateOpen) {
+          await send('ink_delta', { text });
+          return true;
+        }
+        gateHeld += text;
+        const head = gateHeld.trimStart(); // models often lead with whitespace
+        if (head.startsWith(CRISIS_SENTINEL)) {
+          crisisServed = true;
+          await send('crisis', CRISIS_PAYLOAD);
+          return false;
+        }
+        if (CRISIS_SENTINEL.startsWith(head)) return true; // still ambiguous — keep holding
+        gateOpen = true;
+        const held = gateHeld;
+        gateHeld = '';
+        await send('ink_delta', { text: held });
+        return true;
+      };
+
+      /**
+       * The stream ended while the gate was still holding. A held head is by
+       * construction a strict prefix of the sentinel; if it got as far as the
+       * opening brackets, the model was mid-sentinel when the stream died, and
+       * safety fails CLOSED — the card, not a garbled "[[CRIS" fragment.
+       * Anything shorter is flushed as ordinary ink.
+       */
+      const flushInk = async () => {
+        if (gateOpen || crisisServed || !gateHeld) return;
+        if (gateHeld.trimStart().startsWith('[[')) {
+          crisisServed = true;
+          await send('crisis', CRISIS_PAYLOAD);
+          return;
+        }
+        gateOpen = true;
+        const held = gateHeld;
+        gateHeld = '';
+        await send('ink_delta', { text: held });
+      };
+
       const t0 = Date.now();
       const usage = { inputTokens: 0, outputTokens: 0 };
       const provider = textProviderFor(book);
@@ -457,22 +512,28 @@ export function build(options = {}) {
 
       try {
         if (iterator) {
-          if (firstDelta) await send('ink_delta', { text: firstDelta });
+          let flowing = true;
+          if (firstDelta) flowing = await sendInk(firstDelta);
           try {
-            while (!abort.signal.aborted && !clientGone) {
+            while (flowing && !abort.signal.aborted && !clientGone) {
               const next = await iterator.next();
               if (next.done) break;
-              await send('ink_delta', { text: next.value });
+              flowing = await sendInk(next.value);
             }
           } catch (error) {
             request.log?.warn?.({ route: 'exchange', book: book.id, error: String(error) });
-            if (!clientGone) {
-              await send('ink_delta', { text: 'The ink hesitates — ask again in a moment. ' });
+            if (!clientGone && !crisisServed) {
+              await flushInk(); // may fail closed into a crisis event
+              if (!crisisServed) {
+                await send('ink_delta', { text: 'The ink hesitates — ask again in a moment. ' });
+              }
             }
           } finally {
-            // Closing the generator is what actually cancels the upstream read.
+            // Closing the generator is what actually cancels the upstream read
+            // — on a crisis, that discards the rest of the model's text.
             await iterator.return?.().catch?.(() => {});
           }
+          await flushInk();
         } else {
           // Echo mode: stream word-by-word so streaming-first is real from day one.
           for (const word of ECHO_REPLY.split(' ')) {
@@ -486,8 +547,9 @@ export function build(options = {}) {
         // finished picture must land BEFORE `done` — done ends the exchange.
         // A failed develop never fails the exchange; the ink already answered,
         // but the intent MUST be resolved either way or the client keeps an
-        // empty plate forever.
-        if (willDevelop && !clientGone && !abort.signal.aborted) {
+        // empty plate forever. A crisis preempts the develop entirely: the
+        // client is tearing the fiction down, so no image should follow.
+        if (willDevelop && !crisisServed && !clientGone && !abort.signal.aborted) {
           const imageID = randomUUID();
           await send('image_intent', { id: imageID, expectsPreview: false });
           try {
@@ -518,7 +580,9 @@ export function build(options = {}) {
           });
         }
         // A disconnect is not a delivered moment: refund rather than charge.
-        await resolveHold(clientGone ? 'release' : 'settle');
+        // A crisis is never charged either — the writer got a safety card,
+        // not the moment they paid for.
+        await resolveHold(clientGone || crisisServed ? 'release' : 'settle');
       } catch (error) {
         request.log?.error?.({ route: 'exchange', book: book.id, error: String(error) });
         await resolveHold('release');
@@ -537,8 +601,9 @@ export function build(options = {}) {
           output_tokens: usage.outputTokens,
           tokens,
           unit_cost: priceFor(servedModel, usage),
-          credits_spent: clientGone ? 0 : cost,
-          developed: willDevelop,
+          credits_spent: clientGone || crisisServed ? 0 : cost,
+          developed: willDevelop && !crisisServed,
+          crisis: crisisServed,
           client_gone: clientGone,
           duration_ms: Date.now() - t0,
         });

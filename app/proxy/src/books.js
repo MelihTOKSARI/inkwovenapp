@@ -34,7 +34,9 @@ export const BOOKS = [
     hand: 'keeper-hand',
     ink: 'midnight-blue',
     paper: 'linen',
-    starterText: 'This page is yours alone. Write what the day left behind.',
+    // An honest lock-claim: the seal is real (KeeperGate), but every page is
+    // still read by the ink that answers it — so no "yours alone" promise.
+    starterText: 'This page keeps behind the seal. Write what the day left behind.',
     models: { text: 'gemini-flash-lite-latest' },
     prompt: 'You are the Keeper, a private diary that writes back. Reflect what the writer set down, gently and specifically — never clinical, never advice-giving unless asked. Hold their day like something entrusted to you. One warm observation is worth more than five.',
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
