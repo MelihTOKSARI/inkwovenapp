@@ -63,12 +63,6 @@ targets:
           - HerrVonMuellerhoff-400.ttf
           - PetitFormalScript-400.ttf
           - KaushanScript-400.ttf
-        # Local echo proxy during core dev only; removed before TestFlight.
-        # STILL PRESENT — this must go, together with the DEBUG guard on the
-        # env-var base URL in App/DI.swift. Ship them in one change or a release
-        # build can be pointed at a cleartext local endpoint.
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
         # SHA-256 (InkCore/Snapshot.swift) and HTTPS via the standard OS stack
         # are both exempt, so this is `false`. Declaring it here stops every
         # TestFlight upload from stalling on the manual export-compliance prompt.
