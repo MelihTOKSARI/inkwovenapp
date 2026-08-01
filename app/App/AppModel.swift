@@ -75,6 +75,12 @@ final class AppModel {
     private(set) var storePrices: [String: String] = [:]
     var selectedPlan: Plan = .annual
     var showBindConfirm = false
+    /// The terms/privacy/AI-disclosure sheet, reachable from the paywall and
+    /// the Drawer. App Review requires both documents behind a working link.
+    var showPolicies = false
+    /// StoreKit's manage-subscriptions sheet, presented from the Drawer for a
+    /// bound user — the paywall is a place to buy, not to cancel.
+    var showManageSubs = false
 
     // Drawer
     var hiddenBooks: Set<BookID> {
@@ -283,8 +289,11 @@ final class AppModel {
             do {
                 switch try await purchases.purchase(productID) {
                 case .success:
+                    // Stay on the paywall: the success card is the receipt the
+                    // user sees, and its dismissal walks back to the shelf.
+                    // (The Memory screen this used to open showed demo notes —
+                    // cross-page memory is not a v1 feature.)
                     self.purchaseState = .succeeded
-                    self.go(.memory)
                 case .pending:
                     // Ask to Buy / SCA: the transaction is real, the
                     // entitlement is not. Opening Memory here is how a minor

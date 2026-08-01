@@ -77,12 +77,12 @@
 - [ ] F3 Red-team: crisis, GM dark scenarios, Tutor distress, Correspondent impersonation, image/video abuse, minors — **M**
 - [ ] F4 Sign in with Apple (optional) + in-app account deletion — **M**
 - [ ] F5 Export (PDF/text) + delete-all — **S**
-- [ ] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
+- [x] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
 
 ### Epic G — Monetization (D4)
 - [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (20/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
   - AC: free user's 6th moment → paywall before any model call. Plus user's 21st image of the day → "the ink must rest" cooldown path, no error state, event logged.
-- [ ] G2 In-fiction paywall; purchase, restore, trial messaging — **M**
+- [x] G2 In-fiction paywall; purchase, restore, trial messaging — **M**
 - [ ] G3 Entitlement sync + edge cases (refund, expiry, offline) — **M**
 - [ ] G4 **Credit wallet: buy/spend/balance/refund-on-failure; 1 free onboarding credit** — **M**
 - [ ] G5 **The Bindery: content IAP storefront (covers, inks, seasonal papers); apply-to-notebook** — **M**

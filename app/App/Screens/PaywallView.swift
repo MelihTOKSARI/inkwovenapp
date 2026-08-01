@@ -1,7 +1,9 @@
 import SwiftUI
+import InkMoney
 
-/// "Bind the notebook to you" — the in-fiction subscription page.
-/// StoreKit/RevenueCat bind behind AppModel's commerce stubs.
+/// "Bind the notebook to you" — the in-fiction subscription page, backed by
+/// the real StoreKit 2 store: storefront-localized prices, a working restore,
+/// and the terms/privacy sheet App Review expects behind a paywall.
 struct PaywallView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
@@ -22,6 +24,20 @@ struct PaywallView: View {
             if model.showBindConfirm {
                 confirmSheet
             }
+            if model.showPolicies {
+                PolicySheet { model.showPolicies = false }
+            }
+            PurchaseNoteOverlay(
+                state: model.purchaseState,
+                successTitle: "The binding holds",
+                successBody: "The notebook is yours now — every page kept, and the ink never resting.",
+                successAction: "to the shelf",
+                onDismiss: { model.clearPurchaseNote() },
+                onSuccess: {
+                    model.clearPurchaseNote()
+                    model.go(.shelf)
+                }
+            )
         }
     }
 
@@ -44,28 +60,41 @@ struct PaywallView: View {
             VStack(alignment: .leading, spacing: 12) {
                 benefit("Endless moments — the ink never has to rest.")
                 benefit("Every page kept — nothing fades at thirty days.")
-                benefit("The notebook remembers you between sittings.")
-                benefit("Develop freely; moving pictures at a gentler price.")
+                benefit("Pictures develop freely, page after page.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 26)
 
             HStack(spacing: 12) {
                 planCard(
-                    .annual, name: "A year and a day", price: "$59.99", period: "/yr",
-                    tag: "7-day trial · best"
+                    .annual, name: "A year and a day",
+                    price: model.displayPrice(for: ProductID.plusAnnual, fallback: "$59.99"),
+                    period: "/yr", tag: "7-day trial · best"
                 )
-                planCard(.monthly, name: "One moon", price: "$9.99", period: "/mo", tag: nil)
+                planCard(
+                    .monthly, name: "One moon",
+                    price: model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99"),
+                    period: "/mo", tag: nil
+                )
             }
             .padding(.bottom, 22)
 
             sealCTA
 
+            // The trial's full terms, stated where the seal is pressed — not
+            // only inside a tag on the plan card.
+            Text(trialDisclosure)
+                .font(InkFont.body(12.5))
+                .foregroundStyle(Color(hex: 0x8A7658))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .padding(.top, 12)
+
             HStack(spacing: 24) {
-                linkText("Restore a binding") { /* StoreKit restore binds here */ }
-                linkText("Terms & privacy") { /* policy sheet binds here */ }
+                linkText("Restore a binding") { model.restorePurchases() }
+                linkText("Terms & privacy") { model.showPolicies = true }
             }
-            .padding(.top, 18)
+            .padding(.top, 12)
         }
         .padding(EdgeInsets(top: 44, leading: 46, bottom: 36, trailing: 46))
         .background(
@@ -86,6 +115,15 @@ struct PaywallView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8).stroke(Ink.wax.opacity(0.12), lineWidth: 1)
         )
+    }
+
+    private var trialDisclosure: String {
+        switch model.selectedPlan {
+        case .annual:
+            "First 7 days free, then \(model.displayPrice(for: ProductID.plusAnnual, fallback: "$59.99")) a year. Renews until cancelled in Settings."
+        case .monthly:
+            "\(model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99")) a month. Renews until cancelled in Settings."
+        }
     }
 
     private func benefit(_ text: String) -> some View {
@@ -187,7 +225,7 @@ struct PaywallView: View {
                     Text("Confirm the binding")
                         .font(InkFont.display(24))
                         .foregroundStyle(room.heading)
-                    Text("\(model.selectedPlan.price), charged to your Apple account. Cancel anytime in Settings.")
+                    Text("\(trialDisclosure) Charged to your Apple account.")
                         .font(InkFont.body(15))
                         .foregroundStyle(Color(hex: 0xB8A684))
                         .multilineTextAlignment(.center)

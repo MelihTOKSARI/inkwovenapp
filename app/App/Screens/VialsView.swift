@@ -1,43 +1,60 @@
 import SwiftUI
+import InkMoney
 
 /// The credit wallet: moving-picture credits as wax-sealed vials.
+/// Off the shelf for v1 — the moving-picture modality ships flag-off, so the
+/// shop that funds it stays behind the curtain (PRD kill-switch rule). The
+/// screen stays wired for the DEBUG routes and the modality's return.
 struct VialsView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
 
-    private let packs: [(count: Int, price: String)] = [
-        (10, "$4.99"), (30, "$11.99"), (100, "$29.99"),
+    private let packs: [(count: Int, productID: String, fallback: String)] = [
+        (10, ProductID.credits10, "$4.99"),
+        (30, ProductID.credits30, "$11.99"),
+        (100, ProductID.credits100, "$29.99"),
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            RoomNavBar(title: "The Vials") { model.go(.shelf) }
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Text("The Vials")
-                        .font(InkFont.display(34))
-                        .foregroundStyle(room.heading)
-                    Text("Moving-picture credits, sealed in wax until you spend them.")
-                        .font(InkFont.bodyItalic(16))
-                        .foregroundStyle(room.dim)
-                        .padding(.top, 6)
+        ZStack {
+            VStack(spacing: 0) {
+                RoomNavBar(title: "The Vials") { model.go(.shelf) }
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Text("The Vials")
+                            .font(InkFont.display(34))
+                            .foregroundStyle(room.heading)
+                        Text("Moving-picture credits, sealed in wax until you spend them.")
+                            .font(InkFont.bodyItalic(16))
+                            .foregroundStyle(room.dim)
+                            .padding(.top, 6)
 
-                    balance
-                        .padding(.vertical, 34)
+                        balance
+                            .padding(.vertical, 34)
 
-                    HStack(alignment: .bottom, spacing: 16) {
-                        ForEach(Array(packs.enumerated()), id: \.offset) { index, pack in
-                            packCard(pack: pack, big: index == 2, index: index)
+                        HStack(alignment: .bottom, spacing: 16) {
+                            ForEach(Array(packs.enumerated()), id: \.offset) { index, pack in
+                                packCard(pack: pack, big: index == 2, index: index)
+                            }
                         }
-                    }
 
-                    refundNote
-                        .padding(.top, 24)
+                        refundNote
+                            .padding(.top, 24)
+                    }
+                    .frame(maxWidth: 720)
+                    .padding(EdgeInsets(top: 36, leading: 56, bottom: 60, trailing: 56))
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: 720)
-                .padding(EdgeInsets(top: 36, leading: 56, bottom: 60, trailing: 56))
-                .frame(maxWidth: .infinity)
             }
+
+            PurchaseNoteOverlay(
+                state: model.purchaseState,
+                successTitle: "Sealed and delivered",
+                successBody: "The vials are yours — they wait, sealed, until a picture asks to move.",
+                successAction: "very well",
+                onDismiss: { model.clearPurchaseNote() },
+                onSuccess: { model.clearPurchaseNote() }
+            )
         }
     }
 
@@ -58,7 +75,9 @@ struct VialsView: View {
         }
     }
 
-    private func packCard(pack: (count: Int, price: String), big: Bool, index: Int) -> some View {
+    private func packCard(
+        pack: (count: Int, productID: String, fallback: String), big: Bool, index: Int
+    ) -> some View {
         VStack(spacing: 0) {
             VialView(
                 width: 22 + CGFloat(index) * 9,
@@ -78,7 +97,7 @@ struct VialsView: View {
             Button {
                 withAnimation { model.buy(pack: pack.count) }
             } label: {
-                Text("Buy · \(pack.price)")
+                Text("Buy · \(model.displayPrice(for: pack.productID, fallback: pack.fallback))")
                     .font(InkFont.bodySemiBold(15))
                     .foregroundStyle(Color(hex: 0x2A1C0A))
                     .frame(maxWidth: .infinity, minHeight: 44)
