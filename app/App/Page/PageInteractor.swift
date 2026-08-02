@@ -14,6 +14,11 @@ protocol ExchangeProxying: Sendable {
     ) -> AsyncThrowingStream<ReplyChunk, Error>
     func preupload(_ payload: SnapshotPayload) async throws -> UploadTicket
     func abort(_ ticket: UploadTicket) async
+    /// A moving picture, asked for because the reader tapped (task J4). The
+    /// `videoID` is the retry key: asking twice with the same one yields one
+    /// clip and one charge.
+    func video(briefID: String, videoID: UUID) -> AsyncThrowingStream<ReplyChunk, Error>
+    func wallet() async throws -> WalletView
 }
 
 extension ProxyClient: ExchangeProxying {}
@@ -52,6 +57,29 @@ final class PageInteractor {
     /// The finished picture, once the darkroom delivers it.
     private(set) var imageURL: URL?
 
+    // MARK: - Moving pictures (Epic J)
+
+    /// Where the moving picture stands on this page. `offered` is the whole
+    /// of the affordance's condition: the page can only offer what the Book
+    /// judged a scene, and it offers — it never acts.
+    enum VideoState: Equatable {
+        case none
+        /// The Book judged this reply convertible; the page may offer.
+        case offered(ConvertibilityVerdict)
+        /// The reader tapped and the picture is developing.
+        case generating
+        /// The clip is on the page.
+        case delivered(URL)
+        /// It did not arrive; the credit went back. Carries the in-fiction line.
+        case failed(String)
+    }
+
+    private(set) var video: VideoState = .none
+    /// What a tap would spend, as the server last reported it. Nil until the
+    /// wallet is read — the affordance simply says less until then, and the
+    /// server decides for real either way.
+    private(set) var wallet: WalletView?
+
     private let proxy: any ExchangeProxying
     private let analytics: Analytics
     private let book: BookID
@@ -68,6 +96,10 @@ final class PageInteractor {
     private weak var canvas: PKCanvasView?
     private var tickTask: Task<Void, Never>?
     private var exchangeTask: Task<Void, Never>?
+    /// The in-flight generation (task J4). Held so leaving the page cancels
+    /// it — and cancelling is what makes the server release the hold.
+    private var videoTask: Task<Void, Never>?
+    private var walletTask: Task<Void, Never>?
     /// The gate hop between `commitSend` and the model call. Cancelled by
     /// anything that abandons the pending send, so a denied or superseded
     /// commit can never start an exchange behind the user's back.
@@ -132,6 +164,10 @@ final class PageInteractor {
         tickTask?.cancel()
         gateTask?.cancel()
         exchangeTask?.cancel()
+        // A generation in flight belongs to the exchange being left; cancelling
+        // is what tells the server to release its hold.
+        videoTask?.cancel()
+        video = .none
         upload.abort()
         machine.reset()
         typedDraft = ""
@@ -294,6 +330,8 @@ final class PageInteractor {
         tickTask?.cancel()
         gateTask?.cancel()
         exchangeTask?.cancel()
+        videoTask?.cancel()
+        video = .none
         upload.abort()
         completeExchange()
         streamedText = ""
@@ -398,6 +436,10 @@ final class PageInteractor {
         ttfsMS = nil
         developing = false
         imageURL = nil
+        // A new exchange retires the previous reply's offer — the verdict
+        // belongs to the reply that earned it.
+        videoTask?.cancel()
+        video = .none
         // The dedupe was dead code: `previousDigest` was only ever assigned
         // nil, so `SnapshotResult.skipDuplicate` was unreachable and an
         // unchanged page could commit the same exchange — and the same bill —
@@ -473,10 +515,19 @@ final class PageInteractor {
                         if let ttfsMS {
                             await analytics.track(.pageAnswered(book: book, modality: .ink, ttfsMS: ttfsMS))
                         }
+                    case .offerVideo(let verdict):
+                        // The page may now OFFER (task J3). It does not
+                        // generate, does not reserve, and does not spend —
+                        // `requestVideo()` runs only from a tap.
+                        video = .offered(verdict)
+                        await analytics.track(.videoOffered(book: book))
+                        // What the tap would cost, so the affordance can be
+                        // honest before it commits.
+                        refreshWallet()
                     case .requestVideoCredit, .releaseVideoCredit:
                         releaseVideoCredit()
                     case .renderImagePreview, .playVideo:
-                        break // image/video renderers bind in the design pass
+                        break // clips arrive on the /v1/video stream, not here
                     }
                 }
             }
@@ -505,12 +556,146 @@ final class PageInteractor {
         machine.reset()
     }
 
-    /// The video path is unbound end to end — the proxy has no video provider
-    /// and nothing here ever takes a `CreditReservation` — so there is nothing
-    /// to hold and nothing to release. This exists as a real arm rather than a
-    /// `default:` so that wiring video cannot silently drop the release and
-    /// strand a credit the user can then never spend.
-    private func releaseVideoCredit() {}
+    /// A held clip credit goes back (task J4). The hold itself lives on the
+    /// SERVER — it is reserved when a generation starts and released by the
+    /// same route on every failure path, including a client that vanishes
+    /// mid-generation. So the client's part is to stop asking and refresh what
+    /// the wallet actually says, rather than to keep a second, drifting count.
+    ///
+    /// This used to be an empty stub, deliberately kept as a real arm so that
+    /// wiring video could not silently strand a credit. It is now wired.
+    private func releaseVideoCredit() {
+        refreshWallet()
+    }
+
+    /// Re-reads the server's wallet: the client never decides what a clip
+    /// costs or whether a free one remains, it only shows what it was told.
+    func refreshWallet() {
+        walletTask?.cancel()
+        walletTask = Task { [weak self] in
+            guard let self else { return }
+            let view = try? await self.proxy.wallet()
+            guard !Task.isCancelled, let view else { return }
+            self.wallet = view
+        }
+    }
+
+    /// MAKE THIS MOVE (task J4). The one entry point into generation, and it
+    /// exists only behind a tap: nothing on this object ever calls it on the
+    /// reader's behalf.
+    ///
+    /// Flow: reserve (server) → generate → bloom → settle (server). Every
+    /// failure releases, including cancellation — leaving the page or killing
+    /// the app drops the stream, and the route refunds rather than charging
+    /// for a clip delivered to nobody.
+    func requestVideo() {
+        guard case .offered(let verdict) = video else { return }
+        // Double-tap protection is layered: the state moves out of `.offered`
+        // immediately, and the videoID makes the SERVER idempotent even if a
+        // retry gets past this.
+        let videoID = UUID()
+        let wasFree = wallet?.nextClipIsFree ?? false
+        video = .generating
+        let startedAt = Date()
+
+        videoTask?.cancel()
+        videoTask = Task { [weak self] in
+            guard let self else { return }
+            await self.analytics.track(.videoRequested(book: self.book, free: wasFree))
+            var assembler = ReplyAssembler()
+            var delivered = false
+            do {
+                for try await chunk in self.proxy.video(briefID: verdict.briefID, videoID: videoID) {
+                    for output in assembler.consume(chunk) {
+                        switch output {
+                        case .playVideo(let url):
+                            delivered = true
+                            self.video = .delivered(url)
+                        case .releaseVideoCredit:
+                            // The server already released its own hold; this
+                            // refreshes what the page believes it has left.
+                            self.releaseVideoCredit()
+                        case .completed:
+                            break
+                        default:
+                            break
+                        }
+                    }
+                }
+                if delivered {
+                    let waited = Int(Date().timeIntervalSince(startedAt) * 1000)
+                    await self.analytics.track(.videoDelivered(book: self.book, waitedMS: waited))
+                    self.refreshWallet()
+                } else {
+                    // The stream ended without a clip: treat it as a failure
+                    // so the page never waits forever on a picture that is
+                    // not coming.
+                    self.failVideo(.badResponse)
+                }
+            } catch is CancellationError {
+                // The reader left. The server sees the disconnect and releases;
+                // the page simply stops offering to show what never arrived.
+                self.video = .none
+            } catch let error as ProxyError {
+                guard error != .cancelled else {
+                    self.video = .none
+                    return
+                }
+                self.failVideo(error)
+            } catch {
+                self.failVideo(.badResponse)
+            }
+        }
+    }
+
+    /// No clip, and the vial came back. The reader gets the Book's line, never
+    /// a provider string; the analytics get the coarse bucket (task J9).
+    private func failVideo(_ error: ProxyError) {
+        video = .failed(Self.videoDeclineCopy(for: error))
+        refreshWallet()
+        let reason = Self.videoFailureReason(for: error)
+        Task { [analytics, book] in
+            await analytics.track(.videoFailed(book: book, reason: reason))
+        }
+    }
+
+    /// In-fiction copy for a clip that did not develop. The refund promise is
+    /// stated plainly — it is the one thing the reader must be able to trust.
+    private static func videoDeclineCopy(for error: ProxyError) -> String {
+        switch DeclineMapper.map(error) {
+        case .pageDeclines:
+            "The page will not picture this one. Your vial is untouched."
+        case .inkMustRest:
+            "The ink must rest before it can move again. Nothing was spent."
+        case .pageIsQuiet:
+            "The road is dark — a moving picture cannot travel it tonight. Nothing was spent."
+        case .vialsEmpty:
+            "The vials are empty. Nothing was spent."
+        case .inkRanDry:
+            "The picture would not settle. Your vial has been returned."
+        }
+    }
+
+    /// Coarse buckets only — never a provider string, never page content.
+    private static func videoFailureReason(for error: ProxyError) -> String {
+        switch error {
+        case .moderated: "moderated"
+        case .paymentRequired: "no_credit"
+        case .rateLimited: "rate_limited"
+        case .offline: "offline"
+        case .badResponse: "no_clip"
+        case .server(let status): "server_\(status)"
+        case .transport: "transport"
+        case .cancelled: "cancelled"
+        }
+    }
+
+    /// The clip filled the screen — the Riddle-diary moment (task J9).
+    func recordImmersiveOpen() {
+        Task { [analytics, book] in
+            await analytics.track(.videoImmersiveOpened(book: book))
+        }
+    }
 
     /// A 429 carries a cooldown the page already knows how to render.
     /// Stringifying the mapped state threw the seconds away and offered a "try

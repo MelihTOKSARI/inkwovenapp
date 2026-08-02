@@ -10,6 +10,10 @@ public enum ProxyError: Error, Equatable, Sendable {
     /// category detail never exposed.
     case moderated
     case rateLimited(retryAfterSeconds: Double?)
+    /// The wallet is empty and no free clip is available: the vials, not an
+    /// error. Distinct from `.server(402)` so the page can open the shop
+    /// instead of apologising.
+    case paymentRequired
     case badResponse
     case cancelled
 }
@@ -24,7 +28,7 @@ public enum RetryPolicy {
         switch error {
         case .offline, .transport:
             return true
-        case .server, .moderated, .rateLimited, .badResponse, .cancelled:
+        case .server, .moderated, .rateLimited, .paymentRequired, .badResponse, .cancelled:
             return false
         }
     }

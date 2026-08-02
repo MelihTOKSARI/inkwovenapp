@@ -32,6 +32,17 @@ struct ExchangeLifecycleTests {
         }
 
         func abort(_ ticket: UploadTicket) async {}
+
+        // These tests script the ink exchange only; the video path (Epic J) is
+        // exercised on the page itself. Asking for a clip here is a no-op that
+        // yields nothing rather than a fabricated success.
+        func video(briefID: String, videoID: UUID) -> AsyncThrowingStream<ReplyChunk, Error> {
+            AsyncThrowingStream { $0.finish() }
+        }
+
+        func wallet() async throws -> WalletView {
+            WalletView(balance: 0, available: 0, freeClipsRemaining: 0, freeClipsOpen: false)
+        }
     }
 
     @MainActor

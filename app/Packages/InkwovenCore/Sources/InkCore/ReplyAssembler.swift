@@ -23,6 +23,9 @@ public enum AssemblerOutput: Equatable, Sendable {
     /// leaked hold silently makes a credit permanently unspendable.
     case releaseVideoCredit(VideoJob)
     case playVideo(URL)
+    /// The page may OFFER to move (task J3). Advisory: the affordance appears,
+    /// and nothing is generated or charged until the reader taps it.
+    case offerVideo(ConvertibilityVerdict)
     /// Preemption: cancel all renderers, discard partial fiction, surface the
     /// payload plainly. No further fiction outputs will be emitted.
     case crisis(CrisisPayload)
@@ -33,12 +36,22 @@ public struct AssembledReply: Equatable, Sendable {
     public var inkText: String
     public var imageURL: URL?
     public var videoURL: URL?
+    /// Present when the Book judged this reply worth moving. Carried on the
+    /// finished reply so a revisited page can still offer.
+    public var verdict: ConvertibilityVerdict?
     public var usage: Usage
 
-    public init(inkText: String, imageURL: URL? = nil, videoURL: URL? = nil, usage: Usage) {
+    public init(
+        inkText: String,
+        imageURL: URL? = nil,
+        videoURL: URL? = nil,
+        verdict: ConvertibilityVerdict? = nil,
+        usage: Usage
+    ) {
         self.inkText = inkText
         self.imageURL = imageURL
         self.videoURL = videoURL
+        self.verdict = verdict
         self.usage = usage
     }
 }
@@ -49,6 +62,8 @@ public struct ReplyAssembler: Sendable {
     public private(set) var inkText: String = ""
     public private(set) var imageURL: URL?
     public private(set) var videoURL: URL?
+    /// The convertibility verdict, when the Book returned a positive one.
+    public private(set) var verdict: ConvertibilityVerdict?
     public private(set) var isPreempted = false
     /// Video jobs whose credit the shell was told to reserve and which have
     /// not delivered yet. Any exchange ending with entries still here owes the
@@ -92,6 +107,20 @@ public struct ReplyAssembler: Sendable {
             pendingVideoJobs.removeAll()
             return [.playVideo(url)]
 
+        case .videoFailed(let failure):
+            // Terminal for the intent: the clip will never arrive, so the hold
+            // must go back now rather than waiting for the stream to end.
+            pendingVideoJobs.removeAll { $0.id == failure.id }
+            return [.releaseVideoCredit(VideoJob(id: failure.id))]
+
+        case .verdict(let verdict):
+            // Advisory (task J2): a negative verdict is simply never sent, so
+            // an explicit `false` is honoured the same way — the page offers
+            // only on a positive one. Nothing here starts a generation.
+            guard verdict.convertible else { return [] }
+            self.verdict = verdict
+            return [.offerVideo(verdict)]
+
         case .crisis(let payload):
             isPreempted = true
             // Releases lead: a shell that treats `.crisis` as "stop everything
@@ -100,7 +129,13 @@ public struct ReplyAssembler: Sendable {
             return drainPendingVideoCredits() + [.crisis(payload)]
 
         case .done(let usage):
-            let reply = AssembledReply(inkText: inkText, imageURL: imageURL, videoURL: videoURL, usage: usage)
+            let reply = AssembledReply(
+                inkText: inkText,
+                imageURL: imageURL,
+                videoURL: videoURL,
+                verdict: verdict,
+                usage: usage
+            )
             // A stream that ends without the clip it promised still owes the
             // release.
             return drainPendingVideoCredits() + [.completed(reply)]

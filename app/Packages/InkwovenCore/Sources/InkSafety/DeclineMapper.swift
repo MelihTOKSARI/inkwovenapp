@@ -12,6 +12,8 @@ public enum InFictionState: Equatable, Sendable {
     case pageIsQuiet
     /// Transient fault after retries — invite the user to try again.
     case inkRanDry
+    /// The vials are empty and no free clip stands: the shop, not an error.
+    case vialsEmpty
 }
 
 public enum DeclineMapper {
@@ -23,6 +25,8 @@ public enum DeclineMapper {
             .inkMustRest(seconds: retryAfter)
         case .offline:
             .pageIsQuiet
+        case .paymentRequired:
+            .vialsEmpty
         case .transport, .server, .badResponse, .cancelled:
             .inkRanDry
         }

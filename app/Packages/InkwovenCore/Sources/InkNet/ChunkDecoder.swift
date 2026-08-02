@@ -11,6 +11,15 @@ public enum ChunkDecoder {
     /// strategy (see `ProxyClient.preupload`) makes its own local decoder.
     private static let decoder = JSONDecoder()
 
+    /// The verdict is the one chunk carrying a date (`expiresAt`), so it needs
+    /// the ISO-8601 strategy. Separate instance rather than reconfiguring the
+    /// shared one, which several exchanges may be decoding against at once.
+    private static let verdictDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
     /// Shown when the wire payload cannot be trusted. Unbranded, region-neutral,
     /// and safe to render verbatim; `CrisisView` supplies its own resources, so
     /// an empty list costs the reader nothing.
@@ -55,6 +64,15 @@ public enum ChunkDecoder {
             case "video_final":
                 guard let url = URL(string: try decoder.decode(URLBody.self, from: data).url) else { return nil }
                 return .videoFinal(url)
+            case "video_error":
+                // Terminal counterpart to `video_intent`. Dropping it as an
+                // unknown event would leave the reader watching a clip develop
+                // that is never coming, with their credit still held.
+                return .videoFailed(try decoder.decode(VideoFailure.self, from: data))
+            case "verdict":
+                // Advisory only — it can never start a generation, so a
+                // malformed one is safely dropped by the catch below.
+                return .verdict(try verdictDecoder.decode(ConvertibilityVerdict.self, from: data))
             case "done":
                 return .done(try decoder.decode(Usage.self, from: data))
             default:

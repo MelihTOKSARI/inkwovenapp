@@ -13,8 +13,42 @@ public enum ReplyChunk: Equatable, Sendable {
     /// opened: without it the darkroom spins until the exchange ends.
     case imageFailed(ImageFailure)
     case videoFinal(URL)
+    /// The clip will never arrive. Terminal for `videoIntent`, and the signal
+    /// the shell needs to release the hold it took.
+    case videoFailed(VideoFailure)
+    /// Advisory only (task J2): this reply is a scene worth moving. It NEVER
+    /// starts a generation — it only lets the page offer. Its absence means
+    /// no, which is why an older client and a negative verdict agree.
+    case verdict(ConvertibilityVerdict)
     case crisis(CrisisPayload)
     case done(Usage)
+}
+
+/// The server's judgement on one reply, plus the handle to act on it. The
+/// `briefID` points at a server-stored generation brief — the client never
+/// holds or sends prompt text, so there is no free-form generation surface.
+public struct ConvertibilityVerdict: Equatable, Sendable, Codable {
+    public var convertible: Bool
+    public var briefID: String
+    public var expiresAt: Date?
+
+    public init(convertible: Bool, briefID: String, expiresAt: Date? = nil) {
+        self.convertible = convertible
+        self.briefID = briefID
+        self.expiresAt = expiresAt
+    }
+}
+
+/// Why a clip never arrived. Like `ImageFailure.reason`, this is a server-side
+/// diagnostic — the reader sees the Book's own in-fiction line, never this.
+public struct VideoFailure: Equatable, Sendable, Codable {
+    public var id: String
+    public var reason: String?
+
+    public init(id: String, reason: String? = nil) {
+        self.id = id
+        self.reason = reason
+    }
 }
 
 public struct ImageJob: Equatable, Sendable, Codable {

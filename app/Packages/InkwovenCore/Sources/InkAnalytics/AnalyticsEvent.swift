@@ -34,6 +34,24 @@ public enum AnalyticsEvent: Equatable, Sendable {
     /// enum only — never the note, never page content.
     case reportSubmitted(book: BookID, reason: String)
 
+    // -- moving pictures (task J9) -------------------------------------------
+    // Two ratios matter. offered→requested is how the convertibility verdict
+    // (J2) gets tuned: offers nobody takes mean the model is misreading what
+    // it wrote. requested→delivered is the REAL failure rate, which replaces
+    // the assumed 8% in design/app-store-assets/credits.md §2.
+
+    /// The page offered to move — a positive verdict reached the reader.
+    case videoOffered(book: BookID)
+    /// The reader tapped. `free` records which purse it came from.
+    case videoRequested(book: BookID, free: Bool)
+    /// The clip bloomed on the page. `waitedMS` is the theatre's real duration.
+    case videoDelivered(book: BookID, waitedMS: Int)
+    /// No clip, and the credit went back. `reason` is a coarse bucket, never
+    /// a provider string or anything from the page.
+    case videoFailed(book: BookID, reason: String)
+    /// The clip was tapped and filled the screen — the Riddle-diary moment.
+    case videoImmersiveOpened(book: BookID)
+
     public var name: String {
         switch self {
         case .install: "install"
@@ -51,6 +69,11 @@ public enum AnalyticsEvent: Equatable, Sendable {
         case .notificationPermissionAnswered: "notification_permission_answered"
         case .ritualOpened: "ritual_opened"
         case .reportSubmitted: "report_submitted"
+        case .videoOffered: "video_offered"
+        case .videoRequested: "video_requested"
+        case .videoDelivered: "video_delivered"
+        case .videoFailed: "video_failed"
+        case .videoImmersiveOpened: "video_immersive_opened"
         }
     }
 
@@ -84,6 +107,16 @@ public enum AnalyticsEvent: Equatable, Sendable {
             ["book": .string(book.rawValue)]
         case .reportSubmitted(let book, let reason):
             ["book": .string(book.rawValue), "reason": .string(reason)]
+        case .videoOffered(let book):
+            ["book": .string(book.rawValue)]
+        case .videoRequested(let book, let free):
+            ["book": .string(book.rawValue), "free": .bool(free)]
+        case .videoDelivered(let book, let waitedMS):
+            ["book": .string(book.rawValue), "waited_ms": .int(waitedMS)]
+        case .videoFailed(let book, let reason):
+            ["book": .string(book.rawValue), "reason": .string(reason)]
+        case .videoImmersiveOpened(let book):
+            ["book": .string(book.rawValue)]
         }
     }
 }

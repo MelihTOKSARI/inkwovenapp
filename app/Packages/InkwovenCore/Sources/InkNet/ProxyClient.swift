@@ -12,6 +12,9 @@ public struct ProxyEndpoints: Sendable {
     public var books: URL { baseURL.appending(path: "v1/books") }
     public var config: URL { baseURL.appending(path: "v1/config") }
     public var report: URL { baseURL.appending(path: "v1/report") }
+    public var video: URL { baseURL.appending(path: "v1/video") }
+    public var credits: URL { baseURL.appending(path: "v1/credits") }
+    public var creditsGrant: URL { credits.appending(path: "grant") }
 }
 
 /// App-attest + anonymous user token; Sign in with Apple upgrades the token.
@@ -38,6 +41,54 @@ struct ExchangeRequestBody: Encodable {
     var snapshotBase64: String?
     var digest: String
     var ticketID: String?
+}
+
+/// A user-triggered request for a moving picture (task J4). The client names
+/// the brief the Book produced and mints its own job id; it never supplies
+/// prompt text, and it never names a price — what a clip costs, and whether
+/// this one is free, is the proxy's decision.
+///
+/// `videoID` is the idempotency key: a double-tap, a retry, or a relaunch that
+/// re-asks for the same clip all resolve to one generation and one charge.
+struct VideoRequestBody: Encodable {
+    var briefID: String
+    var videoID: String
+}
+
+/// What the wallet holds, as the proxy reports it. Free clips ride along so
+/// the affordance can be honest about what a tap spends before it commits.
+public struct WalletView: Equatable, Sendable, Codable {
+    public var balance: Int
+    public var available: Int
+    public var freeClipsRemaining: Int
+    public var freeClipsOpen: Bool
+
+    public init(balance: Int, available: Int, freeClipsRemaining: Int, freeClipsOpen: Bool) {
+        self.balance = balance
+        self.available = available
+        self.freeClipsRemaining = freeClipsRemaining
+        self.freeClipsOpen = freeClipsOpen
+    }
+
+    /// What the next clip would spend. The proxy makes the real decision — this
+    /// only decides which sentence the page shows before the tap.
+    public var nextClipIsFree: Bool { freeClipsRemaining > 0 && freeClipsOpen }
+    public var canAffordClip: Bool { nextClipIsFree || available > 0 }
+}
+
+/// A verified consumable purchase, forwarded so the server-side wallet can
+/// credit it. StoreKit verified the transaction on device; the amount is the
+/// proxy's to decide from the product id.
+public struct VialGrantPayload: Equatable, Sendable, Encodable {
+    public var productID: String
+    public var transactionID: String
+    public var jws: String
+
+    public init(productID: String, transactionID: String, jws: String) {
+        self.productID = productID
+        self.transactionID = transactionID
+        self.jws = jws
+    }
 }
 
 /// One user-triggered report of a reply (guideline 1.2). Assembled only at
@@ -210,6 +261,72 @@ public final class ProxyClient: Sendable {
         }
     }
 
+    /// One moving picture, requested because the reader tapped (task J4).
+    ///
+    /// The stream is the wait: generation takes minutes, so the server
+    /// heartbeats and the chunks (`videoIntent` → `videoFinal` / `videoFailed`)
+    /// arrive as they happen. Deliberately NOT retried: a retry here is a
+    /// second generation, and the money-safe retry is the caller re-asking with
+    /// the same `videoID`, which the server resolves to one clip and one charge.
+    public func video(
+        briefID: String,
+        videoID: UUID
+    ) -> AsyncThrowingStream<ReplyChunk, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var request = URLRequest(url: endpoints.video)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+                    // A clip outlasts the default resource timeout; the server
+                    // owns the real deadline and answers with an event.
+                    request.timeoutInterval = 420
+                    request.httpBody = try JSONEncoder().encode(
+                        VideoRequestBody(briefID: briefID, videoID: videoID.uuidString)
+                    )
+                    try await runAttempt(request, into: continuation) {}
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: Self.mapped(error))
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// The wallet as the server sees it, including the free-clip balance.
+    public func wallet() async throws -> WalletView {
+        var request = URLRequest(url: endpoints.credits)
+        request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        do {
+            let (data, response) = try await session.data(for: request)
+            try Self.check(response)
+            return try JSONDecoder().decode(WalletView.self, from: data)
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
+    /// Forwards a verified consumable purchase so the server can credit it.
+    /// The transaction id is the idempotency key, so re-sending a receipt the
+    /// server already honoured credits nothing further.
+    public func grantVials(_ payload: VialGrantPayload) async throws {
+        var request = URLRequest(url: endpoints.creditsGrant)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        request.setValue(payload.transactionID, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try JSONEncoder().encode(payload)
+        do {
+            let (_, response) = try await session.data(for: request)
+            try Self.check(response)
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
     public func preupload(_ payload: SnapshotPayload) async throws -> UploadTicket {
         var request = URLRequest(url: endpoints.preupload)
         request.httpMethod = "POST"
@@ -263,6 +380,8 @@ public final class ProxyClient: Sendable {
         switch http.statusCode {
         case 200...299:
             return
+        case 402:
+            throw ProxyError.paymentRequired
         case 422:
             throw ProxyError.moderated
         case 429:
