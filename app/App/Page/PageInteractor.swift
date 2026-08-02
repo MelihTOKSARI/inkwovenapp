@@ -604,8 +604,15 @@ final class PageInteractor {
             await self.analytics.track(.videoRequested(book: self.book, free: wasFree))
             var assembler = ReplyAssembler()
             var delivered = false
+            // The server's own reason for a clip that never came. Without it a
+            // moderation rejection and a provider outage look identical in the
+            // funnel, and those two numbers mean very different things.
+            var serverFailure: String?
             do {
                 for try await chunk in self.proxy.video(briefID: verdict.briefID, videoID: videoID) {
+                    if case .videoFailed(let failure) = chunk {
+                        serverFailure = failure.reason
+                    }
                     for output in assembler.consume(chunk) {
                         switch output {
                         case .playVideo(let url):
@@ -629,8 +636,10 @@ final class PageInteractor {
                 } else {
                     // The stream ended without a clip: treat it as a failure
                     // so the page never waits forever on a picture that is
-                    // not coming.
-                    self.failVideo(.badResponse)
+                    // not coming. A server-stated reason wins over the generic
+                    // one — "moderated" and "the provider fell over" are the
+                    // same non-event to the reader and very different to us.
+                    self.failVideo(serverFailure == "moderated" ? .moderated : .badResponse)
                 }
             } catch is CancellationError {
                 // The reader left. The server sees the disconnect and releases;
