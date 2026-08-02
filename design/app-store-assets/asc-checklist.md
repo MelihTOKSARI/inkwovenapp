@@ -53,7 +53,9 @@ Monetization → Subscriptions:
 - [ ] Add the localized display name + description each product requires, or they
       stay in "Missing Metadata" and cannot be submitted.
 - [ ] Do **not** create consumable credit packs or Bindery products — v1 sells
-      only these two subscriptions.
+      only these two subscriptions. The credit machinery is built but the video
+      modality it funds is unbound; see `credits.md` for the spec and the
+      repricing it needs before it can ship.
 - [ ] Enrol in the **App Store Small Business Program** (15% commission, not 30%).
 
 ## 4. Attach the subscriptions to the version
