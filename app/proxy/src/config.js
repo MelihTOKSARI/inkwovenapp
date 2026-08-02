@@ -31,13 +31,32 @@ export const CONFIG = {
     // low ceiling keeps the reports table from becoming a free upload target.
     reportsPerUserPerMinute: 3,
     reportsPerIPPerMinute: 10,
+    // /v1/video holds an SSE stream for minutes and each accepted request
+    // costs real dollars at fal. Two a minute lets a genuine "try again"
+    // through while making a request loop useless as a cost weapon.
+    videosPerUserPerMinute: 2,
+    videosPerIPPerMinute: 6,
   },
-  onboardingCreditGrant: 1,
   // What each modality costs from the credit wallet. Ink and images are
   // covered by the subscription today, so they cost 0 and the reserve/settle
   // path is a no-op for them; video (vials) is the metered modality. Raising
   // a value here turns metering on for that modality with no code change.
   exchangeCosts: { ink: 0, image: 0, video: 1 },
+  // Moving pictures (tasks J1/J8). Served to the client so the affordance can
+  // be honest about what a tap spends, and tunable without a release.
+  video: {
+    // 2 free clips per user, LIFETIME — replaces onboardingCreditGrant, which
+    // handed a credit at install before any intent to pay. The count is
+    // server-authoritative: the client never grants a free clip.
+    freeClipsPerUser: 2,
+    // Global ceiling on free clips per calendar month, counted server-side
+    // across all users. When it closes, the free path fails closed in fiction
+    // ("the ink must rest") — a viral week must not produce a bill nobody
+    // agreed to. 2,000 clips ≈ $915/mo at the $0.457 effective clip cost
+    // (design/app-store-assets/credits.md §2/§4).
+    freeClipMonthlyCeiling: 2000,
+    clipSeconds: 5,
+  },
 };
 
 // Server-only ceilings. NOT served to the client.
@@ -75,6 +94,25 @@ export const LIMITS = {
   heartbeatIntervalMS: 15_000,
   // Time to receive a request; SSE responses are unbounded by this.
   requestTimeoutMS: 30_000,
+  // -- moving pictures (Epic J) ---------------------------------------------
+  // Video is minutes, not seconds, so it gets its own ceilings rather than
+  // inheriting the image path's 90s. The stream deadline outlasts the
+  // generation timeout so the client always hears the failure as an event,
+  // never as a dead socket.
+  videoGenerationTimeoutMS: 360_000,
+  videoStreamDeadlineMS: 420_000,
+  videoQueuePollMS: 3_000,
+  // A verdict brief must outlive the reading of the reply (the user taps when
+  // they tap), but not become a permanent free-form generation token.
+  videoBriefTTLms: 30 * 60_000,
+  maxBriefChars: 600,
+  // Replies below this length are never offered as scenes — a two-word Oracle
+  // riddle costs no classifier call. Bias toward not offering.
+  minConvertibleReplyChars: 80,
+  // The reply text is capped before it reaches the verdict classifier.
+  maxVerdictReplyChars: 4_000,
+  // /v1/credits/grant carries a StoreKit JWS (a few KB of base64).
+  grantBodyLimit: 16 * 1024,
 };
 
 /**
@@ -100,5 +138,26 @@ export function createPricing(env = process.env) {
     const input = ((usage.inputTokens ?? 0) / 1_000_000) * (rate.inputPer1M ?? 0);
     const output = ((usage.outputTokens ?? 0) / 1_000_000) * (rate.outputPer1M ?? 0);
     return Number((input + output).toFixed(8));
+  };
+}
+
+/**
+ * Video rate card, supplied at deploy time as INK_VIDEO_PRICING:
+ *   {"kling-video-v3-standard":{"perSecond":0.084}}
+ * fal bills video PER SECOND of clip, not per token, so it cannot ride the
+ * token card above (deployment.md §6.6). Same philosophy: with no card the
+ * clip log carries a truthful null, never an invented number.
+ */
+export function createVideoPricing(env = process.env) {
+  let card = {};
+  try {
+    card = env.INK_VIDEO_PRICING ? JSON.parse(env.INK_VIDEO_PRICING) : {};
+  } catch {
+    card = {};
+  }
+  return function priceForClip(model, seconds) {
+    const rate = card[model];
+    if (!rate || typeof rate.perSecond !== 'number') return null;
+    return Number((seconds * rate.perSecond).toFixed(8));
   };
 }

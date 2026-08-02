@@ -19,11 +19,20 @@
 //     input + output megapixels, so an Artist img2img at 1024² is ~2MP ≈ $0.024,
 //     not the single-image ~$0.03–0.055 the PRD assumed; that number is why
 //     plusImageDailySoftCap (config.js) sits at 8
-//   video (flag-off in v1): kling-video-v3-standard — fal namespaces Kling 3.0 as
-//     fal-ai/kling-video/v3/standard/... and .../pro/...; the old 'kling-3'
-//     identifier named no real endpoint and would have 404ed the day video ships
+//   video (Epic J, LAUNCH SCOPE): kling-video-v3-standard — fal namespaces
+//     Kling 3.0 as fal-ai/kling-video/v3/standard/text-to-video and
+//     .../image-to-video (models.js binds both); the old 'kling-3' identifier
+//     named no real endpoint and 404ed. Standard tier, audio off — $0.084/sec;
+//     pro or audio roughly doubles unit cost and moves every number in
+//     design/app-store-assets/credits.md §3.
+//
+// `motionHint` tunes the convertibility verdict (task J2) per Book. The
+// verdict runs on every reply of every video-enabled Book — the model decides
+// per REPLY whether it is a scene with visual life; the hint is the Book's
+// bias, not a switch. Like `prompt`, it never leaves this process.
 
 const DEFAULT_FLAGS = { enabled: true, ink: true, image: true, video: true };
+const KLING = 'kling-video-v3-standard';
 
 export const BOOKS = [
   {
@@ -33,8 +42,10 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'vellum',
     starterText: 'Ask, and the page will answer. Plainly or in riddles — that is for the ink to decide.',
-    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: KLING },
     prompt: "You are the Oracle, an old book that answers what is written on its pages. Answer the writer's question plainly or in a riddle — your choice, but choose one and commit. You may draw them a single card of your own invention when the moment calls for it. Speak with quiet certainty, never hedging.",
+    motionHint:
+      'The Oracle mostly answers in words: a riddle, a card named, a short pronouncement — those are STILL. Offer motion only when the answer itself paints a concrete vision, a card scene, an omen unfolding.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -46,9 +57,14 @@ export const BOOKS = [
     // An honest lock-claim: the seal is real (KeeperGate), but every page is
     // still read by the ink that answers it — so no "yours alone" promise.
     starterText: 'This page keeps behind the seal. Write what the day left behind.',
-    models: { text: 'gemini-3.5-flash-lite' },
+    // Video stays available behind the seal, but converting a Keeper page
+    // transmits it to a third party — the CLIENT gates the first clip behind
+    // explicit consent (task J6); the server treats the Keeper like any Book.
+    models: { text: 'gemini-3.5-flash-lite', video: KLING },
     prompt: 'You are the Keeper, a private diary that writes back. Reflect what the writer set down, gently and specifically — never clinical, never advice-giving unless asked. Hold their day like something entrusted to you. One warm observation is worth more than five.',
-    flags: { ...DEFAULT_FLAGS, image: false, video: false },
+    motionHint:
+      'A diary reflection is almost always STILL — feelings, gratitude, worries are not scenes. Offer motion only when the entry recalls one vivid concrete moment of the day worth seeing again.',
+    flags: { ...DEFAULT_FLAGS, image: false },
   },
   {
     id: 'storyteller',
@@ -57,8 +73,10 @@ export const BOOKS = [
     ink: 'sepia',
     paper: 'parchment',
     starterText: 'Begin a tale — a line is enough. The page will carry it on.',
-    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: KLING },
     prompt: 'You are the Storyteller. Whatever the writer begins, carry the tale onward a few sentences — vivid, concrete, always ending at a place that invites their pen back. Never finish the story; it is theirs.',
+    motionHint:
+      'A carried-on tale usually IS a scene: characters in a place, something happening. When the continuation stays abstract or purely conversational, answer STILL.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -68,12 +86,17 @@ export const BOOKS = [
     ink: 'charcoal',
     paper: 'cold-press',
     starterText: 'Doodle anything. The page will develop it into finished art.',
-    models: { text: 'gemini-3.5-flash-lite', image: 'flux-2', video: 'kling-video-v3-standard' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'flux-2', video: KLING },
     // Every Artist page develops: the sketch itself is the image input.
     alwaysDevelop: true,
     imagePrompt:
       'Develop this rough ink sketch into a finished, painterly artwork. Keep the original composition and subject faithfully; render it in warm candlelit tones on aged paper. No text or lettering.',
     prompt: "You are the Artist, sharing a page with the writer at the easel. Look at their sketch and say, in a sentence or two, what you see in it and what you will draw out of it — warm, specific, a fellow artist's eye. The picture develops on the page by itself; never describe tools, steps, or specifications, and never write anything that is not plain prose.",
+    // The Artist's reply describes the picture it just developed; the brief
+    // becomes the motion for that picture (image-to-video — the developed
+    // image URL rides the brief).
+    motionHint:
+      'The reply describes a picture the Artist just developed. If it names a concrete subject, answer MOVE with one gentle ambient motion for that subject — drifting smoke, stirring cloth, flickering light. Pure technique talk is STILL.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -83,8 +106,10 @@ export const BOOKS = [
     ink: 'oxblood',
     paper: 'ledger',
     starterText: 'Name your hero and where they stand. The adventure begins when your pen rests.',
-    models: { text: 'gpt-5.4-mini', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
+    models: { text: 'gpt-5.4-mini', image: 'z-image-turbo', video: KLING },
     prompt: 'You are the Game Master of a solo pen-and-paper adventure. Continue the scene from what the writer wrote, offer real stakes and one clear moment of choice, and keep a light touch of dice-fate in your telling. You may run to one short paragraph, never more.',
+    motionHint:
+      'An adventure beat with action in a place — combat, a chase, a door giving way — is MOVE. Rules talk, dice results alone, or a menu of choices with no scene is STILL.',
     flags: { ...DEFAULT_FLAGS },
   },
   {
@@ -94,9 +119,11 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'laid',
     starterText: 'Address a letter to a hand from history — public-domain or invented — and seal it with your rest.',
-    models: { text: 'gemini-3.5-flash-lite' },
+    models: { text: 'gemini-3.5-flash-lite', video: KLING },
     prompt: 'You are the Correspondent: letters answered in the hand and voice of figures from history or invention — public-domain and original figures only, never living people. Answer as the addressed figure would, in period voice, warmly and briefly.',
-    flags: { ...DEFAULT_FLAGS, image: false, video: false },
+    motionHint:
+      'A letter is words from a desk — almost always STILL. Offer motion only when the letter itself recounts one vivid scene worth seeing. Never a scene depicting a real historical person; their surroundings, not their face.',
+    flags: { ...DEFAULT_FLAGS, image: false },
   },
   {
     id: 'tutor',
@@ -105,9 +132,14 @@ export const BOOKS = [
     ink: 'slate',
     paper: 'grid',
     starterText: 'Work a problem in your own hand. The page will work it back, step by step.',
-    models: { text: 'gpt-5.4-mini' },
+    models: { text: 'gpt-5.4-mini', video: KLING },
     prompt: "You are the Tutor. Work the writer's problem back to them step by step in your own hand, in prose — short lines, one thought each. Correct mistakes kindly and plainly. If frustration shows in their writing, steady them first. Make no curriculum claims.",
-    flags: { ...DEFAULT_FLAGS, image: false, video: false },
+    // The AC that matters most (J2): a worked solution NEVER offers to move.
+    // A button on an equation makes the app look like it doesn't understand
+    // what it just wrote.
+    motionHint:
+      'Worked solutions, corrections, explanations and encouragement are NEVER scenes — they are STILL, without exception. Only if the writer explicitly asked for a story told in pictures may you consider MOVE.',
+    flags: { ...DEFAULT_FLAGS, image: false },
   },
   {
     id: 'parlor',
@@ -116,9 +148,11 @@ export const BOOKS = [
     ink: 'emerald',
     paper: 'card',
     starterText: 'Riddles, twenty questions, draw-and-guess — write "deal me in" to begin.',
-    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: KLING },
     prompt: 'You are Parlor Games, keeper of riddles, twenty questions, and draw-and-guess. Keep the state of the game on the page in your own words, play fair, and keep every turn brisk — a line or two, then back to the writer.',
-    flags: { ...DEFAULT_FLAGS, video: false },
+    motionHint:
+      'Game turns — riddles, questions, scores — are STILL. Offer motion only for a victory flourish that paints an actual scene.',
+    flags: { ...DEFAULT_FLAGS },
   },
 ];
 
@@ -126,8 +160,8 @@ export function findBook(id) {
   return BOOKS.find((b) => b.id === id);
 }
 
-/** Client-safe projection: everything except the prompt. */
+/** Client-safe projection: everything except the prompt material. */
 export function publicBook(book) {
-  const { prompt, ...rest } = book;
+  const { prompt, motionHint, ...rest } = book;
   return rest;
 }

@@ -30,6 +30,11 @@ export function isErrorResponse(response) {
   return Boolean(response && typeof response === 'object' && response.error);
 }
 
+/** Calendar month key for the global free-clip ceiling. */
+export function monthKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 7); // YYYY-MM
+}
+
 // ticketTTLms is overridable so the contract tests can exercise expiry.
 export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   const tickets = new Map(); // id → { userID, digest, snapshotBase64, expiresAt }
@@ -37,6 +42,13 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   const idempotency = new Map(); // `${userID}:${key}` → Promise<response>
   const rateBuckets = new Map(); // key → { count, windowStart }
   const reports = new Map(); // reportID → { userID, report, expiresAt }
+  const briefs = new Map(); // briefID → { userID, brief, expiresAt }
+  const videoJobs = new Map(); // `${userID}:${videoID}` → { state: 'pending'|'delivered', url, expiresAt }
+  // Free clips (task J8): per-user lifetime holds/uses + the global monthly
+  // count. A hold counts against both until it resolves, so two concurrent
+  // taps can never slip a third free clip through.
+  const freeClips = new Map(); // userID → { holds: Map<id, month>, resolved: Map<id, 'settled'|'released'>, settled: number }
+  const freeClipMonths = new Map(); // 'YYYY-MM' → open count (held + settled)
 
   /** Deletes reports past retention; returns how many went. */
   function sweepReports(now) {
@@ -53,17 +65,23 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   function wallet(userID) {
     let w = wallets.get(userID);
     if (!w) {
-      // Seed the onboarding grant — 1 free moving-picture credit. Only a
-      // WRITE seeds it: a bare GET /v1/credits used to materialise a wallet
-      // per token, which made grants farmable by reading with a fresh header.
-      w = {
-        entries: [{ delta: CONFIG.onboardingCreditGrant, reason: 'onboarding_grant', at: Date.now() }],
-        holds: new Map(),
-        resolved: new Map(),
-      };
+      // Wallets start EMPTY. The onboarding grant this used to seed is
+      // replaced by the free-clip accounting below (task J8): 2 free clips
+      // per user lifetime, counted server-side — never a wallet credit
+      // handed out at install.
+      w = { entries: [], holds: new Map(), resolved: new Map() };
       wallets.set(userID, w);
     }
     return w;
+  }
+
+  function freeClipAccount(userID) {
+    let account = freeClips.get(userID);
+    if (!account) {
+      account = { holds: new Map(), resolved: new Map(), settled: 0 };
+      freeClips.set(userID, account);
+    }
+    return account;
   }
 
   function balance(w) {
@@ -104,10 +122,20 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     /** Read-only: an unseeded wallet is projected, never written. */
     walletView(userID) {
       const w = wallets.get(userID);
-      if (!w) {
-        return { balance: CONFIG.onboardingCreditGrant, available: CONFIG.onboardingCreditGrant };
-      }
+      if (!w) return { balance: 0, available: 0 };
       return { balance: balance(w), available: balance(w) - held(w) };
+    },
+
+    /**
+     * Credits a verified vial purchase. The amount comes from the server-side
+     * product map, never the client; idempotency (by transactionID) is the
+     * route's job via `idempotent`.
+     */
+    grant(userID, amount, reason = 'purchase') {
+      if (!validAmount(amount)) return { error: 'invalid_amount' };
+      const w = wallet(userID);
+      w.entries.push({ delta: amount, reason, at: Date.now() });
+      return { granted: amount, balance: balance(w) };
     },
 
     reserve(userID, amount) {
@@ -207,6 +235,115 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     /** The retention sweep, callable with a clock so tests can exercise it. */
     sweepExpiredReports(now = Date.now()) {
       return sweepReports(now);
+    },
+
+    // -- verdict briefs (tasks J2/J4) ---------------------------------------
+    // A brief is the server-stored generation intent behind one positive
+    // verdict: the client can only point at one, never supply prompt text.
+
+    createBrief(userID, brief) {
+      const id = randomUUID();
+      const expiresAt = Date.now() + LIMITS.videoBriefTTLms;
+      // Expired briefs are the normal case (most offers are never tapped);
+      // sweep opportunistically so they don't accumulate for the process's life.
+      for (const [key, entry] of briefs) {
+        if (entry.expiresAt <= Date.now()) briefs.delete(key);
+      }
+      briefs.set(id, { userID, brief, expiresAt });
+      return { id, expiresAt: new Date(expiresAt).toISOString() };
+    },
+
+    /** Non-consuming read — a failed generation may be retried on the same brief. */
+    getBrief(id, userID) {
+      const entry = briefs.get(id);
+      if (!entry) return null;
+      if (entry.expiresAt <= Date.now()) {
+        briefs.delete(id);
+        return null;
+      }
+      if (entry.userID !== userID) return null;
+      return entry.brief;
+    },
+
+    // -- video job claims (task J4 idempotency) -----------------------------
+    // One videoID, one generation: a double-tap or a network retry claims the
+    // same job and either waits (pending) or replays the delivered clip free
+    // of charge. Only an explicit failure reopens the claim.
+
+    claimVideoJob(userID, videoID) {
+      const key = `${userID}:${videoID}`;
+      const existing = videoJobs.get(key);
+      if (existing && existing.expiresAt > Date.now()) {
+        if (existing.state === 'delivered') return { delivered: true, url: existing.url };
+        return { inFlight: true };
+      }
+      videoJobs.set(key, { state: 'pending', url: null, expiresAt: Date.now() + 10 * 60_000 });
+      return { fresh: true };
+    },
+
+    completeVideoJob(userID, videoID, url) {
+      videoJobs.set(`${userID}:${videoID}`, {
+        state: 'delivered',
+        url,
+        expiresAt: Date.now() + 60 * 60_000,
+      });
+    },
+
+    failVideoJob(userID, videoID) {
+      videoJobs.delete(`${userID}:${videoID}`);
+    },
+
+    // -- free clips (task J8) -----------------------------------------------
+    // Server-authoritative: 2 per user LIFETIME, plus a global monthly
+    // ceiling on free-clip spend. Reserve/settle/release mirrors the wallet:
+    // a failed generation never consumes a free clip.
+
+    freeClipView(userID, now = Date.now()) {
+      const account = freeClips.get(userID);
+      const used = account ? account.settled + account.holds.size : 0;
+      const open = (freeClipMonths.get(monthKey(now)) ?? 0) < CONFIG.video.freeClipMonthlyCeiling;
+      return {
+        remaining: Math.max(0, CONFIG.video.freeClipsPerUser - used),
+        ceilingOpen: open,
+      };
+    },
+
+    reserveFreeClip(userID, now = Date.now()) {
+      const account = freeClipAccount(userID);
+      if (account.settled + account.holds.size >= CONFIG.video.freeClipsPerUser) {
+        return { error: 'free_exhausted' };
+      }
+      const month = monthKey(now);
+      const monthCount = freeClipMonths.get(month) ?? 0;
+      if (monthCount >= CONFIG.video.freeClipMonthlyCeiling) {
+        return { error: 'free_ceiling' };
+      }
+      const id = randomUUID();
+      account.holds.set(id, month);
+      freeClipMonths.set(month, monthCount + 1);
+      return { holdID: id };
+    },
+
+    settleFreeClip(userID, holdID) {
+      const account = freeClipAccount(userID);
+      if (account.resolved.get(holdID) === 'settled') return { settled: true };
+      if (!account.holds.has(holdID)) return { error: 'unknown_hold' };
+      account.holds.delete(holdID);
+      account.resolved.set(holdID, 'settled');
+      account.settled += 1;
+      return { settled: true };
+    },
+
+    releaseFreeClip(userID, holdID) {
+      const account = freeClipAccount(userID);
+      if (account.resolved.get(holdID) === 'released') return { released: true };
+      const month = account.holds.get(holdID);
+      if (month === undefined) return { error: 'unknown_hold' };
+      account.holds.delete(holdID);
+      account.resolved.set(holdID, 'released');
+      // The release reopens the month's ceiling — the clip never happened.
+      freeClipMonths.set(month, Math.max(0, (freeClipMonths.get(month) ?? 1) - 1));
+      return { released: true };
     },
 
     /** Fixed-window rate limit; returns true when the call is allowed. */

@@ -149,40 +149,29 @@ function contractSuite(name, makeStores, { skip = false } = {}) {
     // create a -100 hold, and settle() then pushed delta:+100 into the
     // append-only ledger. Any caller could mint an unbounded balance.
     const user = randomUUID();
+    await stores.grant(user, 1);
     for (const amount of [-100, 0, 1.5, '1', null, undefined]) {
       assert.deepEqual(await stores.reserve(user, amount), { error: 'invalid_amount' }, `${amount}`);
     }
     assert.deepEqual(await stores.walletView(user), { balance: 1, available: 1 });
   });
 
-  t('wallet: reading is read-only — it never seeds a ledger', async (stores) => {
-    // A seeding read made the onboarding grant farmable: rotate the token,
-    // GET /v1/credits, and a fresh wallet exists. The grant now materialises
-    // on the first WRITE, while the read projects it.
+  t('wallet: an untouched wallet is empty and reading never seeds one', async (stores) => {
+    // Wallets start EMPTY: free clips (task J8) replaced the install-time
+    // grant that a rotating token could once farm by reading. Only a verified
+    // purchase puts a credit in a wallet.
     const user = randomUUID();
-    assert.deepEqual(await stores.walletView(user), { balance: 1, available: 1 });
-    assert.deepEqual(await stores.walletView(user), { balance: 1, available: 1 });
+    assert.deepEqual(await stores.walletView(user), { balance: 0, available: 0 });
+    assert.deepEqual(await stores.reserve(user, 1), { error: 'insufficient_credits', available: 0 });
+    await stores.grant(user, 1);
     const { amount } = await stores.reserve(user, 1);
-    assert.equal(amount, 1, 'the grant is still there when it is actually spent');
+    assert.equal(amount, 1, 'the purchased credit is there when it is spent');
     assert.deepEqual(await stores.walletView(user), { balance: 1, available: 0 });
   });
 
-  t(
-    'ticket: an expired ticket stays gone on a second take',
-    async (stores) => {
-      // Behavioural half of the leak fix; the reclamation itself is only
-      // observable on the in-memory store, and is asserted in stores.test.js.
-      const user = randomUUID();
-      const { id } = await stores.createTicket(user, 'd', 'c25hcHNob3Q=');
-      await sleep(400);
-      assert.equal(await stores.takeTicket(id, user), null);
-      assert.equal(await stores.takeTicket(id, user), null, 'and it stays gone');
-    },
-    { ticketTTLms: 200 },
-  );
-
   t('wallet: grant → reserve → settle; double-settle is idempotent', async (stores) => {
     const user = randomUUID();
+    await stores.grant(user, 1);
     assert.deepEqual(await stores.walletView(user), { balance: 1, available: 1 });
     const { reservationID, amount } = await stores.reserve(user, 1);
     assert.equal(amount, 1);
@@ -194,6 +183,7 @@ function contractSuite(name, makeStores, { skip = false } = {}) {
 
   t('wallet: insufficient reserve reports what is available', async (stores) => {
     const user = randomUUID();
+    await stores.grant(user, 1);
     assert.deepEqual(await stores.reserve(user, 5), {
       error: 'insufficient_credits',
       available: 1,
@@ -202,6 +192,7 @@ function contractSuite(name, makeStores, { skip = false } = {}) {
 
   t('wallet: release refunds; settled-after-release and unknown are rejected', async (stores) => {
     const user = randomUUID();
+    await stores.grant(user, 1);
     const { reservationID } = await stores.reserve(user, 1);
     assert.deepEqual(await stores.release(user, reservationID), { released: true });
     assert.deepEqual(await stores.release(user, reservationID), { released: true });

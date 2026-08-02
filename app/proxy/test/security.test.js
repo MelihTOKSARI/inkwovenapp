@@ -75,12 +75,14 @@ test('a negative reserve amount is rejected, not minted into a balance', async (
   // And the balance is untouched: the old path created a -100 hold, so
   // available became balance - (-100) = 101, and settling pushed +100 in.
   const wallet = await app.inject({ method: 'GET', url: '/v1/credits', headers: USER });
-  assert.deepEqual(wallet.json(), { balance: 1, available: 1 });
+  assert.equal(wallet.json().balance, 0);
+  assert.equal(wallet.json().available, 0);
   await app.close();
 });
 
 test('the wallet itself refuses a bad amount, independent of the schema', async () => {
   const stores = createStores();
+  stores.grant('u', 1);
   for (const amount of [-100, 0, 1.5, '1', NaN, Infinity, Number.MAX_SAFE_INTEGER]) {
     assert.deepEqual(await stores.reserve('u', amount), { error: 'invalid_amount' }, `${amount}`);
   }
@@ -109,16 +111,21 @@ test('GET /v1/credits is read-only: reading with a fresh token mints nothing', a
       headers: { 'x-ink-user': `farmed-${i}` },
     });
   }
-  // Reading projects the grant but writes no wallet, so a rotating token
-  // cannot accumulate anything. The grant still materialises on first spend.
-  const spend = await stores.reserve('farmed-0', 1);
-  assert.equal(spend.amount, 1);
-  assert.deepEqual(await stores.walletView('farmed-0'), { balance: 1, available: 0 });
+  // A rotating token accumulates nothing: reading writes no wallet, and since
+  // task J8 there is no install-time grant for it to project either. Free
+  // clips are counted per user server-side, never handed to the wallet.
+  assert.deepEqual(await stores.walletView('farmed-0'), { balance: 0, available: 0 });
+  assert.deepEqual(await stores.reserve('farmed-0', 1), {
+    error: 'insufficient_credits',
+    available: 0,
+  });
   await app.close();
 });
 
 test('a failed reserve is not replayed for the key’s lifetime', async () => {
-  const app = build();
+  const stores = createStores();
+  stores.grant('user-1', 1);
+  const app = build({ stores });
   await app.inject({
     method: 'POST',
     url: '/v1/credits/reserve',
@@ -134,6 +141,7 @@ test('a failed reserve is not replayed for the key’s lifetime', async () => {
   assert.equal(broke.statusCode, 402);
 
   // The user buys credits; the correct retry reuses the same key.
+  stores.grant('user-1', 1);
   const { reservationID } = JSON.parse(
     (
       await app.inject({

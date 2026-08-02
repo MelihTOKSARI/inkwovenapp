@@ -8,20 +8,28 @@
 import Fastify from 'fastify';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BOOKS, findBook, publicBook } from './books.js';
-import { CONFIG, LIMITS, createPricing } from './config.js';
+import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
 import { keyPart } from './keys.js';
 import {
   createTextProviderFactory,
   createImageProviderFactory,
+  createVideoProviderFactory,
+  createVerdictProviderFactory,
+  createPromptModerator,
   composeSystemPrompt,
+  composeVideoPrompt,
   sniffImageMime,
   sniffImageMimeBase64,
   ProviderError,
   CRISIS_SENTINEL,
   CRISIS_PAYLOAD,
 } from './models.js';
+
+// What each consumable credits, decided HERE — the client names a product,
+// never an amount (design/app-store-assets/credits.md §3).
+const VIAL_GRANTS = { vials_small: 3, vials_medium: 8, vials_large: 20 };
 
 const ECHO_REPLY =
   'The page drinks your ink and stirs. Ask again when the real models are bound; for now this echo proves the stream.';
@@ -87,6 +95,49 @@ const ticketParamsSchema = {
   },
 };
 
+// The client points at a server-stored brief and names its own job id; it
+// never supplies prompt text. The videoID doubles as the retry key: one id,
+// one generation, however many times the request is re-sent.
+const videoSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['briefID', 'videoID'],
+    properties: {
+      briefID: { type: 'string', pattern: UUID_PATTERN },
+      videoID: { type: 'string', pattern: UUID_PATTERN },
+    },
+  },
+};
+
+const grantSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['productID', 'transactionID', 'jws'],
+    properties: {
+      productID: { type: 'string', minLength: 1, maxLength: 64 },
+      transactionID: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' },
+      jws: { type: 'string', minLength: 1, maxLength: 12_288 },
+    },
+  },
+};
+
+/**
+ * Reads the payload of a StoreKit 2 JWS without verifying its signature —
+ * see the /v1/credits/grant route for why that is currently the accepted
+ * posture and what turns it off.
+ */
+function decodeJWSPayload(jws) {
+  const parts = typeof jws === 'string' ? jws.split('.') : [];
+  if (parts.length !== 3) return null;
+  try {
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 // Loose on purpose: rejects garbage without turning a clock-skewed device's
 // report away over a timestamp format.
 const ISO_DATE_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}';
@@ -130,6 +181,94 @@ const reportSchema = {
   },
 };
 
+/**
+ * SSE plumbing shared by /v1/exchange and /v1/video: one abort controller per
+ * stream, tripped by a client disconnect or the deadline; raw writes that
+ * honour backpressure and never throw; a heartbeat that keeps intermediaries
+ * from idling the connection out mid-generation.
+ */
+function createStreamChannel(reply, { deadlineMS, heartbeatMS }) {
+  const abort = new AbortController();
+  let clientGone = false;
+  let heartbeat = null;
+  const giveUp = () => {
+    if (!clientGone) {
+      clientGone = true;
+      abort.abort();
+    }
+  };
+  const deadline = setTimeout(giveUp, deadlineMS);
+  const cleanup = () => {
+    clearTimeout(deadline);
+    if (heartbeat) clearInterval(heartbeat);
+  };
+  // Writes to a socket the peer already dropped must never surface as an
+  // unhandled 'error' event.
+  reply.raw.on('error', giveUp);
+  // The RESPONSE's 'close' is the reliable peer-went-away signal: the request
+  // stream has already been consumed by the body parser by the time a handler
+  // runs, so its own 'close' has usually fired and can never be observed
+  // here. writableFinished separates a premature disconnect from our own end().
+  reply.raw.on('close', () => {
+    if (!reply.raw.writableFinished) giveUp();
+  });
+
+  /** Writes to the raw stream, honouring backpressure. Never throws. */
+  const writeRaw = async (chunk) => {
+    const raw = reply.raw;
+    if (clientGone || raw.writableEnded || raw.destroyed) return false;
+    try {
+      if (raw.write(chunk)) return true;
+    } catch {
+      giveUp();
+      return false;
+    }
+    // The socket's buffer is full. Waiting for 'drain' is the difference
+    // between backpressure and queueing a whole generation in process memory
+    // for a client that has stopped reading.
+    await new Promise((resolve) => {
+      const settle = () => {
+        raw.off('drain', settle);
+        abort.signal.removeEventListener('abort', settle);
+        resolve();
+      };
+      raw.once('drain', settle);
+      abort.signal.addEventListener('abort', settle, { once: true });
+    });
+    return !clientGone;
+  };
+
+  return {
+    abort,
+    get clientGone() {
+      return clientGone;
+    },
+    cleanup,
+    send: (event, data) => writeRaw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
+    /** Commits the 200 + SSE headers and starts the heartbeat. hijack() hands
+     * the socket over explicitly; without it Fastify still believes it owns
+     * the response. */
+    open: () => {
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      // SSE comments: the client drops them, intermediaries keep the
+      // connection off their idle timers.
+      heartbeat = setInterval(() => {
+        writeRaw(': ping\n\n').catch(() => {});
+      }, heartbeatMS);
+      heartbeat.unref?.();
+    },
+    end: () => {
+      if (!reply.raw.writableEnded) reply.raw.end();
+    },
+  };
+}
+
 /** Pre-stream provider failures still get a real status; see the exchange route. */
 function statusForProviderError(error) {
   if (error instanceof ProviderError) {
@@ -163,16 +302,28 @@ export function build(options = {}) {
   });
   // Store calls are awaited throughout: the in-memory stores answer
   // synchronously, the Redis/Postgres ones (stores-redis.js) don't.
+  const env = options.env ?? process.env;
   const stores = options.stores ?? createStores();
   const echoDelayMS = options.echoDelayMS ?? Number(process.env.ECHO_DELAY_MS ?? 40);
   const textProviderFor = options.textProviderFactory ?? createTextProviderFactory();
   const imageProviderFor = options.imageProviderFactory ?? createImageProviderFactory();
-  const attestation = options.attestation ?? createAttestationVerifier(options.env ?? process.env);
-  const priceFor = options.priceFor ?? createPricing(options.env ?? process.env);
+  const videoProviderFor = options.videoProviderFactory ?? createVideoProviderFactory(env);
+  const verdictFor = options.verdictFactory ?? createVerdictProviderFactory(env);
+  const moderatePrompt = 'promptModerator' in options ? options.promptModerator : createPromptModerator(env);
+  const attestation = options.attestation ?? createAttestationVerifier(env);
+  const priceFor = options.priceFor ?? createPricing(env);
+  const priceForClip = options.priceForClip ?? createVideoPricing(env);
+  // Purchase-grant verification posture mirrors attest.js: outside production
+  // the decoded receipt is trusted (StoreKit already verified it on-device);
+  // in production the mode must be opted into explicitly or the route fails
+  // closed — a missing secret can never silently accept unverified receipts.
+  const iapMode =
+    options.iapMode ?? env.INK_IAP_MODE ?? (env.NODE_ENV === 'production' ? 'required' : 'anonymous');
   // Overridable so the tests can exercise the deadline and the heartbeat
   // without waiting out the production intervals.
   const streamDeadlineMS = options.streamDeadlineMS ?? LIMITS.streamDeadlineMS;
   const heartbeatMS = options.heartbeatMS ?? LIMITS.heartbeatIntervalMS;
+  const videoStreamDeadlineMS = options.videoStreamDeadlineMS ?? LIMITS.videoStreamDeadlineMS;
 
   app.decorate('stores', stores);
   app.decorate('attestationMode', attestation.mode);
@@ -385,60 +536,14 @@ export function build(options = {}) {
       };
 
       // -- cancellation ------------------------------------------------------
-      // One controller per exchange, aborted by a client disconnect or by the
+      // One channel per exchange, aborted by a client disconnect or by the
       // stream deadline. Without it a user swiping away left the upstream
       // generation running to completion at full cost, delivered to nobody.
-      const abort = new AbortController();
-      let clientGone = false;
-      let heartbeat = null;
-      const giveUp = () => {
-        if (!clientGone) {
-          clientGone = true;
-          abort.abort();
-        }
-      };
-      const deadline = setTimeout(giveUp, streamDeadlineMS);
-      const cleanup = () => {
-        clearTimeout(deadline);
-        if (heartbeat) clearInterval(heartbeat);
-      };
-      // Writes to a socket the peer already dropped must never surface as an
-      // unhandled 'error' event.
-      reply.raw.on('error', giveUp);
-      // The RESPONSE's 'close' is the reliable peer-went-away signal: the
-      // request stream has already been consumed by the body parser by the
-      // time a handler runs, so its own 'close' has usually fired and can
-      // never be observed here. writableFinished separates a premature
-      // disconnect from our own end().
-      reply.raw.on('close', () => {
-        if (!reply.raw.writableFinished) giveUp();
+      const channel = createStreamChannel(reply, {
+        deadlineMS: streamDeadlineMS,
+        heartbeatMS,
       });
-
-      /** Writes to the raw stream, honouring backpressure. Never throws. */
-      const writeRaw = async (chunk) => {
-        const raw = reply.raw;
-        if (clientGone || raw.writableEnded || raw.destroyed) return false;
-        try {
-          if (raw.write(chunk)) return true;
-        } catch {
-          giveUp();
-          return false;
-        }
-        // The socket's buffer is full. Waiting for 'drain' is the difference
-        // between backpressure and queueing a whole generation in process
-        // memory for a client that has stopped reading.
-        await new Promise((resolve) => {
-          const settle = () => {
-            raw.off('drain', settle);
-            abort.signal.removeEventListener('abort', settle);
-            resolve();
-          };
-          raw.once('drain', settle);
-          abort.signal.addEventListener('abort', settle, { once: true });
-        });
-        return !clientGone;
-      };
-      const send = (event, data) => writeRaw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      const { abort, send, cleanup } = channel;
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       // -- crisis gate -------------------------------------------------------
@@ -452,10 +557,14 @@ export function build(options = {}) {
       let crisisServed = false;
       let gateOpen = false; // once true, deltas stream straight through
       let gateHeld = '';
+      // The full reply as served — the convertibility verdict (task J2) judges
+      // it after the stream completes, never on the ttfs-critical path.
+      let replyText = '';
 
       /** Routes one ink delta through the gate. Returns false once the exchange must stop. */
       const sendInk = async (text) => {
         if (gateOpen) {
+          replyText += text;
           await send('ink_delta', { text });
           return true;
         }
@@ -470,6 +579,7 @@ export function build(options = {}) {
         gateOpen = true;
         const held = gateHeld;
         gateHeld = '';
+        replyText += held;
         await send('ink_delta', { text: held });
         return true;
       };
@@ -491,6 +601,7 @@ export function build(options = {}) {
         gateOpen = true;
         const held = gateHeld;
         gateHeld = '';
+        replyText += held;
         await send('ink_delta', { text: held });
       };
 
@@ -537,35 +648,22 @@ export function build(options = {}) {
 
       // -- committed ---------------------------------------------------------
       // Past this point bytes are on the wire and no status can change, so
-      // failures degrade in-fiction. hijack() hands the socket over
-      // explicitly; without it Fastify still believes it owns the response.
-      reply.hijack();
-      reply.raw.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-        connection: 'keep-alive',
-        'x-accel-buffering': 'no',
-      });
-      // SSE comments: the client drops them, intermediaries keep the
-      // connection off their idle timers.
-      heartbeat = setInterval(() => {
-        writeRaw(': ping\n\n').catch(() => {});
-      }, heartbeatMS);
-      heartbeat.unref?.();
+      // failures degrade in-fiction.
+      channel.open();
 
       try {
         if (iterator) {
           let flowing = true;
           if (firstDelta) flowing = await sendInk(firstDelta);
           try {
-            while (flowing && !abort.signal.aborted && !clientGone) {
+            while (flowing && !abort.signal.aborted && !channel.clientGone) {
               const next = await iterator.next();
               if (next.done) break;
               flowing = await sendInk(next.value);
             }
           } catch (error) {
             request.log?.warn?.({ route: 'exchange', book: book.id, error: String(error) });
-            if (!clientGone && !crisisServed) {
+            if (!channel.clientGone && !crisisServed) {
               await flushInk(); // may fail closed into a crisis event
               if (!crisisServed) {
                 await send('ink_delta', { text: 'The ink hesitates — ask again in a moment. ' });
@@ -580,7 +678,7 @@ export function build(options = {}) {
         } else {
           // Echo mode: stream word-by-word so streaming-first is real from day one.
           for (const word of ECHO_REPLY.split(' ')) {
-            if (abort.signal.aborted || clientGone) break;
+            if (abort.signal.aborted || channel.clientGone) break;
             await send('ink_delta', { text: `${word} ` });
             if (echoDelayMS > 0) await sleep(echoDelayMS);
           }
@@ -592,7 +690,8 @@ export function build(options = {}) {
         // but the intent MUST be resolved either way or the client keeps an
         // empty plate forever. A crisis preempts the develop entirely: the
         // client is tearing the fiction down, so no image should follow.
-        if (willDevelop && !crisisServed && !clientGone && !abort.signal.aborted) {
+        let developedURL = null;
+        if (willDevelop && !crisisServed && !channel.clientGone && !abort.signal.aborted) {
           const imageID = randomUUID();
           await send('image_intent', { id: imageID, expectsPreview: false });
           try {
@@ -602,8 +701,12 @@ export function build(options = {}) {
               imageMime: snapshotMime,
               signal: abort.signal,
             });
-            if (url) await send('image_final', { id: imageID, url });
-            else await send('image_error', { id: imageID, reason: 'no_image' });
+            if (url) {
+              developedURL = url;
+              await send('image_final', { id: imageID, url });
+            } else {
+              await send('image_error', { id: imageID, reason: 'no_image' });
+            }
           } catch (error) {
             request.log?.warn?.({
               route: 'exchange',
@@ -615,7 +718,42 @@ export function build(options = {}) {
           }
         }
 
-        if (!clientGone) {
+        // -- convertibility verdict (task J2) --------------------------------
+        // Advisory data on the completed reply: is this a scene with visual
+        // life? Emitted only when positive — absence means no, so the client's
+        // default and every older client agree with the bias toward not
+        // offering. Never on a crisis, never below the length floor (a
+        // two-word riddle costs no classifier call), and never when the video
+        // path couldn't actually generate — an affordance that can't deliver
+        // is worse than none.
+        const assess =
+          book.flags.video && videoProviderFor(book) && !crisisServed && !channel.clientGone
+            ? verdictFor(book)
+            : null;
+        if (assess && replyText.trim().length >= LIMITS.minConvertibleReplyChars) {
+          try {
+            const verdictTimeout = AbortSignal.timeout(10_000);
+            const verdict = await assess({
+              replyText,
+              signal: AbortSignal.any([abort.signal, verdictTimeout]),
+              usage,
+            });
+            if (verdict.convertible && !channel.clientGone) {
+              const created = await stores.createBrief(request.userID, {
+                bookID: book.id,
+                brief: verdict.brief,
+                // The Artist path animates the picture it just developed.
+                imageURL: developedURL,
+              });
+              await send('verdict', { convertible: true, briefID: created.id, expiresAt: created.expiresAt });
+            }
+          } catch (error) {
+            // A verdict failure is a STILL, never a failed exchange.
+            request.log?.warn?.({ route: 'exchange', book: book.id, stage: 'verdict', error: String(error) });
+          }
+        }
+
+        if (!channel.clientGone) {
           await send('done', {
             modelID: servedModel,
             inputTokens: usage.inputTokens,
@@ -625,7 +763,7 @@ export function build(options = {}) {
         // A disconnect is not a delivered moment: refund rather than charge.
         // A crisis is never charged either — the writer got a safety card,
         // not the moment they paid for.
-        await resolveHold(clientGone || crisisServed ? 'release' : 'settle');
+        await resolveHold(channel.clientGone || crisisServed ? 'release' : 'settle');
       } catch (error) {
         request.log?.error?.({ route: 'exchange', book: book.id, error: String(error) });
         await resolveHold('release');
@@ -644,16 +782,212 @@ export function build(options = {}) {
           output_tokens: usage.outputTokens,
           tokens,
           unit_cost: priceFor(servedModel, usage),
-          credits_spent: clientGone || crisisServed ? 0 : cost,
+          credits_spent: channel.clientGone || crisisServed ? 0 : cost,
           developed: willDevelop && !crisisServed,
           crisis: crisisServed,
-          client_gone: clientGone,
+          client_gone: channel.clientGone,
           duration_ms: Date.now() - t0,
         });
-        if (!reply.raw.writableEnded) reply.raw.end();
+        channel.end();
       }
     },
   );
+
+  // -- POST /v1/video: a moving picture, only ever user-triggered (Epic J) ---
+  // Tap → reserve → provider → bloom → settle; any failure at any stage
+  // releases the reservation, and a client that vanishes mid-generation gets
+  // its credit back (kill the app, the vial returns). Payment prefers the two
+  // lifetime free clips (task J8) and falls back to the wallet; the response
+  // is SSE so the minutes-long generation can heartbeat instead of timing out.
+  app.post('/v1/video', { schema: videoSchema }, async (request, reply) => {
+    const { briefID, videoID } = request.body;
+    if (
+      !(await withinLimits(
+        request,
+        reply,
+        CONFIG.rateLimits.videosPerUserPerMinute,
+        CONFIG.rateLimits.videosPerIPPerMinute,
+      ))
+    ) {
+      return reply;
+    }
+
+    // Only a brief the Book actually produced can be animated — the client
+    // never supplies prompt text, so there is no free-form generation surface.
+    const brief = await stores.getBrief(briefID, request.userID);
+    if (!brief) return reply.code(404).send({ error: 'unknown_brief' });
+    const book = findBook(brief.bookID);
+    if (!book || !book.flags.enabled || !book.flags.video) {
+      return reply.code(503).send({ error: 'video_resting' });
+    }
+    const videoProvider = videoProviderFor(book);
+    if (!videoProvider) return reply.code(503).send({ error: 'video_resting' });
+
+    // Strictest tier (task J7): with no moderator bound, nothing generates.
+    if (!moderatePrompt) {
+      request.log?.error?.({ route: 'video', book: book.id, error: 'no_moderator_bound' });
+      return reply.code(503).send({ error: 'video_resting' });
+    }
+    const prompt = composeVideoPrompt(brief.brief);
+    try {
+      const verdict = await moderatePrompt(prompt);
+      if (verdict.flagged) {
+        // Nothing was reserved yet, so there is nothing to refund. Every
+        // rejection is logged with its reason — the real failure rate has to
+        // replace the 8% assumption in credits.md §2.
+        request.log?.warn?.({
+          route: 'video',
+          book: book.id,
+          stage: 'moderation',
+          reject_reason: verdict.reason ?? 'flagged',
+        });
+        return reply.code(422).send({ error: 'moderated' });
+      }
+    } catch (error) {
+      const { status, code } = statusForProviderError(error);
+      request.log?.warn?.({ route: 'video', book: book.id, stage: 'moderation', error: String(error) });
+      if (status === 429) reply.header('retry-after', '30');
+      return reply.code(status).send({ error: code });
+    }
+
+    // Idempotency (task J4): one videoID, one generation. A double-tap or a
+    // network retry lands on the claim — a delivered clip replays free of
+    // charge, an in-flight one answers 409, and only an explicit failure
+    // reopens the id.
+    const claim = await stores.claimVideoJob(request.userID, videoID);
+    if (claim.inFlight) {
+      return reply.code(409).header('retry-after', '5').send({ error: 'video_in_flight' });
+    }
+
+    const clipCost = CONFIG.exchangeCosts.video ?? 0;
+    let payment = null; // { kind: 'free', holdID } | { kind: 'credit', reservationID }
+    if (!claim.delivered && clipCost > 0) {
+      const free = await stores.reserveFreeClip(request.userID);
+      if (free.holdID) {
+        payment = { kind: 'free', holdID: free.holdID };
+      } else if (free.error === 'free_ceiling') {
+        // The global monthly ceiling closed the free path (task J8). A wallet
+        // credit still spends; without one this fails closed IN FICTION —
+        // "the ink must rest" — never as an error card.
+        const held = await stores.reserve(request.userID, clipCost);
+        if (held.reservationID) {
+          payment = { kind: 'credit', reservationID: held.reservationID };
+        } else {
+          await stores.failVideoJob(request.userID, videoID);
+          return reply.code(429).header('retry-after', '3600').send({ error: 'ink_must_rest' });
+        }
+      } else {
+        const held = await stores.reserve(request.userID, clipCost);
+        if (held.reservationID) {
+          payment = { kind: 'credit', reservationID: held.reservationID };
+        } else if (held.error === 'insufficient_credits') {
+          // Both free clips spent and the wallet is empty — the vials.
+          await stores.failVideoJob(request.userID, videoID);
+          return reply.code(402).send(held);
+        } else {
+          await stores.failVideoJob(request.userID, videoID);
+          return reply.code(409).send(held);
+        }
+      }
+    }
+
+    /** Exactly-once resolution of whichever hold was taken. */
+    const resolvePayment = async (outcome) => {
+      if (!payment) return;
+      const held = payment;
+      payment = null;
+      const idKey = held.kind === 'free' ? held.holdID : held.reservationID;
+      try {
+        await stores.idempotent(request.userID, `${outcome}:video:${idKey}`, () => {
+          if (held.kind === 'free') {
+            return outcome === 'settle'
+              ? stores.settleFreeClip(request.userID, held.holdID)
+              : stores.releaseFreeClip(request.userID, held.holdID);
+          }
+          return outcome === 'settle'
+            ? stores.settle(request.userID, held.reservationID)
+            : stores.release(request.userID, held.reservationID);
+        });
+      } catch (error) {
+        request.log?.error?.({ route: 'video', stage: outcome, error: String(error) });
+      }
+    };
+
+    const paymentKind = claim.delivered ? 'replay' : payment?.kind ?? 'unmetered';
+    const channel = createStreamChannel(reply, {
+      deadlineMS: videoStreamDeadlineMS,
+      heartbeatMS,
+    });
+    channel.open();
+    const t0 = Date.now();
+    const seconds = CONFIG.video.clipSeconds;
+    let outcome = 'failed';
+    let generated = false;
+    let rejectReason = null;
+
+    try {
+      await channel.send('video_intent', { id: videoID });
+
+      let url = claim.delivered ? claim.url : null;
+      if (!url) {
+        generated = true;
+        url = await videoProvider({
+          prompt,
+          imageURL: brief.imageURL ?? null,
+          seconds,
+          signal: channel.abort.signal,
+        });
+      }
+
+      if (channel.clientGone) {
+        // The reader left mid-generation: never charge for a clip delivered
+        // to nobody. The claim reopens so a relaunch can ask again.
+        await resolvePayment('release');
+        await stores.failVideoJob(request.userID, videoID);
+        outcome = 'client_gone';
+      } else {
+        await channel.send('video_final', { id: videoID, url });
+        await resolvePayment('settle');
+        await stores.completeVideoJob(request.userID, videoID, url);
+        await channel.send('done', { modelID: book.models.video, inputTokens: 0, outputTokens: 0 });
+        outcome = claim.delivered ? 'replayed' : 'delivered';
+      }
+    } catch (error) {
+      // A flagged output is never shown and ALWAYS refunds (task J7); so does
+      // every other failure — the user never pays for a clip that didn't
+      // arrive, even though we already paid fal for the attempt.
+      await resolvePayment('release');
+      await stores.failVideoJob(request.userID, videoID);
+      const moderated = error instanceof ProviderError && error.kind === 'moderated';
+      rejectReason = moderated ? `output_moderated:${error.detail ?? ''}` : String(error?.message ?? error);
+      outcome = moderated ? 'moderated' : 'failed';
+      if (!channel.clientGone) {
+        await channel.send('video_error', {
+          id: videoID,
+          reason: moderated ? 'moderated' : 'unavailable',
+        });
+      }
+    } finally {
+      channel.cleanup();
+      // Cost per clip (task J1): fal bills per second of clip, not per token,
+      // so this rides its own rate card (INK_VIDEO_PRICING). Failures cost us
+      // too — the attempt is logged either way, with its reason, so the real
+      // failure rate can replace the 8% assumption in credits.md §2.
+      request.log?.info?.({
+        route: 'video',
+        book: book.id,
+        model: book.models.video,
+        clip_seconds: seconds,
+        unit_cost: generated ? priceForClip(book.models.video, seconds) : 0,
+        payment_kind: paymentKind,
+        outcome,
+        reject_reason: rejectReason,
+        client_gone: channel.clientGone,
+        duration_ms: Date.now() - t0,
+      });
+      channel.end();
+    }
+  });
 
   // -- credit wallet: idempotency keys required on mutations -----------------
   /** Shared preamble: rate limit, then the Idempotency-Key. */
@@ -718,9 +1052,55 @@ export function build(options = {}) {
       return reply;
     }
     // Read-only: this used to SEED a wallet, so rotating the token and reading
-    // minted an onboarding grant per rotation.
-    return stores.walletView(request.userID);
+    // minted an onboarding grant per rotation. Free clips ride along so the
+    // affordance can say honestly what a tap will spend (task J3).
+    const wallet = await stores.walletView(request.userID);
+    const freeClips = await stores.freeClipView(request.userID);
+    return {
+      ...wallet,
+      freeClipsRemaining: freeClips.remaining,
+      freeClipsOpen: freeClips.ceilingOpen,
+    };
   });
+
+  // -- POST /v1/credits/grant: a verified vial purchase reaches the ledger ---
+  // StoreKit 2 verified the transaction ON DEVICE (the client only forwards a
+  // `VerificationResult.verified` payload) and the wallet it credits is keyed
+  // to the same client-claimed identity as everything else in anonymous
+  // attestation mode — so in that mode the JWS payload is decoded and
+  // cross-checked, not signature-verified. The amount always comes from the
+  // server-side product map, and the transactionID is the idempotency key: a
+  // replayed receipt credits once. INK_IAP_MODE mirrors the attest.js
+  // posture — production fails CLOSED until 'anonymous' is set explicitly,
+  // and binding real x5c verification against Apple's root turns it off for
+  // good (same pre-launch hardening list as App Attest).
+  app.post(
+    '/v1/credits/grant',
+    { schema: grantSchema, bodyLimit: LIMITS.grantBodyLimit },
+    async (request, reply) => {
+      if (!(await withinLimits(request, reply, CONFIG.rateLimits.creditOpsPerUserPerMinute, CONFIG.rateLimits.exchangesPerIPPerMinute))) {
+        return reply;
+      }
+      if (iapMode !== 'anonymous') {
+        return reply.code(501).send({ error: 'receipt_verification_unbound' });
+      }
+      const { productID, transactionID, jws } = request.body;
+      const amount = VIAL_GRANTS[productID];
+      if (!amount) return reply.code(400).send({ error: 'unknown_product' });
+      // The decoded claims must agree with what the client asserted — a JWS
+      // for a different product or transaction grants nothing.
+      const payload = decodeJWSPayload(jws);
+      if (!payload || payload.productId !== productID || String(payload.transactionId) !== transactionID) {
+        return reply.code(400).send({ error: 'invalid_receipt' });
+      }
+      const result = await stores.idempotent(request.userID, `grant:${transactionID}`, () =>
+        stores.grant(request.userID, amount, 'purchase'),
+      );
+      if (result.error) return walletReply(reply, result);
+      request.log?.info?.({ route: 'grant', product: productID, amount });
+      return result;
+    },
+  );
 
   // -- POST /v1/report: user-triggered report of a reply (guideline 1.2) -----
   // A cold path, fully apart from the exchange machinery: the payload carries

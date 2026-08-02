@@ -76,6 +76,9 @@ test('a client disconnect aborts the upstream generation instead of burning it',
 
 test('a disconnect releases the credit hold rather than settling it', async () => {
   const stores = createStores();
+  // Wallets start empty since free clips replaced the onboarding grant
+  // (task J8), so a metered test funds the credit it means to spend.
+  stores.grant('user-1', 1);
   const original = CONFIG.exchangeCosts.ink;
   CONFIG.exchangeCosts.ink = 1; // meter ink, so the exchange must hold a credit
   const app = build({
@@ -105,6 +108,7 @@ test('a disconnect releases the credit hold rather than settling it', async () =
 
 test('a metered exchange reserves before generating and settles on success', async () => {
   const stores = createStores();
+  stores.grant('user-1', 1);
   const original = CONFIG.exchangeCosts.ink;
   CONFIG.exchangeCosts.ink = 1;
   const app = build({
@@ -142,6 +146,7 @@ test('a metered exchange reserves before generating and settles on success', asy
 
 test('a pre-stream provider failure releases the hold — a blocked exchange is never charged', async () => {
   const stores = createStores();
+  stores.grant('user-1', 1);
   const original = CONFIG.exchangeCosts.ink;
   CONFIG.exchangeCosts.ink = 1;
   const app = build({
@@ -179,6 +184,8 @@ test('ink and images are unmetered by default, so today’s behaviour is unchang
     });
     assert.equal(res.statusCode, 200);
   }
-  assert.deepEqual(await stores.walletView('user-1'), { balance: 1, available: 1 });
+  // Nothing metered, so nothing was ever held: the wallet is untouched, and
+  // an untouched wallet is empty (no onboarding grant since task J8).
+  assert.deepEqual(await stores.walletView('user-1'), { balance: 0, available: 0 });
   await app.close();
 });
