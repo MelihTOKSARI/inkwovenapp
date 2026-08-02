@@ -33,22 +33,28 @@ developer account: Melih Toksari (individual).
 
 ## 3. Create the subscription group and products
 
+> Full detail — exact field values, localized metadata, sandbox procedure, and the
+> rejection-cause table — lives in `subscriptions.md`. The steps below are the summary.
+
 Monetization → Subscriptions:
 
 - [ ] Create subscription group: **Plus** (reference name; the display name shown
       to users can also be "Inkwoven Plus").
-- [ ] Product 1 — exact product ID **`plus_monthly_9_99`**: auto-renewable,
-      duration 1 month, price **$9.99** (USD base; accept Apple's generated
-      per-territory prices). Display name: "Inkwoven Plus Monthly". No intro offer.
-- [ ] Product 2 — exact product ID **`plus_annual_59_99`**: auto-renewable,
-      duration 1 year, price **$59.99**. Display name: "Inkwoven Plus Annual".
-      Introductory offer: **Free trial, 7 days**, all territories.
+- [ ] Product 1 — exact product ID **`plus_weekly`**: auto-renewable,
+      duration 1 week, price **$4.99** (USD base; accept Apple's generated
+      per-territory prices). Display name: "Inkwoven Plus Weekly".
+      Introductory offer: **Free trial, 3 days**, all territories.
+- [ ] Product 2 — exact product ID **`plus_monthly`**: auto-renewable,
+      duration 1 month, price **$9.99**. Display name: "Inkwoven Plus Monthly".
+      No intro offer.
 - [ ] The product IDs must match the strings above character for character — the
-      shipped binary looks them up by ID; a typo means an empty paywall.
-- [ ] Add the App Store promotion/localization metadata each product requires
-      (localized display name + description) or the products can't be submitted.
-- [ ] Do **not** create any consumable credit packs — v1 sells only these two
-      subscriptions.
+      shipped binary looks them up by ID; a typo means an empty paywall. They are
+      **permanent** once submitted and can never be renamed or reused.
+- [ ] Add the localized display name + description each product requires, or they
+      stay in "Missing Metadata" and cannot be submitted.
+- [ ] Do **not** create consumable credit packs or Bindery products — v1 sells
+      only these two subscriptions.
+- [ ] Enrol in the **App Store Small Business Program** (15% commission, not 30%).
 
 ## 4. Attach the subscriptions to the version
 
@@ -63,6 +69,12 @@ From `listing.md`, into the 1.0 version page and App Information:
 - [ ] Subtitle, promotional text, description, keywords — paste the fenced blocks
       exactly (the counts are pre-verified against the field limits).
 - [ ] Primary category: **Lifestyle**. Secondary: **Entertainment**.
+- [ ] Name and subtitle come from `listing.md` and were revised for ASO on
+      2026-08-01 — paste name, subtitle and the keyword field **as a set**, never
+      mix old and new, or the no-duplicate rule breaks. The name locks at first
+      submission.
+- [ ] Optional, free reach: add the en-GB / en-CA / en-AU locales and paste their
+      distinct keyword fields from `listing.md`. Reuse the same description.
 - [ ] Copyright: © 2026 Melih Toksari.
 - [ ] Version string 1.0; select build 1 (uploaded in step 2).
 
@@ -86,8 +98,8 @@ From `design/app-store-assets/screenshots/` (produced per the design brief):
 
 ## 8. Host and enter the URLs
 
-- [ ] Publish `privacy-policy.md` (this folder) at a stable public URL, with the
-      two `TODO: support email` slots filled with a real address first.
+- [ ] Publish `privacy-policy.md` (this folder) at a stable public URL. The
+      support address is filled in already: swareisland@gmail.com.
 - [ ] Stand up a support page (a paragraph and the same contact address suffice).
 - [ ] Enter the privacy policy URL (App Privacy section) and support URL (version
       page). Marketing URL is optional — leave empty if nothing exists yet.

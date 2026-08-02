@@ -27,9 +27,9 @@ THE KEEPER (locked Book)
 The Keeper is the private diary Book, locked with Face ID / Touch ID and the device passcode as fallback. Open it from the shelf and authenticate at the system prompt — a "Use passcode instead" option is offered. The lock is device-side privacy for the owner.
 
 SUBSCRIPTIONS (StoreKit 2, group "Plus")
-- Two auto-renewable plans: plus_monthly_9_99 at $9.99/month, and plus_annual_59_99 at $59.99/year with a 7-day free trial. There are no other purchases in this version.
+- Two auto-renewable plans in the group "Plus": plus_weekly at $4.99/week with a 3-day free trial, and plus_monthly at $9.99/month. The paywall shows both together with the renewal period beside each price, and states the trial terms before purchase. There are no other purchases in this version — no consumables, no content packs.
 - Fastest path to the paywall: Shelf → Drawer → "Subscription — Bind the notebook". The paywall also appears naturally once the day's free answered pages are used up.
-- Both plans purchase normally in the sandbox; the trial is on the annual plan. Restore purchases is the "Restore a binding" link at the foot of the paywall.
+- Both plans purchase normally in the sandbox; the trial is on the weekly plan. Restore purchases is the "Restore a binding" link at the foot of the paywall.
 
 SAFETY
 If a user's writing indicates personal crisis, the app deliberately breaks the fiction and shows a plain care screen with real resources instead of a stylized reply — writing that expresses serious distress in any Book will route there. Image generation runs behind provider safety filters, and every Book and output type can be disabled server-side without a new binary if an issue is ever found.

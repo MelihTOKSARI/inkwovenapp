@@ -2,7 +2,7 @@
 
 **Effective date:** August 1, 2026
 **Developer:** Melih Toksari (individual developer)
-**Contact:** `TODO: support email`
+**Contact:** swareisland@gmail.com
 
 This policy is written to be read, not skimmed past. It describes exactly what the
 Inkwoven app does with your writing, in plain language. If anything here is unclear,
@@ -132,4 +132,4 @@ the change ships. The current version always lives at this URL.
 
 ## Contact
 
-Questions, concerns, or requests: `TODO: support email`.
+Questions, concerns, or requests: swareisland@gmail.com.

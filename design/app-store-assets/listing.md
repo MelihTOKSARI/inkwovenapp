@@ -6,17 +6,44 @@ are for the exact strings between the quotes/fences.
 
 ---
 
-## App name (30 char limit)
+> **ASO revision, 2026-08-01.** Name, subtitle and keyword field were rebuilt as one
+> indexed set. The previous pair (`Inkwoven` / `The notebook that writes back`) read
+> beautifully but indexed almost nothing: the name carried no keyword, the subtitle was
+> mostly stop words, and every search term was crowded into the keyword field — the
+> weakest of the three. **Swap all three fields together or the no-duplicate rule breaks.**
+> The name locks at first submission.
+
+---
+
+## App name (30 char limit — 30 used)
 
 ```
-Inkwoven
+Inkwoven: Handwriting Notebook
 ```
+
+*"Handwriting" is the differentiator no competitor can claim and a winnable lane
+(MyScript-led, not locked up). "Notebook" is the category word Goodnotes and Notability
+left open when both chose "AI Notes" for their titles.*
 
 ## Subtitle (30 char limit — 29 used)
 
 ```
-The notebook that writes back
+Apple Pencil diary, art & ink
 ```
+
+*Five tokens, zero overlap with the name. "Diary" covers the journaling pool in a
+visible field. Deliberately no "AI" in either visible field — in a results page of
+"AI Journal & Diary" clones, the listing that doesn't say AI reads like a real object,
+and the term is fully indexed from the keyword field anyway.*
+
+**Reviewer fallback** if "Apple Pencil" is flagged under Apple's third-party trademark
+guidelines (referential use is permitted, so this should pass — but have it ready):
+
+```
+Pencil-first diary, art & ink
+```
+
+*29 chars. If used, add `apple` to the keyword field.*
 
 ## Promotional text (170 char limit — 158 used; editable anytime without review)
 
@@ -54,22 +81,55 @@ Inkwoven is built iPad-first: pressure-sensitive ink, palm rejection, paper that
 FREE EVERY DAY
 Every Book is free to open, with a few answered pages each day. Pages older than 30 days fade until the notebook is bound to you. Inkwoven Plus removes the daily limit and keeps your whole archive:
 
-• $9.99 per month
-• $59.99 per year, with a 7-day free trial
+• $4.99 per week, with the first 3 days free
+• $9.99 per month — the same notebook, 54% less
 
 Subscriptions renew automatically until cancelled; manage or cancel anytime in your App Store account settings. Restore purchases from the paywall.
 
 Requires iOS 17 or later. Works on iPad and iPhone.
 ```
 
-## Keywords (100 char limit — 100 used)
+## Keywords — en-US (100 char limit — 98 used)
 
-Rules honored: comma-separated, no spaces after commas, no words repeated from the
-app name or subtitle (those already index).
+Rules honored: comma-separated, **no spaces**, no word repeated from the name or
+subtitle (those already index), singulars only, no competitor brands, highest-value
+terms first.
 
 ```
-journal,diary,ai,handwriting,pencil,drawing,doodle,art,story,rpg,adventure,oracle,letters,magic,game
+ai,journal,story,doodle,sketch,drawing,rpg,adventure,fiction,letter,pen,pal,game,master,solo,write
 ```
+
+**What this buys, via Apple's cross-field recombination** — none of these phrases is
+written out anywhere, all are matchable: *ai notebook · ai diary · ai journal ·
+handwriting journal · apple pencil notebook · pencil drawing · doodle art · pencil
+sketch · ai game master · solo rpg · interactive fiction · pen pal · story game.*
+
+`ai` leads the field: invisible to users, weighted first in the index.
+`pen,pal` as two tokens beats `penpal` — it matches the two-word search *and* frees
+"pen" to recombine with apple, ai and ink.
+
+**Removed from the previous field, and why:**
+
+| Term | Reason |
+|---|---|
+| `handwriting`, `diary`, `pencil`, `art` | Promoted to the name/subtitle — keeping them here is an illegal duplicate and wasted budget |
+| `oracle` | Guideline **4.3(b)** names *fortune telling* as a saturated category that gets new submissions rejected. Never let metadata frame that Book as standalone divination |
+| `magic` | No search intent |
+| `letters` | Apple pluralizes automatically — `letter` covers both |
+| `notes` | Unwinnable: Goodnotes and Notability both put "AI Notes" in their actual titles |
+
+### English-variant locales — free extra coverage
+
+Each storefront is a separate index that *also* reads the en-US fields, so a different
+keyword set per locale multiplies reach at zero translation cost. Add these locales in
+App Store Connect and reuse the same description; only the keyword field changes.
+Verified: no overlap with en-US, with each other, or with the visible fields.
+
+| Locale | Keyword field | Chars |
+|---|---|---|
+| en-GB | `sketchbook,handwritten,storybook,bedtime,riddle,tutor,quill,notepad,fantasy,roleplay` | 84 |
+| en-CA | `journaling,scrapbook,reflection,mindful,puzzle,homework,cursive,narrative,penmanship` | 84 |
+| en-AU | `sketching,doodling,storytelling,workbook,fable,imagination,creative,companion,notepaper` | 87 |
 
 ## Categories
 
@@ -84,11 +144,20 @@ App Store Connect will not accept the submission without real, reachable URLs in
 first two slots below. Host these before starting the submission (see
 `asc-checklist.md` step 8).
 
+Support contact address (resolved): **swareisland@gmail.com** — this is also the
+address in `privacy-policy.md` and in the app's Drawer contact row.
+
+Recommended host: a public GitHub repo named `inkwoven` with Pages enabled. No paid
+domain needed; Apple and Google both accept it.
+
 | Field | Value | Status |
 |---|---|---|
-| Support URL (required) | `TODO: host` — a simple page with the app name and a contact address is enough | not yet hosted |
-| Privacy policy URL (required) | `TODO: host` — publish `privacy-policy.md` from this folder verbatim | not yet hosted |
-| Marketing URL (optional) | `TODO: host` — can be left empty for v1 if no site exists yet | optional |
+| Support URL (required) | `https://<github-user>.github.io/inkwoven/support` — app name, a sentence, and swareisland@gmail.com is enough | **not yet hosted — blocks submission** |
+| Privacy policy URL (required) | `https://<github-user>.github.io/inkwoven/privacy` — publish `privacy-policy.md` from this folder verbatim | **not yet hosted — blocks submission** |
+| Marketing URL (optional) | repo root — fine to leave empty for v1 | optional |
+
+Load both in a private browser window before submitting. App Review opens them, and a
+404 here is a same-day rejection.
 
 ## Copyright field
 
