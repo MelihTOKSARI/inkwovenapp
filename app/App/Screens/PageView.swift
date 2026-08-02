@@ -17,11 +17,15 @@ struct PageView: View {
     @State private var restSettled = false
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
+    /// In-fiction acknowledgement after a report lands; fades on its own.
+    @State private var reportAck: String?
+    @State private var reportAckTask: Task<Void, Never>?
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
     private let book: Book
     private let archive: PageArchive
+    private let di: AppDI
     private var net: Reachability { .shared }
 
     init(model: AppModel, di: AppDI) {
@@ -29,6 +33,7 @@ struct PageView: View {
         let book = model.activeBook
         self.book = book
         self.archive = di.archive
+        self.di = di
         _interactor = State(initialValue: PageInteractor(
             proxy: di.proxy, analytics: di.analytics, book: book.id, archive: di.archive
         ))
@@ -70,12 +75,50 @@ struct PageView: View {
 
                 backPill
                 rememberedRibbon
+
+                if let target = model.reportTarget {
+                    ReportSheet(
+                        entry: target,
+                        book: book,
+                        submitter: di.proxy,
+                        analytics: di.analytics,
+                        onClose: { model.reportTarget = nil },
+                        onSent: {
+                            model.reportTarget = nil
+                            acknowledgeReport()
+                        }
+                    )
+                }
             }
         }
         .onChange(of: interactor.status) { _, status in
             react(to: status)
         }
         .onAppear { consumeRevisit() }
+    }
+
+    /// The exchange currently standing on the reply pane, when — and only
+    /// when — it is a completed, archived reply. Streaming and failed
+    /// exchanges have no entry to hand back, so nothing mid-flight is ever
+    /// reportable.
+    private var reportableEntry: PageArchive.Entry? {
+        guard interactor.status == .answered, let id = interactor.displayedEntryID else {
+            return nil
+        }
+        return archive.entries(for: book.id).first { $0.id == id }
+    }
+
+    /// "the binder has taken note" — QuietBanner marginalia, never an alert.
+    private func acknowledgeReport() {
+        reportAckTask?.cancel()
+        withAnimation(.easeOut(duration: 0.35)) {
+            reportAck = "the binder has taken note of this page"
+        }
+        reportAckTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.6)) { reportAck = nil }
+        }
     }
 
     /// Which side the writing hand rests on. Left-handed mode used to move
@@ -248,11 +291,20 @@ struct PageView: View {
         // the page, so every status note is TOP-margin marginalia — just
         // under the opener; the side flips with left-handed mode.
         .overlay(alignment: chromeEdge) {
-            statusNote
-                .frame(maxWidth: 440, alignment: writingEdge)
-                .padding(.top, openerHeight + 12)
-                .allowsHitTesting(false)
-                .inkAnimation(.easeOut(duration: 0.35), value: interactor.status, reduce: reduceMotion)
+            Group {
+                // The report acknowledgement borrows the status margin for a
+                // beat; the regular marginalia returns when it fades.
+                if let ack = reportAck {
+                    QuietBanner(text: ack)
+                        .transition(.opacity)
+                } else {
+                    statusNote
+                }
+            }
+            .frame(maxWidth: 440, alignment: writingEdge)
+            .padding(.top, openerHeight + 12)
+            .allowsHitTesting(false)
+            .inkAnimation(.easeOut(duration: 0.35), value: interactor.status, reduce: reduceMotion)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -441,8 +493,10 @@ struct PageView: View {
         return ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 if !thread.isEmpty {
-                    PageHistoryThread(entries: thread, book: book)
-                        .padding(.top, 30)
+                    PageHistoryThread(entries: thread, book: book) { entry in
+                        model.reportTarget = entry
+                    }
+                    .padding(.top, 30)
                 }
                 errorNote
                     .frame(maxWidth: 440, alignment: .leading)
@@ -451,6 +505,11 @@ struct PageView: View {
                     reply
                         .padding(.top, 30)
                         .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
+                        // Long-press to report — only once the exchange has
+                        // completed and archived; nothing mid-stream.
+                        .modifier(ReportableReply(entry: reportableEntry) { entry in
+                            model.reportTarget = entry
+                        })
                 }
                 // The server decides modality: the frame appears when an
                 // image slot opens (darkroom running), stays for the finished

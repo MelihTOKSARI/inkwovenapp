@@ -22,6 +22,11 @@ export const CONFIG = {
     // generous ceiling costs a real user nothing.
     metadataPerUserPerMinute: 60,
     metadataPerIPPerMinute: 120,
+    // /v1/report carries a full page snapshot and is written by a human
+    // deciding something went wrong — a handful a minute is generous, and a
+    // low ceiling keeps the reports table from becoming a free upload target.
+    reportsPerUserPerMinute: 3,
+    reportsPerIPPerMinute: 10,
   },
   onboardingCreditGrant: 1,
   // What each modality costs from the credit wallet. Ink and images are
@@ -46,6 +51,14 @@ export const LIMITS = {
   exchangeBodyLimit: 384 * 1024,
   preuploadBodyLimit: 262_144,
   smallBodyLimit: 4 * 1024,
+  // JSON body of /v1/report: snapshot + reply text + slack, same arithmetic
+  // as the exchange body.
+  reportBodyLimit: 384 * 1024,
+  maxReportNoteChars: 500,
+  maxReportReplyChars: 20_000,
+  // User-triggered reports (guideline 1.2) are deleted after this many days —
+  // the sweep in both stores enforces it; the privacy policy promises it.
+  reportRetentionDays: 90,
   // Per-reservation ceiling; the wallet also rejects non-integers and <1.
   maxReservationAmount: 100,
   // Client-supplied memory context, capped before it reaches a system prompt.

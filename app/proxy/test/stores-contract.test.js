@@ -10,6 +10,25 @@ import { createRedisStores } from '../src/stores-redis.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A minimal valid report body, as the route hands it to the store. */
+function reportFixture(overrides = {}) {
+  return {
+    reportID: randomUUID(),
+    replyID: randomUUID(),
+    pageID: randomUUID(),
+    bookID: 'oracle',
+    reason: 'disturbing',
+    replyKind: 'ink',
+    replyText: 'The reply under report.',
+    modelID: '',
+    snapshotDigest: 'a'.repeat(64),
+    snapshotBase64: 'c25hcHNob3Q=',
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 function contractSuite(name, makeStores, { skip = false } = {}) {
   const t = (title, fn, storeOptions = {}) =>
     test(`${name}: ${title}`, { skip }, async () => {
@@ -190,6 +209,38 @@ function contractSuite(name, makeStores, { skip = false } = {}) {
     assert.deepEqual(await stores.settle(user, reservationID), { error: 'unknown_reservation' });
     assert.deepEqual(await stores.settle(user, randomUUID()), { error: 'unknown_reservation' });
     assert.deepEqual(await stores.release(user, randomUUID()), { error: 'unknown_reservation' });
+  });
+
+  t('reports: filing acks; a duplicate reportID never files twice', async (stores) => {
+    const user = randomUUID();
+    const report = reportFixture();
+    assert.deepEqual(await stores.fileReport(user, report), { received: true });
+    assert.deepEqual(await stores.fileReport(user, report), { received: true });
+    assert.equal(await stores.reportCount(user), 1, 'a double-tap is one report');
+    await stores.fileReport(user, reportFixture());
+    assert.equal(await stores.reportCount(user), 2);
+  });
+
+  t('reports: a junk reportID is rejected before it reaches storage', async (stores) => {
+    const user = randomUUID();
+    assert.deepEqual(await stores.fileReport(user, reportFixture({ reportID: 'not-a-uuid' })), {
+      error: 'invalid_report',
+    });
+    assert.equal(await stores.reportCount(user), 0);
+  });
+
+  t('reports: the sweep deletes past 90 days and spares anything newer', async (stores) => {
+    const user = randomUUID();
+    await stores.fileReport(user, reportFixture());
+    const day = 24 * 60 * 60 * 1000;
+    // Counts are asserted per-user: on a shared test database another run's
+    // reports may fall to the same sweep, so the removed total is only
+    // checked for "at least ours."
+    await stores.sweepExpiredReports(Date.now() + 89 * day);
+    assert.equal(await stores.reportCount(user), 1, '89 days in, the report still stands');
+    const removed = await stores.sweepExpiredReports(Date.now() + 91 * day);
+    assert.ok(removed >= 1, 'the sweep reports what it deleted');
+    assert.equal(await stores.reportCount(user), 0, '91 days in, the report is gone');
   });
 }
 

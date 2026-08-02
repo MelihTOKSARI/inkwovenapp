@@ -26,6 +26,9 @@ public enum AnalyticsEvent: Equatable, Sendable {
     case crisisFlow(book: BookID)
     case cooldownHit(seconds: Double)
     case memoryTorn(book: BookID)
+    /// User-triggered report of a reply (guideline 1.2). Carries the reason
+    /// enum only — never the note, never page content.
+    case reportSubmitted(book: BookID, reason: String)
 
     public var name: String {
         switch self {
@@ -41,6 +44,7 @@ public enum AnalyticsEvent: Equatable, Sendable {
         case .crisisFlow: "crisis_flow"
         case .cooldownHit: "cooldown_hit"
         case .memoryTorn: "memory_torn"
+        case .reportSubmitted: "report_submitted"
         }
     }
 
@@ -68,6 +72,8 @@ public enum AnalyticsEvent: Equatable, Sendable {
             ["seconds": .double(seconds)]
         case .memoryTorn(let book):
             ["book": .string(book.rawValue)]
+        case .reportSubmitted(let book, let reason):
+            ["book": .string(book.rawValue), "reason": .string(reason)]
         }
     }
 }

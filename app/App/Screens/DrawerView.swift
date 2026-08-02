@@ -147,6 +147,17 @@ struct DrawerView: View {
                                     .frame(minHeight: 44)
                             }
                             .buttonStyle(.plain)
+                            // Published contact (guideline 1.2): a person must
+                            // be reachable without leaving the app to hunt.
+                            Link(destination: SupportContact.mailURL) {
+                                Text("Write to the binder")
+                                    .font(InkFont.body(13))
+                                    .foregroundStyle(room.accent)
+                                    .underline()
+                                    .frame(minHeight: 44)
+                            }
+                            .accessibilityLabel("Write to the binder")
+                            .accessibilityHint("Opens an email to \(SupportContact.email).")
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
