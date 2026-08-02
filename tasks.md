@@ -80,8 +80,15 @@
 - [x] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
 
 ### Epic G — Monetization (D4)
-- [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (20/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
-  - AC: free user's 6th moment → paywall before any model call. Plus user's 21st image of the day → "the ink must rest" cooldown path, no error state, event logged.
+
+> **Pricing change, 2026-08-01:** v1 sells weekly ($4.99, 3-day free trial) + monthly
+> ($9.99, the value plan — 54% less than weekly annualised); annual dropped. Product IDs
+> renamed to `plus_weekly` / `plus_monthly` while the rename was still free (nothing live
+> in ASC). Image soft cap 20 → 8, from the flux-2 cost model — rationale and unit
+> economics in `design/app-store-assets/subscriptions.md`.
+
+- [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (8/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
+  - AC: free user's 6th moment → paywall before any model call. Plus user's 9th image of the day → "the ink must rest" cooldown path, no error state, event logged.
 - [x] G2 In-fiction paywall; purchase, restore, trial messaging — **M**
 - [ ] G3 Entitlement sync + edge cases (refund, expiry, offline) — **M**
 - [ ] G4 **Credit wallet: buy/spend/balance/refund-on-failure; 1 free onboarding credit** — **M**

@@ -36,7 +36,9 @@ public struct GateConfig: Equatable, Sendable, Codable {
 
     public init(
         freeMomentsPerDay: Int = 5,
-        plusImageDailySoftCap: Int = 20,
+        // Offline fallback only — the proxy's value (proxy/src/config.js) is
+        // authoritative and must move in step with this default.
+        plusImageDailySoftCap: Int = 8,
         cooldownCurveSeconds: [Double] = [60, 300, 900, 3600]
     ) {
         self.freeMomentsPerDay = freeMomentsPerDay

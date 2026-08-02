@@ -10,9 +10,18 @@
 // structures meaning the same thing is how an incident kill-switch gets
 // flipped on the wrong one. Every flag below is enforced in server.js.
 //
-// Model routing per PRD §7 (July 2026 picks, revisit monthly):
-//   default ink: gemini-flash-lite-latest · heavy (gm/tutor): gpt-5.4-mini
-//   images: z-image-turbo (fal) · artist img2img: flux-2 (fal) · video: kling-3 (fal)
+// Model routing per PRD §7 (July 2026 picks, corrected 2026-08-01, revisit monthly):
+//   default ink: gemini-3.5-flash-lite — pinned, never the -latest alias: Google
+//     keeps 2.5/3.1/3.5 Flash-Lite live at $0.10/$0.40 through $0.30/$2.50 per 1M,
+//     so a silent alias bump changes unit economics without a deploy
+//   heavy (gm/tutor): gpt-5.4-mini
+//   images: z-image-turbo (fal) · artist img2img: flux-2 (fal) — flux-2 bills
+//     input + output megapixels, so an Artist img2img at 1024² is ~2MP ≈ $0.024,
+//     not the single-image ~$0.03–0.055 the PRD assumed; that number is why
+//     plusImageDailySoftCap (config.js) sits at 8
+//   video (flag-off in v1): kling-video-v3-standard — fal namespaces Kling 3.0 as
+//     fal-ai/kling-video/v3/standard/... and .../pro/...; the old 'kling-3'
+//     identifier named no real endpoint and would have 404ed the day video ships
 
 const DEFAULT_FLAGS = { enabled: true, ink: true, image: true, video: true };
 
@@ -24,7 +33,7 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'vellum',
     starterText: 'Ask, and the page will answer. Plainly or in riddles — that is for the ink to decide.',
-    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo', video: 'kling-3' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
     prompt: "You are the Oracle, an old book that answers what is written on its pages. Answer the writer's question plainly or in a riddle — your choice, but choose one and commit. You may draw them a single card of your own invention when the moment calls for it. Speak with quiet certainty, never hedging.",
     flags: { ...DEFAULT_FLAGS },
   },
@@ -37,7 +46,7 @@ export const BOOKS = [
     // An honest lock-claim: the seal is real (KeeperGate), but every page is
     // still read by the ink that answers it — so no "yours alone" promise.
     starterText: 'This page keeps behind the seal. Write what the day left behind.',
-    models: { text: 'gemini-flash-lite-latest' },
+    models: { text: 'gemini-3.5-flash-lite' },
     prompt: 'You are the Keeper, a private diary that writes back. Reflect what the writer set down, gently and specifically — never clinical, never advice-giving unless asked. Hold their day like something entrusted to you. One warm observation is worth more than five.',
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
   },
@@ -48,7 +57,7 @@ export const BOOKS = [
     ink: 'sepia',
     paper: 'parchment',
     starterText: 'Begin a tale — a line is enough. The page will carry it on.',
-    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo', video: 'kling-3' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
     prompt: 'You are the Storyteller. Whatever the writer begins, carry the tale onward a few sentences — vivid, concrete, always ending at a place that invites their pen back. Never finish the story; it is theirs.',
     flags: { ...DEFAULT_FLAGS },
   },
@@ -59,7 +68,7 @@ export const BOOKS = [
     ink: 'charcoal',
     paper: 'cold-press',
     starterText: 'Doodle anything. The page will develop it into finished art.',
-    models: { text: 'gemini-flash-lite-latest', image: 'flux-2', video: 'kling-3' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'flux-2', video: 'kling-video-v3-standard' },
     // Every Artist page develops: the sketch itself is the image input.
     alwaysDevelop: true,
     imagePrompt:
@@ -74,7 +83,7 @@ export const BOOKS = [
     ink: 'oxblood',
     paper: 'ledger',
     starterText: 'Name your hero and where they stand. The adventure begins when your pen rests.',
-    models: { text: 'gpt-5.4-mini', image: 'z-image-turbo', video: 'kling-3' },
+    models: { text: 'gpt-5.4-mini', image: 'z-image-turbo', video: 'kling-video-v3-standard' },
     prompt: 'You are the Game Master of a solo pen-and-paper adventure. Continue the scene from what the writer wrote, offer real stakes and one clear moment of choice, and keep a light touch of dice-fate in your telling. You may run to one short paragraph, never more.',
     flags: { ...DEFAULT_FLAGS },
   },
@@ -85,7 +94,7 @@ export const BOOKS = [
     ink: 'iron-gall',
     paper: 'laid',
     starterText: 'Address a letter to a hand from history — public-domain or invented — and seal it with your rest.',
-    models: { text: 'gemini-flash-lite-latest' },
+    models: { text: 'gemini-3.5-flash-lite' },
     prompt: 'You are the Correspondent: letters answered in the hand and voice of figures from history or invention — public-domain and original figures only, never living people. Answer as the addressed figure would, in period voice, warmly and briefly.',
     flags: { ...DEFAULT_FLAGS, image: false, video: false },
   },
@@ -107,7 +116,7 @@ export const BOOKS = [
     ink: 'emerald',
     paper: 'card',
     starterText: 'Riddles, twenty questions, draw-and-guess — write "deal me in" to begin.',
-    models: { text: 'gemini-flash-lite-latest', image: 'z-image-turbo' },
+    models: { text: 'gemini-3.5-flash-lite', image: 'z-image-turbo' },
     prompt: 'You are Parlor Games, keeper of riddles, twenty questions, and draw-and-guess. Keep the state of the game on the page in your own words, play fair, and keep every turn brisk — a line or two, then back to the writer.',
     flags: { ...DEFAULT_FLAGS, video: false },
   },

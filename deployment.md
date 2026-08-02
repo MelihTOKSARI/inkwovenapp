@@ -231,7 +231,12 @@ Tests keep running against the in-memory store; production gets durable counters
 
 ## 6. Secrets — getting each key, then storing them
 
-### 6.1 Google — `GEMINI_API_KEY` (Flash-Lite; default text model, 6/8 Books)
+### 6.1 Google — `GEMINI_API_KEY` (gemini-3.5-flash-lite; default text model, 6/8 Books)
+
+> The Books pin **`gemini-3.5-flash-lite`** explicitly (books.js, 2026-08-01) — never the
+> `-latest` alias. Google keeps 2.5 / 3.1 / 3.5 Flash-Lite live at $0.10/$0.40 through
+> $0.30/$2.50 per 1M, so a silent alias bump would change unit economics without a
+> deploy. Bump the pinned version deliberately, together with the §6.6 rate card.
 
 1. Go to [aistudio.google.com](https://aistudio.google.com), sign in with a Google account.
 2. Left sidebar → **Get API key** → **Create API key** (pick/create a Google Cloud project when prompted — the default it offers is fine).
@@ -248,7 +253,7 @@ Tests keep running against the in-memory store; production gets durable counters
 3. Create a **Project** (e.g. `inkwoven-proxy`) under Settings → Projects — set its **Monthly budget limit** right there at creation. Project limits are your real spend guardrail.
 4. Settings → **API keys** → *Create new secret key* → scope it to the `inkwoven-proxy` project. Copy immediately — it's shown once.
 
-### 6.3 fal.ai — `FAL_API_KEY` (z-image-turbo, flux-2, kling-3 — one key for all three)
+### 6.3 fal.ai — `FAL_API_KEY` (z-image-turbo, flux-2, kling-video-v3-standard — one key for all three)
 
 1. Sign up at [fal.ai](https://fal.ai) (GitHub login works).
 2. Dashboard → **Keys** ([fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)) → *Add Key* → name it (`inkwoven-proxy`) → *Create Key*.
@@ -281,7 +286,26 @@ fly secrets set INK_ATTESTATION_MODE=anonymous
 
 plus **hard budget caps at each model provider** (§6.1–6.3, §8) as the backstop until App Attest lands. Once the verifier is bound and the app sends attestations, remove the secret (`fly secrets unset INK_ATTESTATION_MODE`) and production snaps back to fail-closed.
 
-### 6.6 Store everything in Fly
+### 6.6 `INK_MODEL_PRICING` — the rate card that makes cost logs real
+
+Without it every exchange logs truthful token counts and `unit_cost: null` —
+`createPricing` (config.js) refuses to invent a price for a model it has no rate for.
+Set it from the published rates current on 1 Aug 2026:
+
+```sh
+fly secrets set INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50},"gpt-5.4-mini":{"inputPer1M":0.75,"outputPer1M":4.50}}'
+```
+
+- **Keys must match the model IDs pinned in `books.js` character for character** — a
+  mismatched key silently prices that model at null. This is half the reason the Books
+  pin `gemini-3.5-flash-lite` instead of the floating `-latest` alias (§6.1).
+- **Known gap:** the card is token-based, but fal bills images and video **per unit**
+  (z-image $0.005/MP, flux-2 $0.012/MP on input + output megapixels, Kling per clip) —
+  those costs cannot ride this card and the cost log reports null for them. Track them
+  in the fal dashboard until per-unit accounting exists; do not fake them as token rates.
+- Update the card whenever the pinned model version changes, in the same deploy.
+
+### 6.7 Store everything in Fly
 
 **Always single-quote values** — URLs contain `?` and `&`, which zsh otherwise mangles (`no matches found`):
 
@@ -292,7 +316,8 @@ fly secrets set \
   FAL_API_KEY='fal_sk_...' \
   REVENUECAT_API_KEY='sk_...' \
   REDIS_URL='rediss://default:...@....upstash.io:6379' \
-  DATABASE_URL='postgresql://...?sslmode=require'
+  DATABASE_URL='postgresql://...?sslmode=require' \
+  INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50},"gpt-5.4-mini":{"inputPer1M":0.75,"outputPer1M":4.50}}'
 ```
 
 Rules:

@@ -24,9 +24,9 @@ struct SendGateTests {
         #expect(SendGate.canSend(modality: .ink, snapshot: snapshot) == .allow)
     }
 
-    @Test("Plus 21st image of the day → 'the ink must rest' cooldown, never an error")
+    @Test("Plus 9th image of the day → 'the ink must rest' cooldown, never an error")
     func plusImageSoftCapCoolsDown() {
-        let snapshot = EntitlementSnapshot(tier: .plus, imagesUsedToday: 20)
+        let snapshot = EntitlementSnapshot(tier: .plus, imagesUsedToday: 8)
         #expect(SendGate.canSend(modality: .image, snapshot: snapshot) == .cooldown(seconds: 60))
     }
 
@@ -34,7 +34,7 @@ struct SendGateTests {
     func cooldownCurveGrowsAndClamps() {
         let config = GateConfig(cooldownCurveSeconds: [60, 300, 900, 3600])
         #expect(SendGate.canSend(modality: .image,
-                                 snapshot: EntitlementSnapshot(tier: .plus, imagesUsedToday: 21),
+                                 snapshot: EntitlementSnapshot(tier: .plus, imagesUsedToday: 9),
                                  config: config) == .cooldown(seconds: 300))
         #expect(SendGate.canSend(modality: .image,
                                  snapshot: EntitlementSnapshot(tier: .plus, imagesUsedToday: 99),
@@ -43,7 +43,7 @@ struct SendGateTests {
 
     @Test("Plus image under the cap flows")
     func plusImageUnderCapAllowed() {
-        let snapshot = EntitlementSnapshot(tier: .plus, imagesUsedToday: 19)
+        let snapshot = EntitlementSnapshot(tier: .plus, imagesUsedToday: 7)
         #expect(SendGate.canSend(modality: .image, snapshot: snapshot) == .allow)
     }
 

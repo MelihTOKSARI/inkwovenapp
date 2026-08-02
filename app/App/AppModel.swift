@@ -73,7 +73,10 @@ final class AppModel {
     /// answers. Hardcoded USD literals are charged at a different amount in
     /// every other storefront.
     private(set) var storePrices: [String: String] = [:]
-    var selectedPlan: Plan = .annual
+    /// Monthly pre-selected: it is the value plan (54% less than weekly
+    /// annualised), and pre-selecting the cheap-looking weekly is the framing
+    /// App Review reads as a dark pattern (3.1.2).
+    var selectedPlan: Plan = .monthly
     var showBindConfirm = false
     /// The terms/privacy/AI-disclosure sheet, reachable from the paywall and
     /// the Drawer. App Review requires both documents behind a working link.
@@ -120,13 +123,14 @@ final class AppModel {
     }
 
     enum Plan: String {
-        case annual, monthly
+        case weekly, monthly
 
-        var productID: String { self == .annual ? ProductID.plusAnnual : ProductID.plusMonthly }
+        var productID: String { self == .weekly ? ProductID.plusWeekly : ProductID.plusMonthly }
         /// Fallback only — `AppModel.displayPrice(for:fallback:)` prefers the
-        /// storefront's own string.
-        var price: String { self == .annual ? "$59.99 / year" : "$9.99 / month" }
-        var label: String { self == .annual ? "a year and a day" : "one moon" }
+        /// storefront's own string. The period always rides with the price;
+        /// a bare number on a renewing plan is a 3.1.2 rejection.
+        var price: String { self == .weekly ? "$4.99 / week" : "$9.99 / month" }
+        var label: String { self == .weekly ? "seven nights" : "one moon" }
     }
 
     enum ReplyLength: String, CaseIterable {
@@ -230,7 +234,7 @@ final class AppModel {
     }
 
     private func loadStorePrices() async {
-        let ids = [ProductID.plusAnnual, ProductID.plusMonthly] + ProductID.consumables.sorted()
+        let ids = [ProductID.plusWeekly, ProductID.plusMonthly] + ProductID.consumables.sorted()
         var prices: [String: String] = [:]
         for id in ids {
             if let price = await purchases.displayPrice(for: id) { prices[id] = price }

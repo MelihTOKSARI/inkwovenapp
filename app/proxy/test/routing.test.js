@@ -35,7 +35,7 @@ test('a routed provider streams deltas; prompt is injected server-side', async (
   assert.equal(res.statusCode, 200);
   assert.match(res.payload, /Three /);
   assert.match(res.payload, /of swords\./);
-  assert.match(res.payload, /"modelID":"gemini-flash-lite-latest"/);
+  assert.match(res.payload, /"modelID":"gemini-3.5-flash-lite"/);
 
   assert.equal(seen.book, 'oracle');
   assert.equal(seen.imageBase64, PNG_BASE64);
@@ -77,7 +77,7 @@ test('routing table: gm/tutor get the heavy model, others the default', () => {
   assert.ok(factory(findBook('gm')), 'openai key routes the heavy books');
   assert.equal(findBook('gm').models.text, 'gpt-5.4-mini');
   assert.equal(findBook('tutor').models.text, 'gpt-5.4-mini');
-  assert.equal(findBook('oracle').models.text, 'gemini-flash-lite-latest');
+  assert.equal(findBook('oracle').models.text, 'gemini-3.5-flash-lite');
 });
 
 test('no API keys → echo mode (provider factory yields null)', () => {

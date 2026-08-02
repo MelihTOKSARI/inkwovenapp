@@ -61,7 +61,7 @@ actor StoreKitEntitlementStore: PurchaseServicing {
     private var entitlementObservers: [UUID: AsyncStream<EntitlementSnapshot>.Continuation] = [:]
     private var grantObservers: [UUID: AsyncStream<Int>.Continuation] = [:]
 
-    private static let subscriptions: Set<String> = [ProductID.plusMonthly, ProductID.plusAnnual]
+    private static let subscriptions: Set<String> = [ProductID.plusWeekly, ProductID.plusMonthly]
 
     init() {}
 

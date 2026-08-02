@@ -65,16 +65,20 @@ struct PaywallView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 26)
 
+            // Both plans in one view, period beside every price, and the
+            // monthly saving stated outright: $4.99 looks smaller than $9.99
+            // while costing 2.2× as much, and a reviewer who has to do that
+            // arithmetic reads the layout as a dark pattern (3.1.2).
             HStack(spacing: 12) {
                 planCard(
-                    .annual, name: "A year and a day",
-                    price: model.displayPrice(for: ProductID.plusAnnual, fallback: "$59.99"),
-                    period: "/yr", tag: "7-day trial · best"
+                    .weekly, name: "Seven nights",
+                    price: model.displayPrice(for: ProductID.plusWeekly, fallback: "$4.99"),
+                    period: "/wk", tag: "3-day free trial"
                 )
                 planCard(
                     .monthly, name: "One moon",
                     price: model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99"),
-                    period: "/mo", tag: nil
+                    period: "/mo", tag: "save 54% · best"
                 )
             }
             .padding(.bottom, 22)
@@ -119,8 +123,8 @@ struct PaywallView: View {
 
     private var trialDisclosure: String {
         switch model.selectedPlan {
-        case .annual:
-            "First 7 days free, then \(model.displayPrice(for: ProductID.plusAnnual, fallback: "$59.99")) a year. Renews until cancelled in Settings."
+        case .weekly:
+            "Free for 3 days, then \(model.displayPrice(for: ProductID.plusWeekly, fallback: "$4.99")) a week. Renews until cancelled in Settings."
         case .monthly:
             "\(model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99")) a month. Renews until cancelled in Settings."
         }

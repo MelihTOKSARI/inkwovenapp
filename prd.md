@@ -12,7 +12,7 @@
 | Tier | Price | What's included |
 |---|---|---|
 | Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
-| Inkwoven Plus | $9.99/mo or $59.99/yr (7-day trial on annual) | Unlimited ink replies · **20 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| Inkwoven Plus | $4.99/wk (3-day free trial) or $9.99/mo — monthly is the value plan, **54% less** than weekly annualised ($21.62/mo); annual dropped from v1. Decision 2026-08-01, full model in `design/app-store-assets/subscriptions.md` | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
 | Moving-picture credits | Packs of 10 / 30 / 100 | **Launch scope.** Consumable; never bundled unlimited (real video unit cost). 1 free credit at onboarding to seed the wow. |
 | Content IAP (the Bindery) | $1.99–$7.99 | Covers, inks, seasonal papers, Book packs — high margin, zero AI cost. **Launch scope.** |
 
@@ -129,7 +129,7 @@ Native **SwiftUI + PencilKit** (ink latency, glyph animation, and Pencil interac
 | Moving pictures (5s loop) | Kling 3.0 via fal.ai | ~$0.15–0.35/clip | Best quality-per-dollar; credit at ~$0.50 = healthy margin (Sora 2 fallback) |
 | Crisis + moderation | nano-class model | negligible | Runs parallel, never blocks the reply |
 
-Heavy-user math: Plus worst case (20 img/day soft cap) ≈ $6/mo model cost, realistic heavy user ≈ $1.50/mo vs $9.99 — guarded by the 30%-of-sub alert. If heavy users hurt margins, sell image top-up credits (wallet already exists) before ever raising price. Unit-test targets (Claude Code writes tests alongside): idle-send machine, modality router, entitlement + credit math, memory injection, crisis routing. Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet.
+Heavy-user math (corrected 2026-08-01 — flux-2 bills input + output megapixels, so the old figures undercounted the Artist): at the original 20 img/day soft cap the worst case was **$16.16/mo**, not ≈$6; at the shipped cap of 8 it is **≈$5.75/mo** model cost, realistic heavy user ≈ $1.50–3.20/mo vs $9.99 — guarded by the 30%-of-sub alert. If heavy users hurt margins, sell image top-up credits (wallet already exists) before ever raising price. Unit-test targets (Claude Code writes tests alongside): idle-send machine, modality router, entitlement + credit math, memory injection, crisis routing. Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet.
 
 ## 8. Risks & Open Questions
 

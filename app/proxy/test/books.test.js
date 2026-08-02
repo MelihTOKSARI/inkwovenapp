@@ -35,7 +35,7 @@ test('GET /v1/config exposes the server-tunable knobs', async () => {
   const res = await app.inject({ method: 'GET', url: '/v1/config', headers: USER });
   const config = res.json();
   assert.equal(config.freeMomentsPerDay, 5);
-  assert.equal(config.plusImageDailySoftCap, 20);
+  assert.equal(config.plusImageDailySoftCap, 8);
   assert.ok(Array.isArray(config.cooldownCurveSeconds));
   await app.close();
 });

@@ -1,10 +1,11 @@
 import Foundation
 
-/// StoreKit product identifiers (configured in RevenueCat; task A4).
+/// StoreKit product identifiers (configured in App Store Connect; task A4).
+/// Permanent once submitted — deliberately no embedded prices.
 public enum ProductID {
-    public static let plusMonthly = "plus_monthly_9_99"
-    /// 7-day trial attaches to annual.
-    public static let plusAnnual = "plus_annual_59_99"
+    /// 3-day free trial attaches to weekly.
+    public static let plusWeekly = "plus_weekly"
+    public static let plusMonthly = "plus_monthly"
 
     public static let credits10 = "credits_10"
     public static let credits30 = "credits_30"

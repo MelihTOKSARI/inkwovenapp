@@ -98,10 +98,10 @@ Server decides modality; client dispatches. `ReplyAssembler` consumes the chunk 
 ## 7. Entitlements + credits (InkMoney — tasks A4, G1, G3, G4)
 
 - `EntitlementSnapshot` (from RevenueCat listener): `tier` (.free/.plus), `imageLedger`, `momentsUsedToday`, `archiveWindowDays`, `memoryEnabled`.
-- **Gate order (must-test):** `canSend()` runs BEFORE any model call: free 6th moment/day → `.paywall(trigger: .moments)`; Plus image #21/day → `.cooldown(duration:)` (curve fetched from server config, in-fiction slowdown, never an error).
+- **Gate order (must-test):** `canSend()` runs BEFORE any model call: free 6th moment/day → `.paywall(trigger: .moments)`; Plus image #9/day → `.cooldown(duration:)` (curve fetched from server config, in-fiction slowdown, never an error).
 - **Ledgers are server-authoritative** (proxy tracks per-user counters; client caches for offline UX and reconciles on next call — client-side clocks never grant capacity).
 - **CreditWallet:** `reserve(1) → CreditReservation` before video job; `settle(reservation)` on `.settled`; `release(reservation)` on failure (refund path, task C5). All math in pure `LedgerCalculator` with property tests (no negative balances, idempotent settle/release).
-- RevenueCat: monthly `plus_monthly_9_99`, annual `plus_annual_59_99` (7-day trial), consumables `credits_10/30/100`. Restore + refund/expiry/offline edge cases per G3.
+- StoreKit 2 direct (RevenueCat deferred to post-launch): weekly `plus_weekly` ($4.99, 3-day free trial), monthly `plus_monthly` ($9.99, no intro offer — pricing decision 2026-08-01, see `design/app-store-assets/subscriptions.md`). Consumables `credits_10/30/100` defined in `ProductID` but unshipped in v1. Restore + refund/expiry/offline edge cases per G3.
 
 ## 8. Safety hooks (InkSafety — tasks F1, F2)
 

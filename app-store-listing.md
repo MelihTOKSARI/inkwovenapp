@@ -1,5 +1,11 @@
 # Inkwoven — App Store listing (copy-paste ready)
 
+> **SUPERSEDED, 2026-08-01.** Do not paste from this file: pricing here still says
+> monthly + annual with a 7-day trial. v1 ships **weekly + monthly** (`plus_weekly`
+> $4.99/wk with a 3-day trial, `plus_monthly` $9.99/mo) and no consumables or Bindery
+> SKUs. The current listing lives in `design/app-store-assets/` (`listing.md`,
+> `subscriptions.md`) — that folder is the source of truth.
+
 **Generated:** 2026-08-01 · **Store:** Apple App Store (iPadOS + iOS) · **Locale:** en-US primary
 **Every character count below was verified programmatically against Apple's current limits.**
 

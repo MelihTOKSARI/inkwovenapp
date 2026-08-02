@@ -4,51 +4,7 @@
 
   ],
   "products" : [
-    {
-      "displayPrice" : "4.99",
-      "familyShareable" : false,
-      "internalID" : "6748301001",
-      "localizations" : [
-        {
-          "description" : "Ten moving-picture credits, sealed in wax.",
-          "displayName" : "10 Vials",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "credits_10",
-      "referenceName" : "Credits 10",
-      "type" : "Consumable"
-    },
-    {
-      "displayPrice" : "11.99",
-      "familyShareable" : false,
-      "internalID" : "6748301002",
-      "localizations" : [
-        {
-          "description" : "Thirty moving-picture credits, sealed in wax.",
-          "displayName" : "30 Vials",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "credits_30",
-      "referenceName" : "Credits 30",
-      "type" : "Consumable"
-    },
-    {
-      "displayPrice" : "29.99",
-      "familyShareable" : false,
-      "internalID" : "6748301003",
-      "localizations" : [
-        {
-          "description" : "One hundred moving-picture credits, sealed in wax.",
-          "displayName" : "100 Vials",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "credits_100",
-      "referenceName" : "Credits 100",
-      "type" : "Consumable"
-    }
+
   ],
   "settings" : {
     "_failTransactionsEnabled" : false,
@@ -73,6 +29,35 @@
           "codeOffers" : [
 
           ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6748302004",
+          "introductoryOffer" : {
+            "internalID" : "6748302005",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P3D"
+          },
+          "localizations" : [
+            {
+              "description" : "Endless moments, three days free.",
+              "displayName" : "Seven Nights",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "plus_weekly",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "Plus Weekly",
+          "subscriptionGroupID" : "6748302000",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
           "displayPrice" : "9.99",
           "familyShareable" : false,
           "groupNumber" : 1,
@@ -85,38 +70,9 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "plus_monthly_9_99",
+          "productID" : "plus_monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Plus Monthly",
-          "subscriptionGroupID" : "6748302000",
-          "type" : "RecurringSubscription"
-        },
-        {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "59.99",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "6748302002",
-          "introductoryOffer" : {
-            "internalID" : "6748302003",
-            "paymentMode" : "free",
-            "subscriptionPeriod" : "P1W"
-          },
-          "localizations" : [
-            {
-              "description" : "Endless moments, every page kept, seven days free.",
-              "displayName" : "A Year and a Day",
-              "locale" : "en_US"
-            }
-          ],
-          "productID" : "plus_annual_59_99",
-          "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Plus Annual",
           "subscriptionGroupID" : "6748302000",
           "type" : "RecurringSubscription"
         }

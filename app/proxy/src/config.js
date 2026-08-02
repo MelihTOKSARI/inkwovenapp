@@ -4,7 +4,11 @@
 // that only the server enforces live in LIMITS below and are never served.
 export const CONFIG = {
   freeMomentsPerDay: 5,
-  plusImageDailySoftCap: 20,
+  // Set from the flux-2 cost model in design/app-store-assets/subscriptions.md
+  // §6: flux-2 bills input + output megapixels, so a worst-case Plus user at
+  // 8 Artist images/day costs ~30% of net monthly revenue (at 20 it was
+  // $16.16/mo against $8.49 net). Raise it from real usage data, not a hunch.
+  plusImageDailySoftCap: 8,
   // Cooldown per image past the soft cap; last entry repeats.
   cooldownCurveSeconds: [60, 300, 900, 3600],
   rateLimits: {
@@ -62,7 +66,9 @@ export const LIMITS = {
 
 /**
  * Rate card for the cost log, supplied at deploy time as INK_MODEL_PRICING:
- *   {"gemini-flash-lite-latest":{"inputPer1M":0.0,"outputPer1M":0.0}}
+ *   {"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50}}
+ * Keys must match the model IDs pinned in books.js. The card is token-based,
+ * so fal's per-unit image/video costs cannot ride here — see deployment.md §6.
  *
  * Prices are a business input, not a source constant, and inventing one is
  * worse than reporting none — so with no rate card the log carries truthful

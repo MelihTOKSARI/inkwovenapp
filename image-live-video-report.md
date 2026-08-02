@@ -28,7 +28,7 @@
 ### Server (the bulk of the work)
 1. **Prompt derivation** — turn the page into an image brief: typed text arrives as text (once the client sends it); handwriting/sketches get read by the vision model that already sees the page (Gemini), which emits a one-line subject description. Final image prompt = *user subject* + *per-book style suffix* (the current `imagePrompt` becomes the style half, not the whole).
 2. **Text-to-image route** for the non-Artist books via `z-image-turbo`, with a per-request random seed. Keep `flux-2/edit` exclusively for real Pencil sketches.
-3. **Video provider** — `kling-3` on fal, image-to-video: source frame = the just-generated image URL, plus a short motion prompt derived from the same brief ("candle flame flickers, smoke drifts, her cloak stirs"). Emit `video_intent` → reserve a vial → `video_final`; refund on failure. The client already handles every one of those events.
+3. **Video provider** — `kling-video-v3-standard` on fal, image-to-video: source frame = the just-generated image URL, plus a short motion prompt derived from the same brief ("candle flame flickers, smoke drifts, her cloak stirs"). Emit `video_intent` → reserve a vial → `video_final`; refund on failure. The client already handles every one of those events.
 4. **A second exchange shape for "make it move"** — the button fires after `done`, so the develop-to-video upgrade needs its own endpoint or a re-exchange carrying the image URL.
 5. **Moderation gate** before any image/video job (the TODO at `server.js:115`).
 6. **Real token/cost accounting** — `tokens: 0, unit_cost: 0` in the cost log defeats the 30%-of-subscription guardrail it exists for.
@@ -49,7 +49,7 @@ The magic of the diary is that the page *responds* and the response *breathes*. 
 
 **Layer 1 — ambient life (free).** Every developed image gets the client-side Ken Burns drift + the paper-grain shimmer that's already in `PageView`. Cost: zero. Effect: no image on a page is ever fully still. This is the baseline "diary is alive" feeling and it must not be paywalled.
 
-**Layer 2 — true living picture (1 vial).** "Make it move" upgrades the still to a kling-3 ≤5s seamless loop. The crucial detail is the **transition**: crossfade from the exact still into the video's first frame (ask kling for image-to-video so frame 0 *is* the still), so the picture appears to simply start breathing rather than being replaced. Add a soft haptic when motion begins. This moment is the App Store screenshot.
+**Layer 2 — true living picture (1 vial).** "Make it move" upgrades the still to a kling-video-v3-standard ≤5s seamless loop. The crucial detail is the **transition**: crossfade from the exact still into the video's first frame (ask kling for image-to-video so frame 0 *is* the still), so the picture appears to simply start breathing rather than being replaced. Add a soft haptic when motion begins. This moment is the App Store screenshot.
 
 **Layer 3 — memory.** A living page that gets archived stays living: loop file stored locally, replays when the page is reopened. The diary *remembering* in motion is what no competitor screenshot can convey.
 
@@ -66,7 +66,7 @@ The magic of the diary is that the page *responds* and the response *breathes*. 
 | P0 | Client sends typed text in `PageContext`; server composes image prompt from *user's words* + book style; seed per request | Fixes the reported bug outright |
 | P0 | Route typed input → `z-image-turbo`, sketches → `flux-2/edit` | Right model per modality; unlocks images for all image-books |
 | P1 | Persist media locally; archive keeps images/loops | Fal URLs expire; memory is the product |
-| P1 | kling-3 video provider + `video_*` events + vial settle/refund server-side | Client is already waiting for it |
+| P1 | kling-video-v3-standard video provider + `video_*` events + vial settle/refund server-side | Client is already waiting for it |
 | P2 | Moderation gate + real cost logging | Must land before real keys ship |
 | P2 | Turbo preview under the develop animation; crossfade still→loop; haptics | The polish that makes it feel supernatural |
 

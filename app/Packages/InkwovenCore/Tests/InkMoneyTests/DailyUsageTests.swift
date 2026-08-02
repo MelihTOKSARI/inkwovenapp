@@ -140,13 +140,13 @@ struct EntitlementResolverTests {
 
     @Test("the resolver joins durable counters to the entitlement tier")
     func resolverComposesBothHalves() async {
-        let usage = DailyUsage(dayStart: Date(), momentsUsed: 7, imagesUsed: 21)
+        let usage = DailyUsage(dayStart: Date(), momentsUsed: 7, imagesUsed: 9)
         let resolver = EntitlementResolver(entitlements: PlusProvider(), usage: StubUsage(usage: usage))
         let snapshot = await resolver.snapshot()
 
         #expect(snapshot.tier == .plus)
         #expect(snapshot.momentsUsedToday == 7)
-        #expect(snapshot.imagesUsedToday == 21)
+        #expect(snapshot.imagesUsedToday == 9)
         #expect(snapshot.memoryEnabled)
         // The Plus image soft-cap branch is only reachable once real counters
         // arrive — with a hardcoded snapshot it was dead code.
