@@ -35,10 +35,12 @@ SUBSCRIPTIONS (StoreKit 2, group "Plus")
 MOVING PICTURES (AI-generated video)
 - Video is never generated automatically. The model marks whether a reply is a scene worth animating; only then does a "make this move" control appear, and a clip is requested only if the user taps it. Nothing is generated or charged without a deliberate tap.
 - Every user gets 2 free clips; after that they buy consumable "vials". A credit is reserved before generation and released automatically on failure, so nobody pays for a clip that did not arrive.
-- Prompt and output both pass moderation before anything reaches the page, at the strictest threshold in the app. A flagged clip is never shown and always refunds. Styles are illustrative; no photorealistic real people.
+- The generation prompt is written by our server, never by the user: the model describes the scene it just wrote, that description is stored server-side, and the app can only point at it. There is no free-text prompt field anywhere in the app.
+- That prompt is checked by a moderation service before generation, and the video provider's own content filter runs on the output. A clip rejected at either stage is never shown and always refunds the credit. Every generated prompt carries an illustrative-style instruction: no photorealistic imagery and no depictions of real people.
 - The Keeper is the private, Face ID-locked diary; converting one of its pages transmits it, so the app asks separate explicit consent before the first Keeper clip.
 - Tapping a finished clip expands it full screen, looping; tap or swipe down to return.
-- To test: in the Storyteller write two or three sentences of a scene and rest the pen — the reply will offer to move. The Tutor deliberately never offers it; a worked solution is not a scene.
+- To test: in the Storyteller write two or three sentences of a scene and rest the pen — the reply will offer to move. The Tutor deliberately never offers it; a worked solution is not a scene. A moving picture takes up to a couple of minutes to develop, and the page shows that wait in-fiction rather than as a progress bar.
+- If a clip ever answers "the ink must rest", that is our own spending safeguard on free clips rather than a fault; please contact us at the address below and we will lift it immediately for your review.
 
 SAFETY
 If a user's writing indicates personal crisis, the app deliberately breaks the fiction and shows a plain care screen with real resources instead of a stylized reply — writing that expresses serious distress in any Book will route there. Image generation runs behind provider safety filters, and every Book and output type can be disabled server-side without a new binary if an issue is ever found.
@@ -75,8 +77,20 @@ The last paragraph of Part A promises the reviewer a live backend. Make it true
 5. **One real end-to-end exchange from the actual TestFlight build** on a physical
    iPad: write → rest pen → streamed ink reply, plus one Artist image. Do this
    after steps 1–4, the same day you submit.
-6. Provider budget caps set (Google AI Studio, OpenAI, fal.ai) so a review spike
-   can't run a surprise bill.
+6. **One real moving picture, same build, same day:** a Storyteller scene that
+   offers to move → tap → clip blooms → tap the clip for full screen. Then kill
+   the app mid-generation once and confirm the credit comes back. Part A tells
+   the reviewer this works; this is where that becomes true.
+7. **`INK_IAP_MODE=anonymous` and `INK_VIDEO_PRICING` set** (deployment.md
+   §6.7–6.8). Without the first, every vial purchase answers 501 *after* the
+   reviewer has been charged in the sandbox — an immediate rejection and a real
+   refund request.
+8. **Raise `video.freeClipMonthlyCeiling` before review.** It fails closed in
+   fiction ("the ink must rest"), which a reviewer would read as a broken
+   feature. Part A tells them to contact us; better that they never see it.
+9. Provider budget caps set (Google AI Studio, OpenAI, **fal.ai — video is the
+   one modality that can run a real bill on its own**) so a review spike can't
+   run a surprise bill.
 
 Also worth knowing if the reviewer asks: the app sends a speculative snapshot
 upload about 2 seconds after the pen rests (cancelled if writing resumes) so the
