@@ -11,6 +11,7 @@ public struct ProxyEndpoints: Sendable {
     public func preuploadTicket(_ id: String) -> URL { preupload.appending(path: id) }
     public var books: URL { baseURL.appending(path: "v1/books") }
     public var config: URL { baseURL.appending(path: "v1/config") }
+    public var report: URL { baseURL.appending(path: "v1/report") }
 }
 
 /// App-attest + anonymous user token; Sign in with Apple upgrades the token.
@@ -37,6 +38,60 @@ struct ExchangeRequestBody: Encodable {
     var snapshotBase64: String?
     var digest: String
     var ticketID: String?
+}
+
+/// One user-triggered report of a reply (guideline 1.2). Assembled only at
+/// the moment the user taps send — reporting is a cold path, fully apart
+/// from the exchange, and nothing is ever queued or sent in the background.
+/// `reportID` is minted client-side and doubles as the server's idempotency
+/// key, so a retried or double-tapped send files exactly one report.
+public struct ReportPayload: Equatable, Sendable, Encodable {
+    public var reportID: UUID
+    public var replyID: UUID
+    public var pageID: UUID
+    public var bookID: String
+    public var reason: String
+    public var note: String?
+    public var replyKind: String
+    public var replyText: String?
+    public var assetRef: String?
+    public var modelID: String
+    public var snapshotDigest: String
+    public var snapshotBase64: String
+    public var createdAt: Date
+    public var submittedAt: Date
+
+    public init(
+        reportID: UUID,
+        replyID: UUID,
+        pageID: UUID,
+        bookID: String,
+        reason: String,
+        note: String?,
+        replyKind: String,
+        replyText: String?,
+        assetRef: String?,
+        modelID: String,
+        snapshotDigest: String,
+        snapshotBase64: String,
+        createdAt: Date,
+        submittedAt: Date
+    ) {
+        self.reportID = reportID
+        self.replyID = replyID
+        self.pageID = pageID
+        self.bookID = bookID
+        self.reason = reason
+        self.note = note
+        self.replyKind = replyKind
+        self.replyText = replyText
+        self.assetRef = assetRef
+        self.modelID = modelID
+        self.snapshotDigest = snapshotDigest
+        self.snapshotBase64 = snapshotBase64
+        self.createdAt = createdAt
+        self.submittedAt = submittedAt
+    }
 }
 
 public final class ProxyClient: Sendable {
@@ -168,6 +223,25 @@ public final class ProxyClient: Sendable {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             return try decoder.decode(UploadTicket.self, from: data)
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
+    /// Files a user-triggered report of a reply. The server answers with a
+    /// small ack and never echoes content; failures map to the same
+    /// ProxyError taxonomy so the sheet can fail in-fiction and retry.
+    public func report(_ payload: ReportPayload) async throws {
+        var request = URLRequest(url: endpoints.report)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        request.httpBody = try encoder.encode(payload)
+        do {
+            let (_, response) = try await session.data(for: request)
+            try Self.check(response)
         } catch {
             throw Self.mapped(error)
         }

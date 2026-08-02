@@ -5,6 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { CONFIG, LIMITS } from './config.js';
 
 const TICKET_TTL_MS = 60_000;
+const REPORT_RETENTION_MS = LIMITS.reportRetentionDays * 24 * 60 * 60 * 1000;
+
+/** Client-supplied report IDs key the reports map; reject junk early. */
+const REPORT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * A reservation amount is client-supplied. Anything but a whole number in
@@ -32,6 +36,19 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   const wallets = new Map(); // userID → { entries: [{delta, reason, at}], holds: Map<id, amount>, resolved: Map<id, 'settled'|'released'> }
   const idempotency = new Map(); // `${userID}:${key}` → Promise<response>
   const rateBuckets = new Map(); // key → { count, windowStart }
+  const reports = new Map(); // reportID → { userID, report, expiresAt }
+
+  /** Deletes reports past retention; returns how many went. */
+  function sweepReports(now) {
+    let removed = 0;
+    for (const [id, entry] of reports) {
+      if (entry.expiresAt <= now) {
+        reports.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
 
   function wallet(userID) {
     let w = wallets.get(userID);
@@ -156,6 +173,40 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     /** Diagnostics for the dev store only; Redis reclaims by TTL instead. */
     ticketCount() {
       return tickets.size;
+    },
+
+    /**
+     * Files a user-triggered report of a reply (guideline 1.2). Retention is
+     * enforced on every write — the dev store has no timer to wait on — and
+     * a duplicate reportID never files twice, so the route's idempotency
+     * wrapper and this store agree on what a double-tap means.
+     */
+    fileReport(userID, report) {
+      if (!REPORT_UUID_RE.test(report?.reportID ?? '')) return { error: 'invalid_report' };
+      sweepReports(Date.now());
+      if (!reports.has(report.reportID)) {
+        reports.set(report.reportID, {
+          userID,
+          report,
+          expiresAt: Date.now() + REPORT_RETENTION_MS,
+        });
+      }
+      return { received: true };
+    },
+
+    /** How many un-expired reports stand — for one user, or all of them. */
+    reportCount(userID) {
+      sweepReports(Date.now());
+      let count = 0;
+      for (const entry of reports.values()) {
+        if (userID === undefined || entry.userID === userID) count += 1;
+      }
+      return count;
+    },
+
+    /** The retention sweep, callable with a clock so tests can exercise it. */
+    sweepExpiredReports(now = Date.now()) {
+      return sweepReports(now);
     },
 
     /** Fixed-window rate limit; returns true when the call is allowed. */

@@ -95,6 +95,9 @@ struct RootView: View {
         model.keeperUnlocked = false
         di.archive.sealKeeper()
         if model.revisit?.bookID == BookID.keeper.rawValue { model.revisit = nil }
+        // A pending report holds a full entry the same way revisit does; a
+        // sealed Keeper page may not wait in memory behind a closed lock.
+        if model.reportTarget?.bookID == BookID.keeper.rawValue { model.reportTarget = nil }
         if model.activeBook.locked && (model.screen == .page || model.screen == .remembered) {
             model.screen = .shelf
         }

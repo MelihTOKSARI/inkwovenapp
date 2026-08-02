@@ -87,6 +87,49 @@ const ticketParamsSchema = {
   },
 };
 
+// Loose on purpose: rejects garbage without turning a clock-skewed device's
+// report away over a timestamp format.
+const ISO_DATE_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}';
+
+const reportSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'reportID',
+      'replyID',
+      'pageID',
+      'bookID',
+      'reason',
+      'replyKind',
+      'modelID',
+      'snapshotDigest',
+      'snapshotBase64',
+      'createdAt',
+      'submittedAt',
+    ],
+    properties: {
+      reportID: { type: 'string', pattern: UUID_PATTERN },
+      replyID: { type: 'string', pattern: UUID_PATTERN },
+      pageID: { type: 'string', pattern: UUID_PATTERN },
+      bookID: { type: 'string', minLength: 1, maxLength: 64 },
+      reason: {
+        type: 'string',
+        enum: ['disturbing', 'wrong_or_nonsense', 'not_what_i_asked', 'something_else'],
+      },
+      note: { type: ['string', 'null'], maxLength: LIMITS.maxReportNoteChars },
+      replyKind: { type: 'string', enum: ['ink', 'image', 'video'] },
+      replyText: { type: ['string', 'null'], maxLength: LIMITS.maxReportReplyChars },
+      assetRef: { type: ['string', 'null'], maxLength: 500 },
+      modelID: { type: 'string', maxLength: 200 },
+      snapshotDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+      snapshotBase64: { type: 'string', minLength: 1, maxLength: LIMITS.maxSnapshotBase64Chars },
+      createdAt: { type: 'string', maxLength: 40, pattern: ISO_DATE_PATTERN },
+      submittedAt: { type: 'string', maxLength: 40, pattern: ISO_DATE_PATTERN },
+    },
+  },
+};
+
 /** Pre-stream provider failures still get a real status; see the exchange route. */
 function statusForProviderError(error) {
   if (error instanceof ProviderError) {
@@ -678,6 +721,58 @@ export function build(options = {}) {
     // minted an onboarding grant per rotation.
     return stores.walletView(request.userID);
   });
+
+  // -- POST /v1/report: user-triggered report of a reply (guideline 1.2) -----
+  // A cold path, fully apart from the exchange machinery: the payload carries
+  // the reported page's snapshot and reply, assembled client-side at the
+  // moment the user taps send — never before. The snapshot pushes the body
+  // past the 4KB default, so the route opts up the way /v1/exchange does.
+  // The reportID doubles as the idempotency key: a double-tap files once.
+  app.post(
+    '/v1/report',
+    { schema: reportSchema, bodyLimit: LIMITS.reportBodyLimit },
+    async (request, reply) => {
+      if (
+        !(await withinLimits(
+          request,
+          reply,
+          CONFIG.rateLimits.reportsPerUserPerMinute,
+          CONFIG.rateLimits.reportsPerIPPerMinute,
+        ))
+      ) {
+        return reply;
+      }
+
+      const body = request.body;
+      // A reply is ink (text) or a developed asset; a report naming neither
+      // carries nothing a reviewer could look at.
+      const content = body.replyKind === 'ink' ? body.replyText : body.assetRef;
+      if (!content) return reply.code(400).send({ error: 'invalid_report' });
+
+      const snapshot = Buffer.from(body.snapshotBase64, 'base64');
+      if (snapshot.length === 0) return reply.code(400).send({ error: 'missing_snapshot' });
+      if (snapshot.length > LIMITS.maxSnapshotBytes) {
+        return reply.code(413).send({ error: 'snapshot_too_large' });
+      }
+      if (!sniffImageMime(snapshot)) {
+        return reply.code(415).send({ error: 'unsupported_snapshot' });
+      }
+      // Same integrity check as /v1/preupload: the digest the client committed
+      // to must be the digest of the bytes that arrived.
+      const actualDigest = createHash('sha256').update(snapshot).digest('hex');
+      if (!digestMatches(body.snapshotDigest, actualDigest)) {
+        return reply.code(400).send({ error: 'digest_mismatch' });
+      }
+
+      const result = await stores.idempotent(request.userID, `report:${body.reportID}`, () =>
+        stores.fileReport(request.userID, body),
+      );
+      if (result.error) return reply.code(400).send(result);
+      // A counter only: the report's content goes to the store, never the log.
+      request.log?.info?.({ route: 'report', book: body.bookID, reason: body.reason });
+      return result;
+    },
+  );
 
   return app;
 }

@@ -48,6 +48,9 @@ requested. If you start writing again, that upload is cancelled or simply expire
 unused on the server within about a minute. If you do continue to the reply, the
 already-uploaded snapshot is used.
 
+The only other time anything leaves your device is a report you choose to file
+about a reply — see "Reporting a reply" below.
+
 ## Who receives it
 
 Two hops, both solely to generate your reply:
@@ -81,16 +84,41 @@ way any page can answer. If you want writing that never leaves the device at all
 write on a page and delete it without waiting for a reply, or keep that writing
 outside Inkwoven.
 
+## Reporting a reply
+
+If a reply is offensive, wrong, or otherwise misbehaves, you can report it: touch
+and hold the reply on the page and choose "Report this reply." Reporting is the
+one way any page content is ever stored on our server, and it happens only
+because you asked:
+
+- **Only ever user-initiated.** Nothing is reported automatically — no sampling,
+  no background flagging, no quiet telemetry of your pages. A report exists
+  because you pressed send, or it does not exist.
+- **What a report sends** — named on the report sheet before you send it: the
+  reply you are reporting, an image of your strokes from that page, which Book it
+  came from, when it was written, your chosen reason, and your optional note.
+  Reporting a Keeper page shows a stronger notice first, because that page is
+  otherwise sealed on your device.
+- **Nothing leaves until you press send.** Dismissing the sheet sends nothing;
+  a failed send is not retried behind your back.
+- **Deleted after 90 days.** Reports are kept so a human can review them, and
+  the server deletes them 90 days after they are filed. A report's content never
+  appears in server logs — the log records only that a report with some reason
+  was filed.
+
 ## Retention
 
 - **On your device:** pages stay until you delete them.
 - **On the Inkwoven proxy:** your page content is not retained after the exchange
   is served. Snapshots exist on the server only as short-lived working data — a
   speculative upload is deleted the moment it is used, and expires on its own
-  within about a minute if it never is. Page content is not written to the proxy's
-  logs or its database. What the proxy does keep is bookkeeping tied to the random
-  device token: fair-use counters that expire within minutes, and a small ledger of
-  granted and spent credits — none of which contains anything you wrote.
+  within about a minute if it never is. With a single exception — a report you
+  choose to file, described under "Reporting a reply" — page content is not
+  written to the proxy's logs or its database. What the proxy does keep is
+  bookkeeping tied to the random device token: fair-use counters that expire
+  within minutes, and a small ledger of granted and spent credits — none of which
+  contains anything you wrote.
+- **Reports you file:** kept for human review, deleted 90 days after filing.
 - **At the AI providers:** they process your content to produce the reply, under
   their respective API terms, which govern their systems — we cannot make promises
   on their behalf. What we can promise is what we send: only the single exchange's

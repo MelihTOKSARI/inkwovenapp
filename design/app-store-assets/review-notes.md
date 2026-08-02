@@ -37,6 +37,10 @@ If a user's writing indicates personal crisis, the app deliberately breaks the f
 NOTIFICATIONS
 The app sends one optional nightly local reminder; permission is requested only after the user's first answered page, it is off if declined, and no push server or remote notification is involved.
 
+REPORTING AI CONTENT (guideline 1.2)
+- Any AI reply can be reported: touch and hold the reply text on a page — the current reply or any earlier one in the thread — and choose "Report this reply". The sheet asks for a reason, takes an optional note, states in plain words exactly what will be sent, and transmits nothing until the user taps send. Reports are stored on our server for human review and deleted after 90 days.
+- Published contact information: the Drawer (settings) has a "Write to the binder" row that opens an email to our support address; the same address appears in the privacy policy.
+
 The app's backend is a small relay service operated by us; it holds the model API keys and is live for this review — no configuration is needed on your side.
 ```
 

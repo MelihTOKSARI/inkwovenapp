@@ -111,6 +111,10 @@ final class AppModel {
         didSet { defaults.set(replyLength.rawValue, forKey: "ink.replyLength") }
     }
     var showDeleteConfirm = false
+    /// The completed reply under report (guideline 1.2): set by a long-press
+    /// on a reply, cleared on dismiss or send. Presence drives the report
+    /// sheet overlay the way `showPolicies` drives the policy sheet.
+    var reportTarget: PageArchive.Entry?
 
     // The evening ritual. Off until the writer grants notifications after
     // their first answered page; never required for the app to function.

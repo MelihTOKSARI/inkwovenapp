@@ -30,6 +30,9 @@ public enum AnalyticsEvent: Equatable, Sendable {
     /// An app open attributed to the evening ritual's notification; `book` is
     /// the voice that asked.
     case ritualOpened(book: BookID)
+    /// User-triggered report of a reply (guideline 1.2). Carries the reason
+    /// enum only — never the note, never page content.
+    case reportSubmitted(book: BookID, reason: String)
 
     public var name: String {
         switch self {
@@ -47,6 +50,7 @@ public enum AnalyticsEvent: Equatable, Sendable {
         case .memoryTorn: "memory_torn"
         case .notificationPermissionAnswered: "notification_permission_answered"
         case .ritualOpened: "ritual_opened"
+        case .reportSubmitted: "report_submitted"
         }
     }
 
@@ -78,6 +82,8 @@ public enum AnalyticsEvent: Equatable, Sendable {
             ["granted": .bool(granted)]
         case .ritualOpened(let book):
             ["book": .string(book.rawValue)]
+        case .reportSubmitted(let book, let reason):
+            ["book": .string(book.rawValue), "reason": .string(reason)]
         }
     }
 }

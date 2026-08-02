@@ -78,6 +78,7 @@
 - [ ] F4 Sign in with Apple (optional) + in-app account deletion — **M**
 - [x] F5 Export (PDF/text) + delete-all — **S**
 - [x] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
+- [x] F7 Report-a-reply (guideline 1.2): long-press report sheet with Keeper-aware consent, `POST /v1/report` behind auth + low rate limits, 90-day retention enforced by a tested sweep, Drawer "Write to the binder" contact row — **M**
 
 ### Epic G — Monetization (D4)
 

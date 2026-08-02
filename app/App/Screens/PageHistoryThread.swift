@@ -10,6 +10,9 @@ import SwiftUI
 struct PageHistoryThread: View {
     let entries: [PageArchive.Entry]
     let book: Book
+    /// Long-press on an archived reply opens the report sheet. Optional so
+    /// read-only surfaces can show the thread without the affordance.
+    var report: ((PageArchive.Entry) -> Void)? = nil
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 30) {
@@ -54,6 +57,12 @@ struct PageHistoryThread: View {
                         .frame(maxWidth: 720, alignment: .leading)
                 }
                 .fixedSize(horizontal: false, vertical: true)
+                // Archived replies are completed by construction, so every
+                // one is reportable when the surface allows it.
+                .modifier(ReportableReply(
+                    entry: report == nil ? nil : entry,
+                    report: { report?($0) }
+                ))
             }
         }
     }
