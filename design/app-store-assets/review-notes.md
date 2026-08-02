@@ -34,6 +34,9 @@ SUBSCRIPTIONS (StoreKit 2, group "Plus")
 SAFETY
 If a user's writing indicates personal crisis, the app deliberately breaks the fiction and shows a plain care screen with real resources instead of a stylized reply — writing that expresses serious distress in any Book will route there. Image generation runs behind provider safety filters, and every Book and output type can be disabled server-side without a new binary if an issue is ever found.
 
+NOTIFICATIONS
+The app sends one optional nightly local reminder; permission is requested only after the user's first answered page, it is off if declined, and no push server or remote notification is involved.
+
 The app's backend is a small relay service operated by us; it holds the model API keys and is live for this review — no configuration is needed on your side.
 ```
 

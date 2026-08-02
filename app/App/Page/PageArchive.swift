@@ -32,6 +32,11 @@ final class PageArchive: PageArchiving {
 
     /// Every Book but the Keeper.
     private(set) var entries: [Entry] = []
+    /// When any page last archived — a date and nothing else. The Keeper's
+    /// writes count without breaking the seal: the evening ritual has to stay
+    /// silent on a day the user wrote, whichever Book kept the page, and the
+    /// sealed store cannot be scanned for that answer.
+    private(set) var lastWrittenAt: Date?
     /// The Keeper's pages, resident only between `unsealKeeper()` and
     /// `sealKeeper()`. While the gate is shut they are not in memory to hand
     /// out, to dump, or to leak into a crash report.
@@ -41,6 +46,7 @@ final class PageArchive: PageArchiving {
     private let directory: URL
     private let openFileURL: URL
     private let keeperFileURL: URL
+    private let lastWrittenURL: URL
     /// A store that exists but could not be read is not an empty store. These
     /// hold writes back so the next page never overwrites something still
     /// recoverable.
@@ -54,6 +60,10 @@ final class PageArchive: PageArchiving {
         self.directory = dir
         openFileURL = dir.appending(path: "remembered-pages.json")
         keeperFileURL = dir.appending(path: "keeper-pages.json")
+        lastWrittenURL = dir.appending(path: "last-written.json")
+        if let data = try? Data(contentsOf: lastWrittenURL) {
+            lastWrittenAt = try? JSONDecoder().decode(Date.self, from: data)
+        }
         switch Self.load(from: openFileURL) {
         case .loaded(let loaded): entries = loaded
         case .absent: break
@@ -83,7 +93,25 @@ final class PageArchive: PageArchiving {
             entries.insert(entry, at: 0)
             persist(entries, to: openFileURL, blocked: openWritesBlocked)
         }
+        recordWrite(at: entry.createdAt)
         return entry.id
+    }
+
+    /// The timestamp bypasses the write-holds deliberately: even when a store
+    /// is blocked the page was still written tonight, and the ritual must not
+    /// ring over it.
+    private func recordWrite(at date: Date) {
+        lastWrittenAt = date
+        do {
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUnlessOpen]
+            )
+            try JSONEncoder().encode(date)
+                .write(to: lastWrittenURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        } catch {
+            Self.log.error("last-written stamp failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func entries(for book: BookID) -> [Entry] {
@@ -103,9 +131,10 @@ final class PageArchive: PageArchiving {
     func deleteAll() -> Bool {
         entries.removeAll()
         keeperEntries.removeAll()
+        lastWrittenAt = nil
 
         let fm = FileManager.default
-        var targets = [openFileURL, keeperFileURL]
+        var targets = [openFileURL, keeperFileURL, lastWrittenURL]
         if let siblings = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             targets += siblings.filter { url in
                 let name = url.lastPathComponent

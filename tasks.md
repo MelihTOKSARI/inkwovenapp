@@ -89,7 +89,7 @@
 
 ### Epic H — Ritual & launch (D5–D6)
 - [x] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s; **fully pen-driven — name written in ink on the flyleaf, zero keyboard on iPad anywhere in onboarding (launch-blocking)** — **M**
-- [ ] H2 Notification ritual per Book + quiet hours — **M**
+- [x] H2 Notification ritual per Book + quiet hours — **M** *(ships as one nightly local reminder in the last-opened Book's voice, opt-in after the first answered page; "quiet hours" is the single on/off toggle plus wrote-today suppression, not a full quiet-hours range)*
 - [ ] H3 Settings: hand/ink, reply length, fade timing, left-handed mode — **S**
 - [ ] H4 Haptics/sound on absorb & develop; perf pass iPad mini→Pro — **M**
 - [ ] H5 Share-card export (watermarked) — **S**
