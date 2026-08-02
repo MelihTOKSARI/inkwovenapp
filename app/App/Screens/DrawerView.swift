@@ -18,6 +18,8 @@ struct DrawerView: View {
     /// Marginalia for the rare failures: nothing to export, a wipe that
     /// could not finish. Never a raw error string.
     @State private var drawerNote: String?
+    /// The "Written in" row folds its nine choices away until asked.
+    @State private var showHands = false
 
     private let inkChoices: [UInt32] = [0x2E2418, 0x6B4A2B, 0x1F5A63, 0x7A2E2B]
 
@@ -49,6 +51,10 @@ struct DrawerView: View {
                                     options: AppModel.ReplyLength.allCases.map { ($0.rawValue, $0) },
                                     selection: model.replyLength
                                 ) { model.replyLength = $0 }
+                            }
+                            handRow
+                            if showHands {
+                                shelfHandPicker
                             }
                             row("Pages fade after") {
                                 Text("30 days").font(InkFont.body(15)).foregroundStyle(room.accent)
@@ -201,6 +207,53 @@ struct DrawerView: View {
 
     private var hairline: some View {
         Rectangle().fill(room.accent.opacity(0.1)).frame(height: 1)
+    }
+
+    // MARK: - The Voice: script hand
+
+    /// One hand for the whole shelf. A single Book re-dressed from its own
+    /// page reads here as "a mixed shelf".
+    private var handRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) { showHands.toggle() }
+        } label: {
+            HStack(spacing: 12) {
+                Text("Written in").font(InkFont.body(16)).foregroundStyle(room.text)
+                Spacer(minLength: 8)
+                Text(shelfHandName)
+                    .font(InkFont.body(15))
+                    .foregroundStyle(room.accent)
+                Text("›")
+                    .font(InkFont.body(15))
+                    .foregroundStyle(room.accent)
+                    .rotationEffect(.degrees(showHands ? 90 : 0))
+            }
+            .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) { hairline }
+        .accessibilityLabel("Written in. \(shelfHandName)")
+        .accessibilityHint(showHands ? "Closes the hand choices." : "Opens the hand choices.")
+    }
+
+    private var shelfHandName: String {
+        switch model.shelfHand {
+        case .own: return "Each Book's own"
+        case .uniform(let id): return Hand.by(id: id)?.name ?? "Each Book's own"
+        case .mixed: return "A mixed shelf"
+        }
+    }
+
+    private var shelfHandPicker: some View {
+        let uniform: String? = if case .uniform(let id) = model.shelfHand { id } else { nil }
+        return HandPickerList(
+            ownLabel: "Each Book's own",
+            ownHand: nil,
+            selection: uniform,
+            ownSelected: model.shelfHand == .own
+        ) { model.setAllHands($0) }
+            .overlay(alignment: .bottom) { hairline }
     }
 
     // MARK: - The Hand

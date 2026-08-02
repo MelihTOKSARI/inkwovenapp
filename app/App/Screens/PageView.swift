@@ -17,20 +17,22 @@ struct PageView: View {
     @State private var restSettled = false
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
+    @State private var showHandPicker = false
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
-    private let book: Book
+    /// Read through the model, not captured at init: choosing a hand on the
+    /// hand card must re-ink the opener and the replies while the page is
+    /// still open.
+    private var book: Book { model.activeBook }
     private let archive: PageArchive
     private var net: Reachability { .shared }
 
     init(model: AppModel, di: AppDI) {
         self.model = model
-        let book = model.activeBook
-        self.book = book
         self.archive = di.archive
         _interactor = State(initialValue: PageInteractor(
-            proxy: di.proxy, analytics: di.analytics, book: book.id, archive: di.archive
+            proxy: di.proxy, analytics: di.analytics, book: model.activeBookID, archive: di.archive
         ))
     }
 
@@ -70,6 +72,10 @@ struct PageView: View {
 
                 backPill
                 rememberedRibbon
+
+                if showHandPicker {
+                    handCard
+                }
             }
         }
         .onChange(of: interactor.status) { _, status in
@@ -180,15 +186,84 @@ struct PageView: View {
     private var header: some View {
         HStack(spacing: 16) {
             if model.leftHanded {
-                PageToolTray(interactor: interactor, showCancelSend: showCancelSend)
+                PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
                 headerTitle
             } else {
                 headerTitle
-                PageToolTray(interactor: interactor, showCancelSend: showCancelSend)
+                PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
             }
         }
         .padding(.bottom, 26)
         .padding(model.leftHanded ? .leading : .trailing, 52)
+    }
+
+    private func openHandCard() {
+        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) {
+            showHandPicker = true
+        }
+    }
+
+    private func closeHandCard() {
+        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) {
+            showHandPicker = false
+        }
+    }
+
+    /// The hand card: re-dress this Book while its page stays in view — each
+    /// choice re-inks the opener and the replies live, behind a scrim thin
+    /// enough to watch it happen.
+    private var handCard: some View {
+        ZStack(alignment: model.leftHanded ? .topLeading : .topTrailing) {
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .onTapGesture { closeHandCard() }
+                .accessibilityLabel("Close the hand card")
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("The hand it writes in")
+                            .font(InkFont.display(21))
+                            .foregroundStyle(room.heading)
+                        Text("\(book.name) answers in this script.")
+                            .font(InkFont.bodyItalic(13))
+                            .foregroundStyle(room.dim)
+                    }
+                    Spacer(minLength: 8)
+                    Button { closeHandCard() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(room.dim)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(EdgeInsets(top: 16, leading: 18, bottom: 6, trailing: 6))
+
+                ScrollView(showsIndicators: false) {
+                    HandPickerList(
+                        ownLabel: "\(book.name)'s own",
+                        ownHand: Hand.by(id: Book.by(id: book.id).hand),
+                        selection: model.bookHands[book.id],
+                        ownSelected: model.bookHands[book.id] == nil
+                    ) { model.setHand($0, for: book.id) }
+                    .padding(.bottom, 8)
+                }
+            }
+            .frame(maxWidth: 400)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: [room.cardTop, room.cardBottom], startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(room.accent.opacity(0.28), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.45), radius: 26, y: 12)
+            )
+            .frame(maxHeight: 600)
+            .padding(.top, 96)
+            .padding(model.leftHanded ? .leading : .trailing, 56)
+        }
+        .transition(.opacity)
     }
 
     private var headerTitle: some View {

@@ -8,6 +8,8 @@ struct PageToolTray: View {
     /// Cancel is only meaningful while a send is pending, and only after the
     /// rest has held for a beat — the page decides that, not the tray.
     let showCancelSend: Bool
+    /// Opens the hand card — the page owns the card, the tray only rings it.
+    let onHand: () -> Void
     @Environment(\.reduceInkMotion) private var reduceMotion
 
     var body: some View {
@@ -21,6 +23,7 @@ struct PageToolTray: View {
                 interactor.toggleHold()
             }
             trayButton("book.pages", label: "Turn the page") { interactor.turnPage() }
+            trayButton("signature", label: "The hand it writes in") { onHand() }
             trayButton("xmark", label: "Cancel send") { interactor.cancelSend() }
                 .opacity(showCancelSend ? 1 : 0)
                 .allowsHitTesting(showCancelSend)

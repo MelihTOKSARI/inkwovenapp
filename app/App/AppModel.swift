@@ -86,6 +86,18 @@ final class AppModel {
     var hiddenBooks: Set<BookID> {
         didSet { defaults.set(hiddenBooks.map(\.rawValue), forKey: "ink.hiddenBooks") }
     }
+    /// Re-dressings: the hand a Book writes in instead of its own. Absent
+    /// means the Book keeps the script it was bound with. The Drawer's
+    /// shelf-wide choice writes every Book at once (`setAllHands`); there is
+    /// deliberately no second, global layer to reason about.
+    var bookHands: [BookID: String] {
+        didSet {
+            defaults.set(
+                Dictionary(uniqueKeysWithValues: bookHands.map { ($0.key.rawValue, $0.value) }),
+                forKey: "ink.bookHands"
+            )
+        }
+    }
     var inkColorHex: UInt32 {
         didSet { defaults.set(Int(inkColorHex), forKey: "ink.inkColor") }
     }
@@ -167,6 +179,12 @@ final class AppModel {
         // One moving-picture credit is gifted at the door.
         credits = defaults.object(forKey: "ink.credits") as? Int ?? 1
         hiddenBooks = Set((defaults.stringArray(forKey: "ink.hiddenBooks") ?? []).map { BookID(rawValue: $0) })
+        // Unknown faces (a renamed hand, a forged plist) fall back silently
+        // to the Book's own rather than to San Francisco.
+        let storedHands = defaults.dictionary(forKey: "ink.bookHands") as? [String: String] ?? [:]
+        bookHands = Dictionary(uniqueKeysWithValues: storedHands.compactMap { key, value in
+            Hand.by(id: value) != nil ? (BookID(key), value) : nil
+        })
         // A trapping conversion here crashes inside `init`, i.e. on every
         // launch with no way back: `as? Int` succeeds for a negative NSNumber,
         // and the argument domain can supply one.
@@ -234,9 +252,53 @@ final class AppModel {
         themeVariant == .daylight ? .daylight : .candlelight
     }
 
-    var activeBook: Book { Book.by(id: activeBookID) }
+    var activeBook: Book { book(activeBookID) }
 
     var visibleBooks: [Book] { Book.all.filter { !hiddenBooks.contains($0.id) } }
+
+    // MARK: - Hands
+
+    /// The Book as it currently dresses: its preset identity, wearing the
+    /// writer's chosen hand when one is set.
+    func book(_ id: BookID) -> Book {
+        let preset = Book.by(id: id)
+        guard let choice = bookHands[id], let hand = Hand.by(id: choice),
+              hand.id != preset.hand
+        else { return preset }
+        return preset.wearing(hand)
+    }
+
+    /// One Book's choice, from its page. nil restores the Book's own hand.
+    func setHand(_ handID: String?, for id: BookID) {
+        if let handID {
+            bookHands[id] = handID
+        } else {
+            bookHands.removeValue(forKey: id)
+        }
+    }
+
+    /// The Drawer's shelf-wide stroke: dress every Book at once (nil sends
+    /// every Book back to its own script). Overwrites per-Book choices —
+    /// "the whole shelf writes in this" must mean the whole shelf.
+    func setAllHands(_ handID: String?) {
+        if let handID {
+            bookHands = Dictionary(uniqueKeysWithValues: Book.all.map { ($0.id, handID) })
+        } else {
+            bookHands = [:]
+        }
+    }
+
+    /// What the Drawer's row reports about the shelf as a whole.
+    enum ShelfHand: Equatable {
+        case own, uniform(String), mixed
+    }
+
+    var shelfHand: ShelfHand {
+        let choices = Set(Book.all.map { bookHands[$0.id] })
+        if choices.isEmpty || choices == [nil] { return .own }
+        if choices.count == 1, let id = choices.first ?? nil { return .uniform(id) }
+        return .mixed
+    }
 
     // MARK: - Navigation
 
