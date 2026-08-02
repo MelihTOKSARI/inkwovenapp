@@ -1,7 +1,7 @@
 # Inkwoven — App Store listing (v1.0)
 
 All copy below is final draft, sized against App Store Connect limits and true of the
-shipping v1 build (no video, no credit packs, no accounts, no sync). Character counts
+shipping v1 build (no accounts, no sync). Character counts
 are for the exact strings between the quotes/fences.
 
 ---
@@ -45,18 +45,20 @@ Pencil-first diary, art & ink
 
 *29 chars. If used, add `apple` to the keyword field.*
 
-## Promotional text (170 char limit — 158 used; editable anytime without review)
+## Promotional text (170 char limit — 160 used; editable anytime without review)
 
 ```
-Write with your Pencil — or a fingertip — and the page answers: flowing script, or a picture that develops before your eyes. Eight Books, one enchanted shelf.
+Write with your Pencil and the page answers — in script, in a picture that develops, or in a moving picture you can fall into. Eight Books, one enchanted shelf.
 ```
 
-## Description (4000 char limit — 2,600 used; leads with the hook)
+## Description (4000 char limit — 3,072 used; leads with the hook)
 
 ```
 Paper that answers.
 
 Inkwoven is a notebook for iPad whose pages answer your handwriting. Write with Apple Pencil or a fingertip, let the pen rest, and the page drinks your ink — then a reply flows back in script, or a picture develops on the page like a photograph in a tray.
+
+And when the page writes you a scene, it can make it move. Tap once and the moving picture blooms on the paper; tap again and it fills the screen, looping, and you are inside it.
 
 Eight Books sit on the shelf, and each one turns the same paper into something different:
 
@@ -83,6 +85,9 @@ Every Book is free to open, with a few answered pages each day. Pages older than
 
 • $4.99 per week, with the first 3 days free
 • $9.99 per month — the same notebook, 54% less
+
+MOVING PICTURES
+Your first two are free. After that they are sold as vials — small packs, never a subscription, because a moving picture costs real money to make. You spend one only when you ask for one, and it comes back to you if the page fails to develop.
 
 Subscriptions renew automatically until cancelled; manage or cancel anytime in your App Store account settings. Restore purchases from the paywall.
 

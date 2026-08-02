@@ -52,16 +52,17 @@ Monetization → Subscriptions:
       **permanent** once submitted and can never be renamed or reused.
 - [ ] Add the localized display name + description each product requires, or they
       stay in "Missing Metadata" and cannot be submitted.
-- [ ] Do **not** create consumable credit packs or Bindery products — v1 sells
-      only these two subscriptions. The credit machinery is built but the video
-      modality it funds is unbound; see `credits.md` for the spec and the
-      repricing it needs before it can ship.
+- [ ] Create the three consumables from `credits.md` §3 — **only once `tasks.md`
+      Epic J is complete and video works end to end**. A product for a modality
+      that cannot execute is a 2.1 rejection:
+      `vials_small` 3 @ $4.99 · `vials_medium` 8 @ $10.99 · `vials_large` 20 @ $24.99
+- [ ] Do **not** create Bindery products — it ships as a try-on room with no SKUs.
 - [ ] Enrol in the **App Store Small Business Program** (15% commission, not 30%).
 
 ## 4. Attach the subscriptions to the version
 
 - [ ] On the 1.0 version page, in the In-App Purchases / Subscriptions section,
-      attach both products. First-ever subscriptions must be submitted **with** the
+      attach **all five products** — both subscriptions and the three vials. First-ever subscriptions must be submitted **with** the
       app version — they cannot be approved standalone before the app is.
 
 ## 5. Paste the listing fields

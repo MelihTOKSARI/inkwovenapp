@@ -12,14 +12,14 @@
 | Tier | Price | What's included |
 |---|---|---|
 | Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
-| Inkwoven Plus | $4.99/wk (3-day free trial) or $9.99/mo — monthly is the value plan, **54% less** than weekly annualised ($21.62/mo); annual dropped from v1. Decision 2026-08-01, full model in `design/app-store-assets/subscriptions.md` | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
-| Moving-picture credits | Packs of 10 / 30 / 100 | **Launch scope.** Consumable; never bundled unlimited (real video unit cost). 1 free credit at onboarding to seed the wow. |
-| Content IAP (the Bindery) | $1.99–$7.99 | Covers, inks, seasonal papers, Book packs — high margin, zero AI cost. **Launch scope.** |
+| Inkwoven Plus | **$4.99/wk (3-day trial) or $9.99/mo** | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| **Moving-picture credits (the Vials)** | 3 / 8 / 20 at $4.99 / $10.99 / $24.99 | **LAUNCH-BLOCKING — the hero feature.** Consumable; never bundled unlimited (real unit cost ~$0.46/clip delivered). **2 free clips per user, ever**, so everyone reaches the hero moment; global monthly spend ceiling enforced server-side. |
+| Content IAP (the Bindery) | — | **Cut from v1.** Ships as a try-on room with no SKUs; a storefront where nothing can be bought is a 2.1 rejection. |
 
 - **Paywall trigger:** 6th magic moment of a day, reopening a >30-day page, or invoking memory ("the notebook wants to remember this…") — always after a value moment, never at onboarding.
 - **Soft vs hard:** soft — free stays genuinely magical daily.
-- **Platform:** RevenueCat over StoreKit 2; 30%→15% small-business share.
-- **Rationale:** $9.99 matches proven AI-app WTP. All 8 Books free maximizes shelf discovery; we monetize volume (moments), memory, modality (video credits), and cosmetics — not doors.
+- **Platform:** **StoreKit 2 direct** in v1 (RevenueCat deferred to the server-side entitlement gate); enrol in the Small Business Program for 15%.
+- **Rationale:** weekly is the low-commitment entry and the only price that survives the worst-case image user; monthly is the value plan at a 54% saving and must be shown as such. All 8 Books free maximizes shelf discovery; we monetize volume (moments), memory, modality (video credits), and cosmetics — not doors.
 
 ## 1. Context & Problem
 
@@ -65,10 +65,14 @@
 - Idle-send state machine (~3s pen rest → snapshot → send; new stroke cancels); **speculative upload at ~2s (cancel on new stroke) so network cost is pre-paid at send-commit**; ink-absorption animation **starts the instant the send commits — 1.5–2s of in-fiction theater the model runs behind**.
 - Vision-LLM pipeline via thin serverless proxy (key custody, Book prompt injection, rate limits); **streaming-first: first ink strokes render from first tokens, never from a completed reply**. Snapshots downscaled hard; send only the region with new strokes since last exchange.
 - **Latency budget: first ink stroke ≤4s after send (p95, throttled-network test profile); image development starts ≤8s; violating this kills the fiction — treat as a launch-blocking bug. Instrument p50/p95 time-to-first-stroke.**
-- Reply modality router: model decides ink / image / **video** per page context; client renders all three.
+- **Reply modality router + convertibility signal (LAUNCH-BLOCKING):** the model decides ink / image per page context and, on every reply, returns a **convertibility verdict** — is this reply a scene with visual life, or is it a riddle, a correction, a worked equation? The verdict is advisory data on the reply, never an auto-generation. Client renders all three modalities.
+- **Video is never auto-generated.** Where the verdict is positive, the response area carries an affordance — *make this move* — and a clip is requested only when the user taps it. This is the same user-triggered principle as reporting: the page never spends the user's money or the user's privacy on their behalf.
 - Ink renderer: streamed cursive (Core Text glyph paths + stroke animation), per-Book hand/ink.
 - Image renderer: develops on-page like a darkroom photo, **preview-first — low-res/progressive preview begins developing immediately while full-res generates (the darkroom fiction is built for this)**; doodle-conditioning (image-to-image) for the Artist.
-- **Moving-picture renderer: credit-gated video request → develop-on-page player (Daily-Prophet style loop).**
+- **Moving-picture renderer (LAUNCH-BLOCKING, the hero feature): user taps → credit reserve → fal `kling-video/v3` → develop-on-page bloom → looping player.** Refund-on-failure via reserve/settle/release; the user is never charged for a clip that didn't arrive.
+- **Immersive playback: tap the clip and it expands past the page to fill the screen** — looping, no chrome, no controls, dismiss by tap or swipe down. The page is a window; tapping goes through it. This is the Riddle-diary moment and the single most shareable thing the product does.
+- **The Keeper requires its own consent for video.** It is a Face ID-locked private diary; converting a Keeper page means transmitting it. Explicit, page-level consent before the first Keeper clip — never a silent tap.
+- **Free-clip accounting:** 2 free clips per user lifetime, server-authoritative, plus a global monthly ceiling on free-clip spend so a viral week cannot produce an unbudgeted bill.
 - **Exchange lifecycle (tested, not implied):** on reply completion → user strokes archived to the page record and REMOVED from the live canvas (absorption ends in removal, never minimum-opacity ghosting); on send failure → strokes retained with in-fiction retry. Canvas is always ready for the next exchange after a successful reply.
 - **Canvas tool tray (in-fiction, top corner, dormant while pen moves):** undo, eraser (+ Pencil double-tap), **hold ("the page waits" — pauses idle-send for long writing/drawing)**, cancel send, turn page. Never grows into a toolbar.
 - **Pen-first input everywhere, onboarding included:** name and all onboarding responses written in ink; a keyboard appearing on iPad is a launch-blocking bug.
@@ -87,7 +91,6 @@
 **Safety & compliance:**
 - Crisis classifier on all Books (break character, care, resources — red-teamed, incl. Tutor frustration and GM dark scenarios).
 - Image AND video moderation (prompt + output) — App Review requirement.
-- User-triggered reporting of any AI reply (long-press → report sheet → server store, 90-day retention) + published support contact in the Drawer — App Review requirement (guideline 1.2). Nothing reports automatically; content leaves the device only on send.
 - Optional Sign in with Apple, in-app account deletion, export/delete-all, privacy labels, AI disclosure, subscription + credit terms, 13+ rating.
 
 **Monetization:**
@@ -127,10 +130,10 @@ Native **SwiftUI + PencilKit** (ink latency, glyph animation, and Pencil interac
 | Ink replies, heavy (Game Master, Tutor) | GPT-5 Mini / Gemini 3 Flash | ~$0.005–0.01/page | Best handwriting + reasoning at small-model price |
 | Images, default illustrations | Z-Image Turbo via fal.ai | ~$0.01/img, ~1s @1024² | Speed inside the develop animation; free-tier viable |
 | Images, Artist doodle img2img | FLUX.2 via fal.ai | ~$0.03–0.055/img | Quality where it's the whole point; fal = lowest prod latency |
-| Moving pictures (5s loop) | Kling 3.0 via fal.ai | ~$0.15–0.35/clip | Best quality-per-dollar; credit at ~$0.50 = healthy margin (Sora 2 fallback) |
+| **Moving pictures (5s loop)** | **fal `fal-ai/kling-video/v3/standard/*`** | **$0.42/clip** ($0.084/s, audio off); $0.46 effective at 8% failure | Verified Aug 2026. **NOT `kling-3` — that endpoint 404s.** Pro tier $0.56, audio adds ~50%. Credit must sell ≥$1.00 for real margin |
 | Crisis + moderation | nano-class model | negligible | Runs parallel, never blocks the reply |
 
-Heavy-user math (corrected 2026-08-01 — flux-2 bills input + output megapixels, so the old figures undercounted the Artist): at the original 20 img/day soft cap the worst case was **$16.16/mo**, not ≈$6; at the shipped cap of 8 it is **≈$5.75/mo** model cost, realistic heavy user ≈ $1.50–3.20/mo vs $9.99 — guarded by the 30%-of-sub alert. If heavy users hurt margins, sell image top-up credits (wallet already exists) before ever raising price. Unit-test targets (Claude Code writes tests alongside): idle-send machine, modality router, entitlement + credit math, memory injection, crisis routing. Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet.
+Heavy-user math (re-verified Aug 2026 against published rates): typical Plus user ≈ $1.05/mo, heavy ≈ $3.21/mo. At the old 20-image cap the worst case was **$16.16/mo** — a loss against the monthly plan — because flux-2 bills input **and** output megapixels (~$0.024/image, not the $0.03–0.055 assumed here). **Cap lowered to 8/day**, server-tunable. Video is metered separately by credits and never bundled. If heavy users hurt margins, sell image top-up credits (wallet already exists) before ever raising price. Unit-test targets (Claude Code writes tests alongside): idle-send machine, modality router, entitlement + credit math, memory injection, crisis routing. Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet.
 
 ## 8. Risks & Open Questions
 
@@ -140,8 +143,9 @@ Heavy-user math (corrected 2026-08-01 — flux-2 bills input + output megapixels
 | **App Review latency/rejection (AI images + video + credits all at once)** | M | H | Submit day 6; expedited-review request; conservative styles, no photoreal people; complete AI disclosure + credit terms; fallback: launch whenever approved, marketing holds |
 | Eight doors dilute the launch story | H | H | Brand = the engine; one hero demo; listing leads with "paper that answers"; per-Book videos roll out post-launch as the drip instead |
 | Latency breaks the fiction | M | H | §4 latency budget is launch-blocking; small/fast models, streaming, aggressive caching |
-| Video unit cost / moderation failure | M | H | Credits only, never unlimited; refund-on-failure; strictest moderation on video |
-| Cursive/development/video animations underwhelm | M | H | Day-1 spikes with go/no-go; any modality can slip to a flag-off state |
+| Video unit cost / moderation failure | M | H | Credits only, never unlimited; **user-triggered generation only** (nothing spends without a tap); refund-on-failure; 2 free clips capped by a global monthly ceiling; strictest moderation on video |
+| **Video is launch-blocking and unbuilt as of Aug 1** | H | H | No provider is bound on the proxy today. This is the critical path — everything else in the launch waits on it |
+| Cursive/development animations underwhelm | M | H | Day-1 spikes with go/no-go; ink and image can slip to a flag-off state. **Video cannot — it is the launch** |
 | Crisis mishandled in any of 8 Books | M | H | Engine-level classifier; red-team incl. Tutor + GM scenarios |
 | Correspondent IP exposure | M | M | Public-domain/original figures only at launch; zero trademarked references |
 | Image costs at free tier | M | H | ~1 image/day free, caching, downscaled outputs |
@@ -157,4 +161,4 @@ Open questions: (Eng) video model pick — cost/speed/loop quality; (Design) 8 d
 
 ## 10. Launch Checklist
 
-- [ ] Latency budget met on iPad Air (ink ≤4s, image ≤8s) · [ ] QA iPad mini/Air/Pro + iPhone, both orientations · [ ] All 8 Books answer correctly with distinct voices · [ ] Analytics funnel + per-Book + credit events verified · [ ] Paywall/restore/trial + credit purchase/refund tested · [ ] Crisis + image + video moderation red-team pass · [ ] Kill-switch flags verified per Book/modality · [ ] Store listing + hero video · [ ] Privacy labels, AI disclosure, account deletion verified
+- [ ] **Moving pictures work end to end: convertibility verdict → tap → clip blooms → immersive full-screen loop** · [ ] **Credit reserve/settle/release + refund-on-failure verified** · [ ] **2-free-clip accounting + global ceiling verified server-side** · [ ] Latency budget met on iPad Air (ink ≤4s, image ≤8s) · [ ] QA iPad mini/Air/Pro + iPhone, both orientations · [ ] All 8 Books answer correctly with distinct voices · [ ] Analytics funnel + per-Book + credit events verified · [ ] Paywall/restore/trial + credit purchase/refund tested · [ ] Crisis + image + video moderation red-team pass · [ ] Kill-switch flags verified per Book/modality · [ ] Store listing + hero video · [ ] Privacy labels, AI disclosure, account deletion verified

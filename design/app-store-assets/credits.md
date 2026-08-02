@@ -1,7 +1,8 @@
 # Inkwoven — Moving-picture credits ("the Vials")
 
-**Status: not in v1.** This is the spec for the day video ships. Nothing here goes into
-App Store Connect yet.
+**Status: LAUNCH SCOPE.** Moving pictures are the hero feature and v1 does not ship without
+them (`vision.md`, `prd.md` §0/§4, `tasks.md` Epic J). These three consumables go into App
+Store Connect alongside the two subscriptions.
 
 Companion to `subscriptions.md`. That file covers what ships now; this one covers the
 consumable layer and, more importantly, records why the prices currently sitting in
@@ -9,18 +10,20 @@ consumable layer and, more importantly, records why the prices currently sitting
 
 ---
 
-## 1. Why credits are dark in v1
+## 1. State of the build
 
-The machinery is complete and works: the credit wallet, an idempotent ledger with
-`/v1/credits/reserve|settle|release`, `creditGrants()` in `PurchaseService`, and
-`VialsView.swift` — the wax-sealed vials shop, already styled.
+Everything around video exists: the credit wallet, an idempotent ledger with
+`/v1/credits/reserve|settle|release`, `creditGrants()` in `PurchaseService`,
+`VialsView.swift` (the wax-sealed shop, styled), and `VideoLoopDriver.swift` on the client.
 
-What does not exist is the thing credits buy. `proxy/src/models.js` contains **no video
-route at all**; `PageInteractor.swift:508` records that the path is unbound end to end;
-and `VialsView`'s own doc comment says the shop stays behind the curtain for v1.
+**The provider does not.** `proxy/src/models.js` contains no video route at all,
+`PageInteractor.swift:508` records the path as unbound end to end, and the endpoint named
+in `books.js` — `kling-3` — is not a real fal route. That is the critical path: `tasks.md`
+Epic J.
 
-Selling a currency for a modality that cannot execute is a guideline **2.1**
-incomplete-feature rejection. Credits ship when video ships.
+Until J1–J8 land, these consumables must **not** be created in App Store Connect — selling
+a currency for a modality that cannot execute is a guideline **2.1** rejection. They are
+created and attached in the same submission that ships video, not before.
 
 **Images are not part of this.** `proxy/src/config.js` sets
 `exchangeCosts: { ink: 0, image: 0, video: 1 }` — images cost zero credits and are covered
@@ -126,20 +129,31 @@ to solve:
 
 ---
 
-## 4. The onboarding grant
+## 4. Free clips — decided
 
-Three options, in order of preference:
+**Every user gets 2 free clips, ever.** Not per day, not per month — two, lifetime.
 
-1. **Drop it.** Set `onboardingCreditGrant: 0`. The wow moment is already the ink
-   absorption — video is the premium delight, not the hook.
-2. **Gate it behind a value moment**, the way the paywall is: grant the first credit after
-   a user's first *answered page*, not at install. Same generosity, paid only for people
-   who actually engaged, and it cuts the per-install cost by whatever your activation rate
-   is short of 100%.
-3. **Keep it at install** and treat it as a marketing line item with a hard monthly ceiling
-   enforced server-side.
+The reasoning: this is the hero feature, so everyone must reach it; but at $0.457 effective
+per delivered clip, generosity is a real budget line.
 
-The grant is already server-tunable via config, so this is a number change, not a release.
+| Free clips | Cost per install | At 25,000 installs |
+|---|---|---|
+| 1 | $0.46 | $11,400 |
+| **2** | **$0.91** | **$22,850** |
+| 3 | $1.37 | $34,275 |
+
+Those are worst cases — they assume every install burns every free clip. Real spend scales
+with activation.
+
+Two guards, both required:
+
+1. **Server-authoritative count.** The client never grants a free clip; the proxy does.
+2. **A global monthly ceiling on free-clip spend**, enforced server-side, that fails closed
+   *in fiction* ("the ink must rest") rather than erroring. A viral week must not be able to
+   produce a bill nobody agreed to.
+
+Both are server-tunable — the count and the ceiling change without a release. Replaces
+`onboardingCreditGrant: 1`, which granted at install before any intent to pay.
 
 ---
 
@@ -158,21 +172,23 @@ The grant is already server-tunable via config, so this is a number change, not 
 
 ---
 
-## 6. Before any of this ships
+## 6. Launch checklist
 
-- [ ] Bind a video provider in `proxy/src/models.js` — there is currently none
-- [ ] Fix the endpoint identifier: `fal-ai/kling-video/v3/standard/...`, **not** `kling-3`,
-      which 404s (it appears in every Book definition in `books.js`)
-- [ ] Choose the tier deliberately — standard/audio-off at $0.42 versus pro/audio-on at
-      $0.84 is a 2× swing that changes every number above
-- [ ] Instrument the real failure rate; re-run §2 with the measured value
-- [ ] Decide the onboarding grant (§4)
-- [ ] Set provider budget caps before a single credit is sold
-- [ ] Create the three consumables in App Store Connect with the IDs in §3
-- [ ] Turn the video kill-switch flag on per Book
-- [ ] Update `listing.md` — the description currently makes no mention of video, correctly;
-      it will need a line, and the App Store description must not promise video before the
-      flag is on in production
+- [ ] `tasks.md` Epic J complete — J1 (provider) through J8 (free-clip accounting)
+- [ ] Endpoint identifier fixed: `fal-ai/kling-video/v3/standard/...`, **not** `kling-3`
+- [ ] Tier chosen deliberately — standard/audio-off $0.42 vs pro/audio-on $0.84 is a 2×
+      swing that changes every number above. Ship standard/audio-off unless the quality
+      difference is visible in a side-by-side
+- [ ] Real failure rate instrumented; §2 re-run with the measured value, not 8%
+- [ ] Free-clip count (2) and the global monthly ceiling both live and server-tunable
+- [ ] Provider budget caps set at fal before a single clip is generated
+- [ ] Three consumables created in App Store Connect with the §3 IDs, **attached to the
+      same version** as the subscriptions
+- [ ] Video kill-switch flag on per Book
+- [ ] `listing.md` description carries the moving-picture line and the credit terms
+- [ ] `review-notes.md` carries the video moderation story — this is the highest-scrutiny
+      modality in the submission and boilerplate will not survive it
+- [ ] A screenshot slot shows the immersive full-screen clip
 
 ---
 

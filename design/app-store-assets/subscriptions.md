@@ -19,7 +19,7 @@ count below was checked programmatically against App Store Connect's limits.
 | | v1.0 | Notes |
 |---|---|---|
 | Auto-renewable subscriptions | **2** | `plus_weekly`, `plus_monthly` |
-| Consumables (moving-picture credits) | **none** | Video is unbound end to end — no provider on the proxy |
+| **Consumables (the Vials)** | **3** | `vials_small/medium/large` — **launch scope, the hero feature.** Full spec in `credits.md` |
 | Non-consumables (the Bindery) | **none** | Bindery ships as a try-on room with no SKUs |
 | Purchase framework | **StoreKit 2, direct** | No RevenueCat in v1 — see §11 |
 | Server receipt validation | **none** | Entitlement derived on-device from `Transaction.currentEntitlements` |
@@ -30,26 +30,15 @@ count below was checked programmatically against App Store Connect's limits.
 > guideline 2.1 rejection, and the release scheme ignores the file anyway. The catalog is
 > being regenerated to match this document — see the handover report.
 
-### Why there are no credit / image / video purchases — this was deliberate
+### On images vs video
 
-Reading the codebase suggests otherwise, so this is recorded to stop it being
-rediscovered as an apparent oversight:
-
-- **Images were never sold separately.** `proxy/src/config.js` sets
-  `exchangeCosts: { ink: 0, image: 0, video: 1 }` — images cost **zero** credits and are
-  covered entirely by the subscription (free tier within the daily 5, Plus up to the soft
-  cap). There is no image IAP to miss.
-- **Video credits — "the Vials" — are fully built and deliberately dark.** The wallet,
-  the idempotent ledger, `/v1/credits/reserve|settle|release`, `creditGrants()` in
-  `PurchaseService`, and `VialsView.swift` all exist and work. What does **not** exist is
-  a video provider: `proxy/src/models.js` contains no video route at all, and
-  `PageInteractor.swift:508` states the path is unbound end to end. `VialsView`'s own doc
-  comment says the shop stays behind the curtain for v1.
-
-Selling a currency that buys a modality which cannot execute is a guideline 2.1
-incomplete-feature rejection. **The credit machinery is built; the modality it funds is
-not.** Credits ship when video ships — and not at the prices currently in the test
-catalog, which lose money on every clip. See `credits.md`.
+- **Images are never sold separately.** `proxy/src/config.js` sets
+  `exchangeCosts: { ink: 0, image: 0, video: 1 }` — images cost zero credits and are
+  covered by the subscription (free tier within the daily 5, Plus up to the soft cap).
+- **Video is metered by credits and is launch-blocking.** See `credits.md`. The consumables
+  must not be created in App Store Connect until `tasks.md` Epic J is complete — a product
+  for a modality that cannot execute is a 2.1 rejection — and then they ship attached to
+  the same version as the subscriptions.
 
 ---
 

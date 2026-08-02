@@ -1,6 +1,6 @@
 # Inkwoven — Product Vision
 
-**One-liner:** An enchanted notebook for iPad — write with your Pencil, the page drinks your ink, and it answers in flowing script, a developing picture, or a moving photograph. Paper that answers.
+**One-liner:** An enchanted notebook for iPad — write with your Pencil, the page drinks your ink, and it answers in flowing script, a developing picture, or a **moving photograph you can fall into**. Paper that answers.
 **Status:** Vision v2 (platform) · MVP stage
 **Last updated:** 2026-07-06
 
@@ -11,6 +11,10 @@
 Inkwoven is **a medium, not a single-purpose app**. The product is the *paper engine* — handwriting in, magic out in three grammars: **ink** (a reply written back in a flowing hand), **pictures** (an image that develops on the page like a photograph in a tray), and **moving pictures** (short living images, Daily-Prophet style). What the paper is *for* is decided by which **Book** you open. Books are content modules on one shared engine — the journal is one book on the shelf, not the identity of the product.
 
 This is the anti-chatbot: every AI product is a cold chat window with a keyboard; Inkwoven is an enchanted object with a pen. That contrast is the brand, the demo, and the moat.
+
+**The moving picture is the hero, not the garnish.** The Tom Riddle diary; the Daily Prophet. A page that writes back is lovely — a page that becomes a window you fall into is the thing people screen-record and send to a friend. When a reply is a scene, the page offers to make it move; tap the clip and it expands past the page to fill the screen, looping, no chrome. **This is launch scope and the launch does not happen without it.** Every other modality supports it.
+
+The conversion is always **user-triggered**. The model judges whether a reply is convertible — a scene has visual life, a worked equation does not — and only then does the affordance appear. Nobody is charged for a clip they didn't ask for, and the page never spends money on the user's behalf.
 
 ## The opportunity
 
@@ -50,7 +54,7 @@ No competitor serves any of these through handwriting, and none can pivot to it 
 ## Target user
 
 **Best-fit segment:** 18–45, owns iPad + Pencil (an affluent, design-sensitive, creativity-skewed base), already AI-curious, drawn to cozy-magic aesthetics.
-**Switching trigger:** seeing the demo — ink drunk by the page and an answer flowing back, or a doodle developing into art. The product moment *is* the ad. Secondary triggers per Book: "I should journal again," "I want a solo campaign," "my kid wants a bedtime story."
+**Switching trigger:** seeing the demo — ink drunk by the page and an answer flowing back, a doodle developing into art, or a written scene blooming into a moving picture that fills the screen. The product moment *is* the ad. Secondary triggers per Book: "I should journal again," "I want a solo campaign," "my kid wants a bedtime story."
 
 ## Competitive alternatives & our wedge
 
@@ -62,7 +66,7 @@ No competitor serves any of these through handwriting, and none can pivot to it 
 | AI Dungeon / solo-RPG tools | Interactive fiction | Text-box UIs; no pen, no theater, no illustrated pages |
 | Doodle-to-art web toys | Shareable fun | One-trick, no home, no habit |
 
-**Our wedge:** the only pen-first AI medium — one enchanted object that answers in ink, pictures, and moving pictures, with a shelf of Books no chat window can imitate.
+**Our wedge:** the only pen-first AI medium — one enchanted object that answers in ink, pictures, and **moving pictures you can step inside**, with a shelf of Books no chat window can imitate. The handwriting is how you get in; the moving picture is why you stay and why anyone else hears about it.
 
 ## Value proposition
 
@@ -74,7 +78,7 @@ No competitor serves any of these through handwriting, and none can pivot to it 
 |---|---|
 | Paper engine: write → absorb → answer (ink/image) → the core gasp | ✅ |
 | 5 Books → the right magic for the moment, one object | ✅ |
-| Moving pictures on the page | ⚠️ premium delight (credit-gated, fast-follow if timeline slips) |
+| **Moving pictures: a reply becomes a scene you fall into** | ✅ **the hero moment — launch-blocking** |
 | Book drops → recurring novelty without app-switching | ✅ post-launch engine |
 | Privacy (Face ID, local-first) for the Keeper | ✅ |
 
