@@ -89,7 +89,22 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   }
 
   function held(w) {
-    return [...w.holds.values()].reduce((sum, amount) => sum + amount, 0);
+    return [...w.holds.values()].reduce((sum, hold) => sum + hold.amount, 0);
+  }
+
+  /**
+   * Drops holds old enough that no live request can still own them. A hold
+   * outlives its request only when the process died between reserve and settle
+   * — a deploy mid-generation — and such a hold is invisible to the user while
+   * permanently subtracting from `available`. Runs before every wallet read.
+   */
+  function reclaimStale(w, now = Date.now()) {
+    for (const [id, hold] of w.holds) {
+      if (now - hold.at >= LIMITS.staleHoldReclaimMS) {
+        w.holds.delete(id);
+        w.resolved.set(id, 'released');
+      }
+    }
   }
 
   return {
@@ -123,6 +138,7 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     walletView(userID) {
       const w = wallets.get(userID);
       if (!w) return { balance: 0, available: 0 };
+      reclaimStale(w);
       return { balance: balance(w), available: balance(w) - held(w) };
     },
 
@@ -141,21 +157,22 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     reserve(userID, amount) {
       if (!validAmount(amount)) return { error: 'invalid_amount' };
       const w = wallet(userID);
+      reclaimStale(w);
       const available = balance(w) - held(w);
       if (available < amount) return { error: 'insufficient_credits', available };
       const id = randomUUID();
-      w.holds.set(id, amount);
+      w.holds.set(id, { amount, at: Date.now() });
       return { reservationID: id, amount };
     },
 
     settle(userID, reservationID) {
       const w = wallet(userID);
       if (w.resolved.get(reservationID) === 'settled') return { settled: true };
-      const amount = w.holds.get(reservationID);
-      if (amount === undefined) return { error: 'unknown_reservation' };
+      const hold = w.holds.get(reservationID);
+      if (hold === undefined) return { error: 'unknown_reservation' };
       w.holds.delete(reservationID);
       w.resolved.set(reservationID, 'settled');
-      w.entries.push({ delta: -amount, reason: 'video_spend', at: Date.now() });
+      w.entries.push({ delta: -hold.amount, reason: 'video_spend', at: Date.now() });
       return { settled: true };
     },
 
@@ -344,6 +361,22 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       // The release reopens the month's ceiling — the clip never happened.
       freeClipMonths.set(month, Math.max(0, (freeClipMonths.get(month) ?? 1) - 1));
       return { released: true };
+    },
+
+    /**
+     * Releases holds too old for any live request to own them — the durable
+     * store runs this on a timer and at boot (stores-redis.js). Here the maps
+     * die with the process, so a stale hold cannot outlive it; the method
+     * exists so both stores answer the same interface.
+     */
+    reclaimStaleHolds(now = Date.now()) {
+      let reclaimed = 0;
+      for (const w of wallets.values()) {
+        const before = w.holds.size;
+        reclaimStale(w, now);
+        reclaimed += before - w.holds.size;
+      }
+      return reclaimed;
     },
 
     /** Fixed-window rate limit; returns true when the call is allowed. */

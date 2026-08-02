@@ -113,6 +113,14 @@ export const LIMITS = {
   maxVerdictReplyChars: 4_000,
   // /v1/credits/grant carries a StoreKit JWS (a few KB of base64).
   grantBodyLimit: 16 * 1024,
+  // A hold outlives its request only when the process died between reserve and
+  // settle — a deploy or a crash mid-generation. Those holds are invisible to
+  // the user and permanently subtract from `available`, so they are reclaimed.
+  //
+  // Must comfortably exceed videoStreamDeadlineMS (7 min): reclaiming a hold
+  // whose generation is still running would hand the credit back AND deliver
+  // the clip. 30 minutes is four times the longest legitimate hold.
+  staleHoldReclaimMS: 30 * 60_000,
 };
 
 /**
