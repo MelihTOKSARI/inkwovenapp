@@ -4,7 +4,51 @@
 
   ],
   "products" : [
-
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "6748302010",
+      "localizations" : [
+        {
+          "description" : "Three moving pictures, sealed in wax.",
+          "displayName" : "Three Vials",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "vials_small",
+      "referenceName" : "Vials Small (3)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "10.99",
+      "familyShareable" : false,
+      "internalID" : "6748302011",
+      "localizations" : [
+        {
+          "description" : "Eight moving pictures, sealed in wax.",
+          "displayName" : "Eight Vials",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "vials_medium",
+      "referenceName" : "Vials Medium (8)",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "24.99",
+      "familyShareable" : false,
+      "internalID" : "6748302012",
+      "localizations" : [
+        {
+          "description" : "Twenty moving pictures, and the best rate.",
+          "displayName" : "Twenty Vials",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "vials_large",
+      "referenceName" : "Vials Large (20)",
+      "type" : "Consumable"
+    }
   ],
   "settings" : {
     "_failTransactionsEnabled" : false,

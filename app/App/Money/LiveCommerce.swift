@@ -1,6 +1,25 @@
 import Foundation
 import InkCore
 import InkMoney
+import InkNet
+
+/// Carries a verified vial purchase to the server-side wallet.
+///
+/// This is the only place the two halves of commerce meet: StoreKit proves the
+/// purchase, the proxy owns the balance. Throwing propagates — `PurchaseService`
+/// reads a throw as "leave the transaction unfinished", which is what makes a
+/// failed delivery a retry rather than a loss.
+struct ProxyVialDelivery: VialGrantDelivering {
+    let proxy: ProxyClient
+
+    func deliver(_ grant: VialGrant) async throws {
+        try await proxy.grantVials(VialGrantPayload(
+            productID: grant.productID,
+            transactionID: grant.transactionID,
+            jws: grant.jws
+        ))
+    }
+}
 
 /// The one live commerce composition.
 ///
@@ -10,9 +29,29 @@ import InkMoney
 /// `AppModel.bound` and the page's send gate reading two different receipts and
 /// two different counters.
 enum LiveCommerce {
-    static let purchases = StoreKitEntitlementStore()
+    /// Bound once the app's proxy client exists (`AppDI.live()`); until then a
+    /// consumable purchase stays unfinished rather than being consumed with
+    /// nowhere to deliver it.
+    nonisolated(unsafe) private static var delivery: (any VialGrantDelivering)?
+
+    static func bind(proxy: ProxyClient) {
+        delivery = ProxyVialDelivery(proxy: proxy)
+    }
+
+    static let purchases = StoreKitEntitlementStore(delivery: LazyVialDelivery())
     static let usage = DailyUsageStore()
     static let page = PageEntitlements(entitlements: purchases, usage: usage)
+
+    /// Resolves the binding at call time, so the store can be a `let` while the
+    /// proxy is composed later in `AppDI`.
+    private struct LazyVialDelivery: VialGrantDelivering {
+        func deliver(_ grant: VialGrant) async throws {
+            guard let delivery = LiveCommerce.delivery else {
+                throw CommerceError.deliveryPending
+            }
+            try await delivery.deliver(grant)
+        }
+    }
 }
 
 /// The page's view of commerce: the snapshot the send gate reads and the

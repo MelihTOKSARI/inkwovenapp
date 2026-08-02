@@ -25,6 +25,10 @@ struct PageView: View {
     /// In-fiction acknowledgement after a report lands; fades on its own.
     @State private var reportAck: String?
     @State private var reportAckTask: Task<Void, Never>?
+    /// The clip filling the screen (task J5), and the Keeper's one-time
+    /// consent gate in front of the first sealed page to travel (task J6).
+    @State private var immersiveClip: ImmersiveClip?
+    @State private var askingKeeperConsent = false
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
@@ -101,6 +105,23 @@ struct PageView: View {
                         }
                     )
                 }
+
+                if askingKeeperConsent {
+                    KeeperClipConsent(
+                        onCancel: { askingKeeperConsent = false },
+                        onAgree: {
+                            askingKeeperConsent = false
+                            model.grantKeeperClipConsent()
+                            interactor.requestVideo()
+                        }
+                    )
+                }
+            }
+            // The clip goes THROUGH the page: a full-screen cover over the
+            // whole room, not a sheet stacked on the reply pane.
+            .fullScreenCover(item: $immersiveClip) { clip in
+                ImmersiveClipView(url: clip.url) { immersiveClip = nil }
+                    .onAppear { interactor.recordImmersiveOpen() }
             }
         }
         .onChange(of: interactor.status) { _, status in
@@ -600,6 +621,9 @@ struct PageView: View {
                     developSection
                         .padding(.top, 30)
                 }
+
+                movingPictureSection
+                    .padding(.top, 22)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             // Mirror of the absorb veil (0.9s easeIn out of sight): the
@@ -634,6 +658,48 @@ struct PageView: View {
                 .accessibilityIdentifier("reply-pane")
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: - Moving pictures (Epic J)
+
+    /// The whole of the video surface, on the reply side where the answer
+    /// lives — never in the bottom region the writing hand owns (task B6's
+    /// occlusion rule holds here too).
+    @ViewBuilder
+    private var movingPictureSection: some View {
+        switch interactor.video {
+        case .none:
+            EmptyView()
+        case .offered:
+            MovingPictureOffer(
+                book: book,
+                wallet: interactor.wallet,
+                isOffline: net.isOffline,
+                onRequest: requestMovingPicture
+            )
+        case .generating:
+            MovingPictureDeveloping(book: book)
+        case .delivered(let url):
+            MovingPictureFrame(url: url, book: book) { immersiveClip = ImmersiveClip(url: url) }
+        case .failed(let line):
+            // The refund promise is part of the copy — the reader is told, in
+            // the same breath, that nothing was spent.
+            QuietBanner(text: line)
+                .frame(maxWidth: 440, alignment: .leading)
+        }
+    }
+
+    /// The tap. The Keeper's first clip stops here for consent; everything
+    /// else goes straight to the interactor, which is the only thing that can
+    /// start a generation.
+    private func requestMovingPicture() {
+        if book.locked && !model.keeperClipConsentGranted {
+            withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) {
+                askingKeeperConsent = true
+            }
+            return
+        }
+        interactor.requestVideo()
     }
 
     // MARK: - Develop frame (Artist)

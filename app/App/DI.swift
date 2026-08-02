@@ -33,6 +33,9 @@ final class AppDI {
     static func live() -> AppDI {
         let endpoints = ProxyEndpoints(baseURL: proxyBaseURL())
         let proxy = ProxyClient(endpoints: endpoints, auth: AnonymousTokenProvider())
+        // The vials are bought through StoreKit but spent from the server-side
+        // wallet, so the purchase store needs a way to reach the proxy.
+        LiveCommerce.bind(proxy: proxy)
         // TODO(A3): bind the real SDK adapter here for both configurations.
         #if DEBUG
         let analytics = Analytics(sink: ConsoleAnalyticsSink())

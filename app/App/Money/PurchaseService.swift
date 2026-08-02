@@ -18,6 +18,10 @@ enum CommerceError: Error, Equatable {
     case productUnavailable(String)
     /// The receipt did not verify. Never granted; never finished.
     case unverified
+    /// StoreKit took the payment but the server-side wallet has not credited
+    /// it yet. The transaction stays UNFINISHED, so StoreKit redelivers it on
+    /// the next launch and the vials arrive then — nobody pays for nothing.
+    case deliveryPending
 }
 
 /// The App layer's purchase seam. It extends `EntitlementProviding` rather
@@ -33,8 +37,10 @@ protocol PurchaseServicing: EntitlementProviding {
     /// Localized storefront price. Hardcoded USD literals are a misleading-price
     /// rejection in every non-USD storefront.
     func displayPrice(for productID: String) async -> String?
-    /// Credit amounts granted by verified consumable purchases, in order.
-    func creditGrants() -> AsyncStream<Int>
+    /// Fires after a verified vial purchase has been credited server-side, so
+    /// the shop can re-read the wallet. Carries no amount: the balance comes
+    /// from the proxy, never from adding up what the client thinks it bought.
+    func creditGrants() -> AsyncStream<Void>
 }
 
 /// Verified-purchase entitlements, StoreKit 2 only.
@@ -59,11 +65,18 @@ actor StoreKitEntitlementStore: PurchaseServicing {
     private var updatesTask: Task<Void, Never>?
 
     private var entitlementObservers: [UUID: AsyncStream<EntitlementSnapshot>.Continuation] = [:]
-    private var grantObservers: [UUID: AsyncStream<Int>.Continuation] = [:]
+    private var grantObservers: [UUID: AsyncStream<Void>.Continuation] = [:]
+
+    /// Where a verified vial purchase goes. Nil until the composition root
+    /// binds it — and a nil delivery never finishes a consumable transaction,
+    /// so the purchase waits for the next launch rather than evaporating.
+    private let delivery: (any VialGrantDelivering)?
 
     private static let subscriptions: Set<String> = [ProductID.plusWeekly, ProductID.plusMonthly]
 
-    init() {}
+    init(delivery: (any VialGrantDelivering)? = nil) {
+        self.delivery = delivery
+    }
 
     deinit { updatesTask?.cancel() }
 
@@ -85,7 +98,7 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         }
     }
 
-    nonisolated func creditGrants() -> AsyncStream<Int> {
+    nonisolated func creditGrants() -> AsyncStream<Void> {
         AsyncStream { continuation in
             let id = UUID()
             continuation.onTermination = { _ in
@@ -141,7 +154,12 @@ actor StoreKitEntitlementStore: PurchaseServicing {
                 // by a client that could not check it.
                 throw CommerceError.unverified
             }
-            grant(for: transaction.productID)
+            // The wallet is server-side, so the purchase is not done until the
+            // proxy has credited it. A failed delivery leaves the transaction
+            // unfinished for redelivery — never finished-and-lost.
+            guard await deliver(verification, transaction: transaction) else {
+                throw CommerceError.deliveryPending
+            }
             await transaction.finish()
             await refresh()
             return .success
@@ -166,10 +184,9 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         guard case .verified(let transaction) = result else { return }
         // A consumable that nobody took delivery of must stay unfinished:
         // StoreKit redelivers an unfinished transaction on the next launch,
-        // but a finished one is gone for good. `Transaction.updates` can fire
-        // before the shell has attached its observer, so finishing here
-        // unconditionally would take the user's money and drop the vials.
-        if !grant(for: transaction.productID) {
+        // but a finished one is gone for good. This is the path that redeems a
+        // purchase whose delivery failed the first time.
+        guard await deliver(result, transaction: transaction) else {
             await refresh()
             return
         }
@@ -177,17 +194,30 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         await refresh()
     }
 
-    /// Consumables are credited exactly once, at the moment a verified
-    /// transaction arrives — never from a button tap. Returns false when the
-    /// grant found no taker, leaving the transaction open for redelivery.
-    @discardableResult
-    private func grant(for productID: String) -> Bool {
-        guard let amount = ProductID.creditAmount(for: productID) else {
-            return true // not a consumable — nothing to deliver
+    /// Sends a verified consumable to the server-side wallet. Returns false
+    /// when the transaction must stay open for redelivery — no delivery bound,
+    /// or the server did not accept it.
+    ///
+    /// Idempotency is the server's: the transaction id is the key, so a
+    /// redelivered purchase credits exactly once no matter how many times this
+    /// runs. Non-consumables pass straight through — there is nothing to credit.
+    private func deliver(
+        _ result: VerificationResult<StoreKit.Transaction>,
+        transaction: StoreKit.Transaction
+    ) async -> Bool {
+        guard ProductID.consumables.contains(transaction.productID) else { return true }
+        guard let delivery else { return false }
+        do {
+            try await delivery.deliver(VialGrant(
+                productID: transaction.productID,
+                transactionID: String(transaction.id),
+                jws: result.jwsRepresentation
+            ))
+            for continuation in grantObservers.values { continuation.yield(()) }
+            return true
+        } catch {
+            return false
         }
-        guard !grantObservers.isEmpty else { return false }
-        for continuation in grantObservers.values { continuation.yield(amount) }
-        return true
     }
 
     private func product(for productID: String) async throws -> Product? {
@@ -215,7 +245,7 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         entitlementObservers.removeValue(forKey: id)
     }
 
-    private func addGrantObserver(_ id: UUID, _ continuation: AsyncStream<Int>.Continuation) {
+    private func addGrantObserver(_ id: UUID, _ continuation: AsyncStream<Void>.Continuation) {
         grantObservers[id] = continuation
     }
 
@@ -243,7 +273,7 @@ struct UnboundPurchaseService: PurchaseServicing {
         throw CommerceError.productUnavailable(productID)
     }
     func displayPrice(for productID: String) async -> String? { nil }
-    func creditGrants() -> AsyncStream<Int> {
+    func creditGrants() -> AsyncStream<Void> {
         AsyncStream { $0.finish() }
     }
 }

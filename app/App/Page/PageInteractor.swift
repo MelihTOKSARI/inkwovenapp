@@ -706,6 +706,10 @@ final class PageInteractor {
         case .pageDeclines: .declined("pageDeclines")
         case .pageIsQuiet: .declined("pageIsQuiet")
         case .inkRanDry: .declined("inkRanDry")
+        // Ink costs no vials, so a payment refusal on this path is a server
+        // disagreement rather than an empty purse — decline in fiction and let
+        // the reader try again, never send them to a shop they don't need.
+        case .vialsEmpty: .declined("inkRanDry")
         }
     }
 

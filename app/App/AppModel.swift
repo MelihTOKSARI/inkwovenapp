@@ -1,6 +1,15 @@
 import SwiftUI
 import InkCore
 import InkMoney
+import InkNet
+
+/// The wallet read, as the rooms need it. `ProxyClient` is the live conformer;
+/// keeping it a protocol is what lets a preview run with no purse at all.
+protocol WalletReading: Sendable {
+    func wallet() async throws -> WalletView
+}
+
+extension ProxyClient: WalletReading {}
 
 /// Where a purchase attempt stands. `deferred` is Ask-to-Buy / SCA: the
 /// transaction exists, nothing is owned yet, and the room must not behave as
@@ -55,10 +64,12 @@ final class AppModel {
         didSet { defaults.set(reduceMotionOverride, forKey: "ink.reduceMotion") }
     }
 
-    // Commerce. Entitlement is never stored here — see `bound`.
-    var credits: Int {
-        didSet { defaults.set(credits, forKey: "ink.credits") }
-    }
+    // Commerce. Neither entitlement nor balance is stored here — see `bound`
+    // and `wallet`. The vial count used to live in UserDefaults, where the
+    // argument domain could set it and a refund could never take it back.
+    /// The server's wallet, as last read. Nil until the proxy answers; the
+    /// shop shows its waiting state rather than inventing a number.
+    private(set) var wallet: WalletView?
     /// Tier as the last verified receipt reports it. Written only by the
     /// entitlement stream, never by a button.
     private(set) var tier: Tier = .free
@@ -150,6 +161,17 @@ final class AppModel {
         didSet { defaults.set(lastOpenedBookID?.rawValue, forKey: "ink.lastOpenedBook") }
     }
 
+    /// The Keeper's one-time consent to send a sealed page out for a moving
+    /// picture (task J6). Asked once, remembered after — but only ever set by
+    /// the reader agreeing on the consent card, never by a tap elsewhere.
+    private(set) var keeperClipConsentGranted: Bool {
+        didSet { defaults.set(keeperClipConsentGranted, forKey: "ink.keeperClipConsent") }
+    }
+
+    func grantKeeperClipConsent() {
+        keeperClipConsentGranted = true
+    }
+
     var keeperUnlocked = false
     var signedName: String {
         didSet { defaults.set(signedName, forKey: "ink.signedName") }
@@ -178,11 +200,13 @@ final class AppModel {
     init(
         defaults: UserDefaults = .standard,
         purchases: any PurchaseServicing = LiveCommerce.purchases,
+        walletReader: (any WalletReading)? = nil,
         ritual: RitualScheduler? = nil,
         ritualDiary: (any RitualDiary)? = nil
     ) {
         self.defaults = defaults
         self.purchases = purchases
+        self.walletReader = walletReader
         self.ritual = ritual
         self.ritualDiary = ritualDiary
         // The review/UITest affordances stay, but only in Debug. They read the
@@ -222,8 +246,6 @@ final class AppModel {
         themeVariant = RoomVariant(rawValue: defaults.string(forKey: "ink.theme") ?? "") ?? .candlelight
         spreadLayout = defaults.object(forKey: "ink.spread") as? Bool ?? true
         reduceMotionOverride = defaults.bool(forKey: "ink.reduceMotion")
-        // One moving-picture credit is gifted at the door.
-        credits = defaults.object(forKey: "ink.credits") as? Int ?? 1
         hiddenBooks = Set((defaults.stringArray(forKey: "ink.hiddenBooks") ?? []).map { BookID(rawValue: $0) })
         // Unknown faces (a renamed hand, a forged plist) fall back silently
         // to the Book's own rather than to San Francisco.
@@ -251,22 +273,31 @@ final class AppModel {
         lastOpenedBookID = storedVoice.flatMap { id in
             Book.all.contains { $0.id == id } ? id : nil
         }
+        keeperClipConsentGranted = defaults.bool(forKey: "ink.keeperClipConsent")
         signedName = defaults.string(forKey: "ink.signedName") ?? ""
         signatureData = defaults.data(forKey: "ink.signature")
         // The old forgeable entitlement flag: remove it so nothing can revive
         // it, and so a device carrying `ink.bound = YES` loses it on this run.
         defaults.removeObject(forKey: "ink.bound")
+        // Same for the local vial count, which the argument domain could set
+        // and which no refund could ever claw back. The wallet is the server's.
+        defaults.removeObject(forKey: "ink.credits")
         observeCommerce()
     }
 
     // MARK: - Commerce
 
     private let purchases: any PurchaseServicing
+    /// Reads the server-side balance. Optional so previews and the harness can
+    /// run with no network — they show the waiting state, never a fake purse.
+    private let walletReader: (any WalletReading)?
     private var entitlementTask: Task<Void, Never>?
     private var grantTask: Task<Void, Never>?
 
     private static let purchaseFailure = "The seal would not take. Nothing was charged."
     private static let restoreFailure = "No binding was found for this hand."
+    private static let deliveryPending =
+        "The vials are paid for but still in the post. They will arrive when the road clears — open the app again in a moment."
 
     private func observeCommerce() {
         entitlementTask = Task { [purchases] in
@@ -276,16 +307,24 @@ final class AppModel {
             }
         }
         grantTask = Task { [purchases] in
-            // Credits are added here and nowhere else: only a verified
-            // consumable transaction reaches this stream.
-            for await amount in purchases.creditGrants() {
-                self.credits += amount
+            // A delivered purchase means the SERVER's balance changed; re-read
+            // it rather than adding up what the client thinks it bought.
+            for await _ in purchases.creditGrants() {
+                await self.refreshWallet()
             }
         }
         Task { [purchases] in
             await purchases.start()
             await self.loadStorePrices()
+            await self.refreshWallet()
         }
+    }
+
+    /// Re-reads the server wallet. Failure leaves the last known value standing
+    /// — the shop says what it last knew rather than flashing an empty purse.
+    func refreshWallet() async {
+        guard let walletReader else { return }
+        if let view = try? await walletReader.wallet() { wallet = view }
     }
 
     private func loadStorePrices() async {
@@ -503,11 +542,11 @@ final class AppModel {
         }
     }
 
-    /// A vial pack. The count maps to its consumable SKU; the credits are added
-    /// by the grant stream when the transaction verifies, never here — this was
-    /// `credits += pack` behind a button labelled with a price.
-    func buy(pack: Int) {
-        guard let productID = Self.creditProductID(for: pack) else {
+    /// A vial pack, by product id. The credits land in the SERVER's wallet when
+    /// the transaction verifies and the proxy accepts it — never here. This was
+    /// once `credits += pack` behind a button labelled with a price.
+    func buyVials(_ productID: String) {
+        guard ProductID.consumables.contains(productID) else {
             purchaseState = .failed(Self.purchaseFailure)
             return
         }
@@ -515,10 +554,17 @@ final class AppModel {
         Task { [purchases] in
             do {
                 switch try await purchases.purchase(productID) {
-                case .success: self.purchaseState = .succeeded
+                case .success:
+                    self.purchaseState = .succeeded
+                    await self.refreshWallet()
                 case .pending: self.purchaseState = .deferred
                 case .cancelled: self.purchaseState = .idle
                 }
+            } catch CommerceError.deliveryPending {
+                // Paid, but the wallet has not been credited yet. The
+                // transaction stays open, so StoreKit redelivers it — say so
+                // honestly rather than claiming a failure that lost the money.
+                self.purchaseState = .failed(Self.deliveryPending)
             } catch {
                 self.purchaseState = .failed(Self.purchaseFailure)
             }
@@ -540,22 +586,10 @@ final class AppModel {
         }
     }
 
-    private static func creditProductID(for pack: Int) -> String? {
-        ProductID.consumables.first { ProductID.creditAmount(for: $0) == pack }
-    }
-
-    func spendMovingCredit() -> Bool {
-        guard credits > 0 else { return false }
-        credits -= 1
-        return true
-    }
-
-    /// "If a picture fails to develop, its vial returns to you." The debit
-    /// above has no reservation behind it, so this is the only refund path
-    /// there is — the develop failure path must call it.
-    func refundMovingCredit() {
-        credits += 1
-    }
+    /// What the shop shows on the shelf. Nil while the wallet is still being
+    /// read — the room says "counting" rather than "none".
+    var vialBalance: Int? { wallet?.available }
+    var freeClipsRemaining: Int? { wallet?.freeClipsRemaining }
 
     func toggleShelf(book: Book) {
         if hiddenBooks.contains(book.id) {

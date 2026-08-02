@@ -2,17 +2,22 @@ import SwiftUI
 import InkMoney
 
 /// The credit wallet: moving-picture credits as wax-sealed vials.
-/// Off the shelf for v1 — the moving-picture modality ships flag-off, so the
-/// shop that funds it stays behind the curtain (PRD kill-switch rule). The
-/// screen stays wired for the DEBUG routes and the modality's return.
+///
+/// Live as of Epic J — the modality the vials fund now works end to end, so the
+/// shop comes out from behind the curtain. Prices and pack sizes are the ones
+/// costed in `design/app-store-assets/credits.md` §3; the balance shown is the
+/// server's, never a local tally.
 struct VialsView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
 
-    private let packs: [(count: Int, productID: String, fallback: String)] = [
-        (10, ProductID.credits10, "$4.99"),
-        (30, ProductID.credits30, "$11.99"),
-        (100, ProductID.credits100, "$29.99"),
+    /// Fallbacks are shown only until StoreKit answers with the storefront's
+    /// own strings — a hardcoded USD price is charged differently everywhere
+    /// else, which is a misleading-price rejection.
+    private let packs: [(productID: String, fallback: String)] = [
+        (ProductID.vialsSmall, "$4.99"),
+        (ProductID.vialsMedium, "$10.99"),
+        (ProductID.vialsLarge, "$24.99"),
     ]
 
     var body: some View {
@@ -37,6 +42,7 @@ struct VialsView: View {
                                 packCard(pack: pack, big: index == 2, index: index)
                             }
                         }
+                        .task { await model.refreshWallet() }
 
                         refundNote
                             .padding(.top, 24)
@@ -58,27 +64,41 @@ struct VialsView: View {
         }
     }
 
+    /// The purse, as the server reports it. While the read is in flight the
+    /// count is a quiet placeholder rather than a zero — telling someone they
+    /// have nothing when we simply have not asked yet is its own small lie.
     private var balance: some View {
         HStack(spacing: 22) {
-            VialView(width: 46, height: 78, fill: 0.38)
+            VialView(width: 46, height: 78, fill: model.vialBalance ?? 0 > 0 ? 0.55 : 0.12)
                 .shadow(color: Ink.candle.opacity(0.12), radius: 12)
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(model.credits)")
+                Text(model.vialBalance.map(String.init) ?? "—")
                     .font(InkFont.display(44))
                     .foregroundStyle(room.heading)
                     .contentTransition(.numericText())
-                SmallCapsLabel(
-                    text: "moments remain · 1 gifted at binding",
-                    size: 12, tracking: 1.7, color: room.dim
-                )
+                SmallCapsLabel(text: balanceCaption, size: 12, tracking: 1.7, color: room.dim)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(model.vialBalance.map { "\($0) vials remain. \(balanceCaption)" }
+            ?? "Counting your vials.")
+    }
+
+    /// The free clips are named plainly: they are the reason a first-time
+    /// reader never meets this room before they have seen what it buys.
+    private var balanceCaption: String {
+        guard let free = model.freeClipsRemaining else { return "moments remain" }
+        if free > 0 {
+            return free == 1 ? "moments remain · 1 gifted" : "moments remain · \(free) gifted"
+        }
+        return "moments remain"
     }
 
     private func packCard(
-        pack: (count: Int, productID: String, fallback: String), big: Bool, index: Int
+        pack: (productID: String, fallback: String), big: Bool, index: Int
     ) -> some View {
-        VStack(spacing: 0) {
+        let count = ProductID.creditAmount(for: pack.productID) ?? 0
+        return VStack(spacing: 0) {
             VialView(
                 width: 22 + CGFloat(index) * 9,
                 height: 46 + CGFloat(index) * 15,
@@ -86,7 +106,7 @@ struct VialsView: View {
             )
             .frame(height: 84, alignment: .bottom)
 
-            Text("\(pack.count)")
+            Text("\(count)")
                 .font(InkFont.display(28))
                 .foregroundStyle(room.heading)
                 .padding(.top, 14)
@@ -95,7 +115,7 @@ struct VialsView: View {
                 .padding(.bottom, 18)
 
             Button {
-                withAnimation { model.buy(pack: pack.count) }
+                withAnimation { model.buyVials(pack.productID) }
             } label: {
                 Text("Buy · \(model.displayPrice(for: pack.productID, fallback: pack.fallback))")
                     .font(InkFont.bodySemiBold(15))
@@ -108,6 +128,9 @@ struct VialsView: View {
                     )
             }
             .buttonStyle(PressScaleStyle())
+            .accessibilityLabel(
+                "Buy \(count) vials for \(model.displayPrice(for: pack.productID, fallback: pack.fallback))"
+            )
         }
         .padding(EdgeInsets(top: 26, leading: 16, bottom: 18, trailing: 16))
         .frame(maxWidth: .infinity)
