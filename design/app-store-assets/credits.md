@@ -25,8 +25,9 @@ implemented rather than a stub. The short-form endpoint identifier that 404ed is
   immersive loop, plus killing the app mid-generation and seeing the credit return.
 - The fal budget cap (`deployment.md` §9). Video is the only modality that can run a real
   bill on its own.
-- `INK_VIDEO_PRICING` and `INK_IAP_MODE` set in production (`deployment.md` §6.7–6.8).
-  Without the second, every purchase 501s *after* the user has paid.
+- `INK_VIDEO_PRICING`, `INK_APPLE_ROOT_CA` and `INK_BUNDLE_ID` set in production
+  (`deployment.md` §6.7–6.8). Without the last two, receipt verification is unbound and
+  every purchase 501s *after* the user has paid.
 
 Selling a currency for a modality that cannot execute is a guideline **2.1** rejection, so
 these are created and attached in the same submission that ships video — once the list
@@ -38,11 +39,12 @@ by the subscription. Video is the only metered modality, by design.
 
 ---
 
-## 2. The prices in the test catalog lose money
+## 2. Why the original ladder lost money
 
-`Inkwoven.storekit` currently carries `credits_10` at $4.99, `credits_30` at $11.99, and
-`credits_100` at $29.99. Costed against the real fal rates for Kling v3 (the PRD assumed
-$0.15–0.35 per clip; the published rate is $0.42–0.98):
+Kept as the reasoning behind §3, not as a description of the catalog: `Inkwoven.storekit`
+was regenerated with the §3 products on 2026-08-02. The old entries were `credits_10` at
+$4.99, `credits_30` at $11.99 and `credits_100` at $29.99, costed against the real fal
+rates for Kling v3 (the PRD assumed $0.15–0.35 per clip; the published rate is $0.42–0.98):
 
 | Pack | Price | Net @ 15% | Per credit | vs $0.42 cost |
 |---|---|---|---|---|
@@ -74,8 +76,8 @@ all land in this bucket. At an assumed **8% failure rate** the effective cost pe
 Instrument the real rate before launch and re-run this table — 8% is an assumption, not a
 measurement.
 
-**The free onboarding credit is a per-install cost.** `onboardingCreditGrant: 1` hands
-every new user a clip before they have shown any intent to pay:
+**A free clip is a per-install cost.** The `onboardingCreditGrant: 1` this replaced handed
+every new user a clip before they had shown any intent to pay:
 
 | Installs | Video cost | Revenue |
 |---|---|---|
@@ -187,7 +189,10 @@ Both are server-tunable — the count and the ceiling change without a release. 
       swing that changes every number above. Ship standard/audio-off unless the quality
       difference is visible in a side-by-side
 - [ ] Real failure rate instrumented; §2 re-run with the measured value, not 8%
-- [ ] Free-clip count (2) and the global monthly ceiling both live and server-tunable
+- [ ] Free-clip count (2), the global monthly ceiling and the per-address daily cap all
+      live and server-tunable — see §7 for why the last one exists
+- [ ] `INK_APPLE_ROOT_CA` + `INK_BUNDLE_ID` set, and one sandbox pack bought end to end:
+      unset, receipt verification is unbound and every purchase 501s after the charge
 - [ ] Provider budget caps set at fal before a single clip is generated
 - [ ] Three consumables created in App Store Connect with the §3 IDs, **attached to the
       same version** as the subscriptions
@@ -199,7 +204,99 @@ Both are server-tunable — the count and the ceiling change without a release. 
 
 ---
 
-## 7. Where the numbers came from
+## 7. Red-team record (task J10)
+
+Adversarial pass over the video path on 2026-08-02, after Epic J landed: prompt
+injection, cost exhaustion, credit stranding, moderation bypass, abuse and minors.
+Everything below was found by reading and executing the shipped code, not by
+reasoning about the design. All of it is fixed; the residual risks are named at the
+end because they are the ones that need a human decision rather than a patch.
+
+### Fixed
+
+**The spend ceiling counted deliveries, not spend.** Releasing a free clip dropped
+its row out of the monthly count, so opening a request, letting fal run for two
+minutes, and dropping the socket refunded the reader *and* un-counted the money.
+The ceiling never advanced and never closed — the ~$915/month bound in §4 was
+asserted by a comment and enforced by nothing, at roughly $150/hour from one
+address. The month now counts every **attempt**, because every attempt is billed;
+a release returns the clip to the reader only.
+
+**A forged receipt minted unlimited credits.** `POST /v1/credits/grant` decoded the
+StoreKit JWS and trusted its claims, on the reasoning that StoreKit had already
+verified it on-device. That is worthless when the client is whatever speaks HTTP:
+three base64url segments bought 20 credits, repeatable with a fresh transaction id,
+and credits have no ceiling at all. Receipts are now verified properly — x5c chain,
+validity dates, chain signatures, ES256 over the payload, bundle id, revocation —
+against an Apple root the operator supplies. **Without that anchor the route
+refuses**, which is why `deployment.md` §6.8 is a launch-blocking step: unset, every
+purchase 501s after the user has paid.
+
+**Two free clips per user was two per header value.** Identity is the `x-ink-user`
+token and attestation is anonymous, so a token costs nothing to mint. One address
+could exhaust the global ceiling in an afternoon — and then every legitimate user
+gets "the ink must rest" until the month rolls over, which is a denial of the launch
+feature, not just a bill. Free clips are now also capped per address per day.
+
+**Both prompt-injection fences were forgeable.** The scrubber stripped only runs of
+three or more angle brackets, so `<< <END REPLY> >>` reproduced a fence exactly, and
+its zero-width list missed U+2060 and U+00AD, so brackets separated by invisible
+characters passed too. It now strips every Unicode control and format character and
+removes angle brackets outright. Separately, the verdict parser was dotall — a
+multi-line answer smuggled instructions into the brief — and the fal prompt put the
+brief *first* with the safety clause last, handing position and recency to the one
+part of the string that traces back to the reader's page. The brief is one line, and
+the rules now bracket it on both sides.
+
+**The moderator failed open, and lost its real-person check exactly where it
+mattered.** An unexpected 200 envelope yielded `Boolean(undefined)` — a silent allow
+in the strictest gate in the app. And the "no real people" rule lived only on the
+Gemini fallback, so it disappeared in the configuration we actually ship. Both
+fixed: unreadable verdicts block, and the app's own policy gate always runs
+alongside the categorical one.
+
+**The Artist path animated an image nobody moderated.** On image-to-video the clip's
+real subject is the developed picture, while the moderated text can be as innocuous
+as "gentle wind stirs the cloth". The image is now moderated too.
+
+**Stranded holds.** A hold outlives its request when the process dies between reserve
+and settle — for video that is a minutes-long window, and a stranded hold silently
+destroys a purchased vial or one of the two lifetime free clips, with no way for the
+user to ask for it back. Both stores now reclaim holds after 30 minutes (four times
+the longest legitimate hold), at boot and on a timer.
+
+**Instrumentation that would have lied.** fal rejects with wording like "NSFW content
+detected", which the moderation regex did not match — output rejections logged as
+generic outages, so the measured moderation rate in §2 would have read as zero. Also
+fixed: a reader who walks away mid-generation is logged as `client_gone`, not as a
+failure, so abandonment does not inflate the failure rate this section depends on.
+
+### Residual risks — accepted, with the reason
+
+**Anonymous attestation is the root of the cost model.** Every per-user limit is a
+per-token limit until App Attest is bound (`app/proxy/src/attest.js` lists what a
+human must supply). The per-address cap and the global ceiling bound the damage;
+they do not make identity real. This is the single highest-value hardening left, and
+it is a pre-launch item on `deployment.md` §9 for that reason.
+
+**Photorealistic real people are reachable in principle.** The control stack is a
+style clause positioned first and restated last, an instruction to the classifier, a
+policy gate, and Kling's own filter — four probabilistic layers and no deterministic
+one, because there is no reliable deterministic test for "is this a real person".
+The Correspondent and Storyteller are *built* to write vividly about historical
+figures, so this is the feature's inherent press and App Review risk rather than a
+bug with a fix. Worth a spot check on the Correspondent before submission.
+
+**Output moderation is the provider's.** We moderate the prompt and the source
+image; the clip itself is filtered by Kling. `review-notes.md` says exactly that
+rather than claiming our own output gate.
+
+**A brief is reusable for 30 minutes.** Deliberate — a failed clip must be
+retryable — and no longer a spend lever now that attempts are counted.
+
+---
+
+## 8. Where the numbers came from
 
 Published rates, 1 August 2026:
 

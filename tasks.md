@@ -154,9 +154,11 @@ nothing here has a flag-off escape hatch. Full build spec in the handover; econo
 - [x] J9 **Analytics** — `video_offered`, `video_requested` (with `free`), `video_delivered`
       (with `waited_ms`), `video_failed` (coarse reason buckets only), `video_immersive_opened`;
       server-side per-clip cost, outcome and reject-reason logging — **S**
-- [x] J10 **Red-team the video path** — prompt injection into generation, cost exhaustion,
-      credit stranding, moderation bypass, abuse and minors. Findings and their resolutions
-      are recorded in `design/app-store-assets/credits.md` §7 — **M**
+- [x] J10 **Red-team the video path** — prompt injection, cost exhaustion, credit
+      stranding, moderation bypass, abuse and minors. Two ways to spend our money without
+      paying (an un-counting spend ceiling, a forgeable receipt) and both injection fences
+      were found broken and fixed. Findings, fixes and the accepted residual risks are
+      recorded in `design/app-store-assets/credits.md` §7 — **M**
 
 ### Epic H — Ritual & launch (D5–D6)
 - [x] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s; **fully pen-driven — name written in ink on the flyleaf, zero keyboard on iPad anywhere in onboarding (launch-blocking)** — **M**
