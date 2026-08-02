@@ -706,9 +706,10 @@ struct PageView: View {
 
     private var developSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // isMoving stays false for v1: the moving-picture modality is
-            // flag-off (no video provider is bound), so nothing may charge a
-            // vial for it. DevelopFrame keeps the capability for its return.
+            // isMoving is false because this is the STILL develop (the Artist's
+            // picture). A moving picture is a separate, user-triggered request
+            // and renders in `movingPictureSection` — nothing here ever spends
+            // a vial.
             DevelopFrame(book: book, step: developStep, isMoving: false, imageURL: interactor.imageURL)
                 .frame(maxWidth: 420)
             Text("developed from your page")

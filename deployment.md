@@ -324,23 +324,35 @@ fly secrets set INK_VIDEO_PRICING='{"kling-video-v3-standard":{"perSecond":0.084
   failure rate that replaces the assumed 8% in credits.md §2, and `payment_kind`
   separates free clips from paid ones so the free-clip budget line is visible.
 
-### 6.8 `INK_IAP_MODE` — purchase-receipt posture (set it, or grants 501)
+### 6.8 `INK_APPLE_ROOT_CA` + `INK_BUNDLE_ID` — receipt verification (set them, or grants 501)
 
-Mirrors `INK_ATTESTATION_MODE`. `POST /v1/credits/grant` credits the server-side
-wallet from a StoreKit 2 JWS; StoreKit verified it on-device, and in `anonymous`
-mode the proxy decodes and cross-checks the claims (product, transaction) without
-verifying Apple's signature. With `NODE_ENV=production` and this unset the mode is
-`required`, which **fails closed** — every grant answers 501 and purchased vials
-never arrive. v1 ships with:
+`POST /v1/credits/grant` credits the server-side wallet from a StoreKit 2 signed
+transaction. "StoreKit verified it on device" is **not** a control here: under
+anonymous attestation the client is whatever speaks HTTP, so an unverified grant
+is a credit mint, and credits buy clips that cost real money at fal.
+
+`app/proxy/src/receipts.js` therefore verifies the JWS properly — x5c chain,
+validity dates, chain signatures, ES256 signature over the payload, and the
+bundle id — anchored to Apple's root. **You must supply the anchor.** It is not
+in the repo, because a certificate pasted from memory is not a trust anchor.
+
+1. Download **Apple Root CA - G3** from
+   [apple.com/certificateauthority](https://www.apple.com/certificateauthority/)
+   and convert to PEM if needed: `openssl x509 -inform der -in AppleRootCA-G3.cer -out AppleRootCA-G3.pem`
+2. Set both secrets:
 
 ```sh
-fly secrets set INK_IAP_MODE=anonymous
+fly secrets set INK_APPLE_ROOT_CA="$(cat AppleRootCA-G3.pem)" INK_BUNDLE_ID='com.empath.inkwoven'
 ```
 
-Binding real `x5c` verification against Apple's root retires this, the same way a
-real App Attest verifier retires `INK_ATTESTATION_MODE`. Until then the amount is
-always the server's (`VIAL_GRANTS` in server.js) and the transaction id is the
-idempotency key, so a replayed receipt credits exactly once.
+With either missing the verifier is null and **every grant answers 501** — the
+user is charged by Apple and receives nothing. Verify with `fly secrets list`
+before submission, and buy one sandbox pack end to end.
+
+The amount always comes from the server-side product map (`VIAL_GRANTS` in
+server.js), never the request body, and the transaction id is the idempotency
+key, so a replayed receipt credits exactly once. A revoked or refunded
+transaction is rejected.
 
 ### 6.9 Store everything in Fly
 
@@ -355,7 +367,8 @@ fly secrets set \
   REDIS_URL='rediss://default:...@....upstash.io:6379' \
   DATABASE_URL='postgresql://...?sslmode=require' \
   INK_ATTESTATION_MODE='anonymous' \
-  INK_IAP_MODE='anonymous' \
+  INK_BUNDLE_ID='com.empath.inkwoven' \
+  INK_APPLE_ROOT_CA="$(cat AppleRootCA-G3.pem)" \
   INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50},"gpt-5.4-mini":{"inputPer1M":0.75,"outputPer1M":4.50}}' \
   INK_VIDEO_PRICING='{"kling-video-v3-standard":{"perSecond":0.084}}'
 ```
@@ -423,7 +436,7 @@ Scaling later is one command each: `fly scale memory 512`, `fly scale count 2`, 
 - [ ] `INK_ATTESTATION_MODE=anonymous` set (§6.5) — without it, production 401s every request
 - [ ] Model provider keys set; real routing on for one Book; cost logs visible in `fly logs`
 - [ ] `fly secrets list` shows GEMINI_API_KEY, OPENAI_API_KEY, and FAL_API_KEY actually present — a missing key silently drops that Book to echo mode
-- [ ] `INK_IAP_MODE=anonymous` set (§6.8) — without it every vial purchase 501s after the user has paid
+- [ ] `INK_APPLE_ROOT_CA` + `INK_BUNDLE_ID` set (§6.8) — without them every vial purchase 501s after the user has paid; buy one sandbox pack end to end to prove it
 - [ ] `INK_VIDEO_PRICING` set (§6.7) — without it every clip logs a null cost and the free-clip budget line is invisible
 - [ ] **fal budget cap set before the first clip**: video is the only modality that can run a real bill on its own, and the free-clip ceiling protects the free path only
 - [ ] One real moving picture generated end to end from a release build: offer → tap → clip → full screen, and a killed app mid-generation returns the credit

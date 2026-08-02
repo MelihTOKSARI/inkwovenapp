@@ -11,6 +11,7 @@ import { BOOKS, findBook, publicBook } from './books.js';
 import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
+import { createReceiptVerifier, ReceiptError } from './receipts.js';
 import { keyPart } from './keys.js';
 import {
   createTextProviderFactory,
@@ -123,20 +124,6 @@ const grantSchema = {
   },
 };
 
-/**
- * Reads the payload of a StoreKit 2 JWS without verifying its signature —
- * see the /v1/credits/grant route for why that is currently the accepted
- * posture and what turns it off.
- */
-function decodeJWSPayload(jws) {
-  const parts = typeof jws === 'string' ? jws.split('.') : [];
-  if (parts.length !== 3) return null;
-  try {
-    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-}
 
 // Loose on purpose: rejects garbage without turning a clock-skewed device's
 // report away over a timestamp format.
@@ -313,12 +300,11 @@ export function build(options = {}) {
   const attestation = options.attestation ?? createAttestationVerifier(env);
   const priceFor = options.priceFor ?? createPricing(env);
   const priceForClip = options.priceForClip ?? createVideoPricing(env);
-  // Purchase-grant verification posture mirrors attest.js: outside production
-  // the decoded receipt is trusted (StoreKit already verified it on-device);
-  // in production the mode must be opted into explicitly or the route fails
-  // closed — a missing secret can never silently accept unverified receipts.
-  const iapMode =
-    options.iapMode ?? env.INK_IAP_MODE ?? (env.NODE_ENV === 'production' ? 'required' : 'anonymous');
+  // Receipt verification: real, or nothing. Null means no trust anchor is
+  // configured (receipts.js REQUIRES A HUMAN), and the grant route refuses
+  // rather than crediting a wallet from claims anyone can write.
+  const verifyReceipt =
+    'verifyReceipt' in options ? options.verifyReceipt : createReceiptVerifier(env);
   // Overridable so the tests can exercise the deadline and the heartbeat
   // without waiting out the production intervals.
   const streamDeadlineMS = options.streamDeadlineMS ?? LIMITS.streamDeadlineMS;
@@ -830,7 +816,15 @@ export function build(options = {}) {
     }
     const prompt = composeVideoPrompt(brief.brief);
     try {
-      const verdict = await moderatePrompt(prompt);
+      const verdict = await moderatePrompt(prompt, {
+        // The Artist animates the picture it just developed — the image IS
+        // the subject, and a brief describing it can be entirely innocuous.
+        imageURL: brief.imageURL ?? null,
+        // A hung moderation socket would otherwise hold the request open for
+        // the client's whole patience; nothing is reserved yet, so this is
+        // liveness rather than money.
+        signal: AbortSignal.timeout(15_000),
+      });
       if (verdict.flagged) {
         // Nothing was reserved yet, so there is nothing to refund. Every
         // rejection is logged with its reason — the real failure rate has to
@@ -862,7 +856,11 @@ export function build(options = {}) {
     const clipCost = CONFIG.exchangeCosts.video ?? 0;
     let payment = null; // { kind: 'free', holdID } | { kind: 'credit', reservationID }
     if (!claim.delivered && clipCost > 0) {
-      const free = await stores.reserveFreeClip(request.userID);
+      // The address rides along: free clips are per token, and a token costs
+      // nothing to mint under anonymous attestation (task J10).
+      const free = await stores.reserveFreeClip(request.userID, {
+        ipKey: keyPart(request.ip),
+      });
       if (free.holdID) {
         payment = { kind: 'free', holdID: free.holdID };
       } else if (free.error === 'free_ceiling') {
@@ -914,18 +912,24 @@ export function build(options = {}) {
     };
 
     const paymentKind = claim.delivered ? 'replay' : payment?.kind ?? 'unmetered';
-    const channel = createStreamChannel(reply, {
-      deadlineMS: videoStreamDeadlineMS,
-      heartbeatMS,
-    });
-    channel.open();
     const t0 = Date.now();
     const seconds = CONFIG.video.clipSeconds;
     let outcome = 'failed';
     let generated = false;
     let rejectReason = null;
 
+    // Everything past the hold lives inside the try, including opening the
+    // stream: a hold taken outside it has no resolver if anything between the
+    // reserve and the first `await` throws. The stale-hold reclaim would catch
+    // that eventually, but "eventually" is 30 minutes of a credit the reader
+    // can see is missing.
+    let channel;
     try {
+      channel = createStreamChannel(reply, {
+        deadlineMS: videoStreamDeadlineMS,
+        heartbeatMS,
+      });
+      channel.open();
       await channel.send('video_intent', { id: videoID });
 
       let url = claim.delivered ? claim.url : null;
@@ -963,19 +967,17 @@ export function build(options = {}) {
       // A reader who walked away is not a failed clip. Counting the abort as a
       // failure would inflate the very number this log exists to measure —
       // the real failure rate that replaces the 8% assumption in credits.md §2.
-      if (channel.clientGone) {
+      if (channel?.clientGone) {
         outcome = 'client_gone';
       } else {
         outcome = moderated ? 'moderated' : 'failed';
-      }
-      if (!channel.clientGone) {
-        await channel.send('video_error', {
+        await channel?.send('video_error', {
           id: videoID,
           reason: moderated ? 'moderated' : 'unavailable',
         });
       }
     } finally {
-      channel.cleanup();
+      channel?.cleanup();
       // Cost per clip (task J1): fal bills per second of clip, not per token,
       // so this rides its own rate card (INK_VIDEO_PRICING). Failures cost us
       // too — the attempt is logged either way, with its reason, so the real
@@ -989,10 +991,10 @@ export function build(options = {}) {
         payment_kind: paymentKind,
         outcome,
         reject_reason: rejectReason,
-        client_gone: channel.clientGone,
+        client_gone: Boolean(channel?.clientGone),
         duration_ms: Date.now() - t0,
       });
-      channel.end();
+      channel?.end();
     }
   });
 
@@ -1071,16 +1073,16 @@ export function build(options = {}) {
   });
 
   // -- POST /v1/credits/grant: a verified vial purchase reaches the ledger ---
-  // StoreKit 2 verified the transaction ON DEVICE (the client only forwards a
-  // `VerificationResult.verified` payload) and the wallet it credits is keyed
-  // to the same client-claimed identity as everything else in anonymous
-  // attestation mode — so in that mode the JWS payload is decoded and
-  // cross-checked, not signature-verified. The amount always comes from the
-  // server-side product map, and the transactionID is the idempotency key: a
-  // replayed receipt credits once. INK_IAP_MODE mirrors the attest.js
-  // posture — production fails CLOSED until 'anonymous' is set explicitly,
-  // and binding real x5c verification against Apple's root turns it off for
-  // good (same pre-launch hardening list as App Attest).
+  //
+  // The receipt is verified HERE, cryptographically, against Apple's root
+  // (receipts.js). It is not enough that StoreKit verified it on device: the
+  // device is whatever speaks HTTP, and credits buy clips that cost real money
+  // — an unverified grant is a mint. With no trust anchor configured the route
+  // FAILS CLOSED rather than trusting the claims.
+  //
+  // The amount always comes from the server-side product map, never the body,
+  // and the transaction id is the idempotency key, so a replayed receipt
+  // credits exactly once.
   app.post(
     '/v1/credits/grant',
     { schema: grantSchema, bodyLimit: LIMITS.grantBodyLimit },
@@ -1088,18 +1090,32 @@ export function build(options = {}) {
       if (!(await withinLimits(request, reply, CONFIG.rateLimits.creditOpsPerUserPerMinute, CONFIG.rateLimits.exchangesPerIPPerMinute))) {
         return reply;
       }
-      if (iapMode !== 'anonymous') {
+      if (!verifyReceipt) {
+        request.log?.error?.({ route: 'grant', error: 'receipt_verification_unbound' });
         return reply.code(501).send({ error: 'receipt_verification_unbound' });
       }
       const { productID, transactionID, jws } = request.body;
       const amount = VIAL_GRANTS[productID];
       if (!amount) return reply.code(400).send({ error: 'unknown_product' });
-      // The decoded claims must agree with what the client asserted — a JWS
-      // for a different product or transaction grants nothing.
-      const payload = decodeJWSPayload(jws);
-      if (!payload || payload.productId !== productID || String(payload.transactionId) !== transactionID) {
+
+      let claims;
+      try {
+        claims = verifyReceipt(jws);
+      } catch (error) {
+        const code = error instanceof ReceiptError ? error.code : 'invalid_receipt';
+        request.log?.warn?.({ route: 'grant', product: productID, reject: code });
         return reply.code(400).send({ error: 'invalid_receipt' });
       }
+      // The signed claims are the authority; the body only says which of them
+      // the caller believes it is presenting, and must agree.
+      if (claims.productId !== productID || String(claims.transactionId) !== transactionID) {
+        return reply.code(400).send({ error: 'invalid_receipt' });
+      }
+      // A refunded or revoked transaction buys nothing.
+      if (claims.revocationDate || claims.revocationReason !== undefined) {
+        return reply.code(400).send({ error: 'revoked_receipt' });
+      }
+
       const result = await stores.idempotent(request.userID, `grant:${transactionID}`, () =>
         stores.grant(request.userID, amount, 'purchase'),
       );

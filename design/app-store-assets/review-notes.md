@@ -81,10 +81,11 @@ The last paragraph of Part A promises the reviewer a live backend. Make it true
    offers to move → tap → clip blooms → tap the clip for full screen. Then kill
    the app mid-generation once and confirm the credit comes back. Part A tells
    the reviewer this works; this is where that becomes true.
-7. **`INK_IAP_MODE=anonymous` and `INK_VIDEO_PRICING` set** (deployment.md
-   §6.7–6.8). Without the first, every vial purchase answers 501 *after* the
-   reviewer has been charged in the sandbox — an immediate rejection and a real
-   refund request.
+7. **`INK_APPLE_ROOT_CA`, `INK_BUNDLE_ID` and `INK_VIDEO_PRICING` set**
+   (deployment.md §6.7–6.8). Without the first two, receipt verification is
+   unbound and every vial purchase answers 501 *after* the reviewer has been
+   charged in the sandbox — an immediate rejection and a real refund request.
+   Buy one sandbox pack end to end and watch the balance move.
 8. **Raise `video.freeClipMonthlyCeiling` before review.** It fails closed in
    fiction ("the ink must rest"), which a reviewer would read as a broken
    feature. Part A tells them to contact us; better that they never see it.

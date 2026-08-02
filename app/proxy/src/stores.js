@@ -35,6 +35,11 @@ export function monthKey(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 7); // YYYY-MM
 }
 
+/** Calendar day key for the per-address free-clip ceiling. */
+export function dayKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 // ticketTTLms is overridable so the contract tests can exercise expiry.
 export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   const tickets = new Map(); // id → { userID, digest, snapshotBase64, expiresAt }
@@ -48,7 +53,10 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   // count. A hold counts against both until it resolves, so two concurrent
   // taps can never slip a third free clip through.
   const freeClips = new Map(); // userID → { holds: Map<id, month>, resolved: Map<id, 'settled'|'released'>, settled: number }
-  const freeClipMonths = new Map(); // 'YYYY-MM' → open count (held + settled)
+  // 'YYYY-MM' → clips ATTEMPTED this month. Never decremented: a release
+  // refunds the reader, not the bill we already ran at fal.
+  const freeClipMonths = new Map();
+  const freeClipIPs = new Map(); // ipKey → { day, count }
 
   /** Deletes reports past retention; returns how many went. */
   function sweepReports(now) {
@@ -325,7 +333,14 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       };
     },
 
-    reserveFreeClip(userID, now = Date.now()) {
+    /** How many free clips this address has started today (task J10). */
+    freeClipIPCount(ipKey, now = Date.now()) {
+      const entry = freeClipIPs.get(ipKey);
+      if (!entry || entry.day !== dayKey(now)) return 0;
+      return entry.count;
+    },
+
+    reserveFreeClip(userID, { now = Date.now(), ipKey = null } = {}) {
       const account = freeClipAccount(userID);
       if (account.settled + account.holds.size >= CONFIG.video.freeClipsPerUser) {
         return { error: 'free_exhausted' };
@@ -335,9 +350,23 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       if (monthCount >= CONFIG.video.freeClipMonthlyCeiling) {
         return { error: 'free_ceiling' };
       }
+      // Free clips are per token, and in anonymous attestation a token is free
+      // to mint — so the address behind them is what actually bounds an
+      // exhaustion run (task J10, config.js freeClipsPerIPPerDay).
+      const day = dayKey(now);
+      const ipEntry = ipKey ? freeClipIPs.get(ipKey) : null;
+      const ipCount = ipEntry && ipEntry.day === day ? ipEntry.count : 0;
+      if (ipKey && ipCount >= CONFIG.video.freeClipsPerIPPerDay) {
+        return { error: 'free_ceiling' };
+      }
       const id = randomUUID();
-      account.holds.set(id, month);
+      account.holds.set(id, { month, at: now });
+      // The month counter counts ATTEMPTS, not deliveries: releasing gives the
+      // clip back to the READER, but fal has already been paid for the attempt.
+      // Decrementing here would make the ceiling unbounded — abandon a
+      // connection mid-generation and the spend un-counts itself.
       freeClipMonths.set(month, monthCount + 1);
+      if (ipKey) freeClipIPs.set(ipKey, { day, count: ipCount + 1 });
       return { holdID: id };
     },
 
@@ -354,12 +383,13 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     releaseFreeClip(userID, holdID) {
       const account = freeClipAccount(userID);
       if (account.resolved.get(holdID) === 'released') return { released: true };
-      const month = account.holds.get(holdID);
-      if (month === undefined) return { error: 'unknown_hold' };
+      const hold = account.holds.get(holdID);
+      if (hold === undefined) return { error: 'unknown_hold' };
       account.holds.delete(holdID);
       account.resolved.set(holdID, 'released');
-      // The release reopens the month's ceiling — the clip never happened.
-      freeClipMonths.set(month, Math.max(0, (freeClipMonths.get(month) ?? 1) - 1));
+      // The READER gets their free clip back — but the month's counter does
+      // NOT move: we paid for the attempt whether or not it arrived, and the
+      // ceiling exists to bound what we pay.
       return { released: true };
     },
 
@@ -375,6 +405,19 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
         const before = w.holds.size;
         reclaimStale(w, now);
         reclaimed += before - w.holds.size;
+      }
+      // Free-clip holds strand exactly as wallet holds do — one of a reader's
+      // two lifetime clips, gone with no way to ask for it back. The durable
+      // store sweeps both; so must this one, or the two answer different
+      // contracts.
+      for (const account of freeClips.values()) {
+        for (const [id, hold] of account.holds) {
+          if (now - hold.at >= LIMITS.staleHoldReclaimMS) {
+            account.holds.delete(id);
+            account.resolved.set(id, 'released');
+            reclaimed += 1;
+          }
+        }
       }
       return reclaimed;
     },

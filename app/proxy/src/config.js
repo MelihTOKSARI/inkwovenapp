@@ -55,6 +55,16 @@ export const CONFIG = {
     // agreed to. 2,000 clips ≈ $915/mo at the $0.457 effective clip cost
     // (design/app-store-assets/credits.md §2/§4).
     freeClipMonthlyCeiling: 2000,
+    // Free clips are keyed to the x-ink-user token, and in anonymous
+    // attestation mode that token IS the identity — so rotating it mints a
+    // fresh pair of free clips. Nothing above stops one machine from spending
+    // the whole month's ceiling in an afternoon and denying it to everyone
+    // else; only App Attest really closes that, and it is not bound yet.
+    //
+    // Until then the address pays for the tokens behind it. 20/day is far
+    // above any plausible household or small office (10 first-time readers a
+    // day behind one NAT) and far below what an exhaustion run needs.
+    freeClipsPerIPPerDay: 20,
     clipSeconds: 5,
   },
 };
