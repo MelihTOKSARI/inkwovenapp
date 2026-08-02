@@ -2,10 +2,12 @@
 
 **MVP goal:** *A new user opens any of the 8 Books, writes or doodles, and watches the page drink the ink and answer — in flowing script, a developing picture, or a moving picture — within 90 seconds of install.*
 
-> **CRITICAL PATH (2026-08-01): moving pictures are launch-blocking and currently unbuilt.**
-> No video provider exists on the proxy (`grep video proxy/src/models.js` → 0 hits).
-> Epic J below is the hero feature; the launch does not ship without it. Every "flag-off"
-> escape hatch elsewhere in this file applies to ink and image, **never to video**.
+> **CRITICAL PATH (2026-08-02): moving pictures are BUILT.** Epic J landed — the provider
+> is bound on the proxy, the convertibility verdict rides every reply, and the page offers
+> only what the reader taps. What remains before submission is verification on a physical
+> iPad, the fal budget cap, and the App Store Connect products; see the Definition of Done
+> and `deployment.md` §9. Every "flag-off" escape hatch elsewhere in this file applies to
+> ink and image, **never to video**.
 **Assumptions:** solo founder driving **Claude Design** (all screens/specs) + **Claude Code** (all implementation + tests); native SwiftUI + PencilKit; iPad-first, iPhone companion; iOS 17+; SwiftData + CloudKit; serverless proxy (model routing + remote Book definitions); RevenueCat incl. consumables.
 **Sizes (AI-assisted):** S ≈ 1–2 h · M ≈ half day · L ≈ 1 day. Human time is review/tuning; Claude Code writes tests with every story.
 **Architecture rule (unchanged):** the engine knows nothing about specific Books; Books are data + prompts. Kill-switch flag per Book and per modality — anything broken gets disabled server-side, not resubmitted.
@@ -108,30 +110,53 @@
 nothing here has a flag-off escape hatch. Full build spec in the handover; economics in
 `design/app-store-assets/credits.md`.*
 
-- [ ] J1 **Video provider on the proxy** — `fal-ai/kling-video/v3/standard/*` bound in
-      `models.js`; there is currently no video code there at all. Fix the `kling-3`
-      identifier in `books.js` (it 404s). Timeout, retry, error taxonomy — **L**
-- [ ] J2 **Convertibility verdict** — every ink reply returns whether it is a scene worth
-      moving. Advisory only; never triggers generation. Tuned per Book — **M**
-  - AC: a Storyteller scene returns convertible; a Tutor worked solution does not; a
-    two-word Oracle riddle does not.
-- [ ] J3 **"Make this move" affordance in the response area** — appears only on a positive
-      verdict, in-fiction, obeys the occlusion rule — **M**
-- [ ] J4 **Generation flow** — tap → credit reserve → provider → bloom on page → settle;
-      any failure releases the reservation. Never charges for a clip that didn't arrive — **L**
-- [ ] J5 **Immersive playback** — tap the clip and it expands past the page to fill the
-      screen: looping, no chrome, no controls; dismiss by tap or swipe down — **L**
-  - AC: 60fps expand on iPad Air; audio session doesn't stop the user's music; rotation held.
-- [ ] J6 **Keeper consent gate** — explicit page-level consent before the first Keeper clip
-      leaves the device; the Keeper is Face ID-locked and private by default — **S**
-- [ ] J7 **Video moderation, strictest tier** — prompt AND output; no photoreal people; a
-      flagged output never reaches the page and always refunds — **M**
-- [ ] J8 **Free-clip accounting** — 2 per user lifetime, server-authoritative, plus a global
-      monthly ceiling on free-clip spend that fails closed in fiction — **M**
-- [ ] J9 **Analytics** — `video_offered`, `video_requested`, `video_delivered`,
-      `video_failed`, `video_immersive_opened`, plus cost-per-clip logging — **S**
-- [ ] J10 **Red-team the video path** — prompt injection into generation, abuse, minors,
-      moderation bypass, cost-exhaustion — **M**
+- [x] J1 **Video provider on the proxy** — `fal-ai/kling-video/v3/standard/{text,image}-to-video`
+      bound in `models.js` via fal's queue API (submit → poll → fetch), standard tier /
+      audio off, its own generous deadline separate from the image ceiling, SSE heartbeat
+      through the wait, and best-effort cancel when the reader leaves. Per-second cost
+      logging via `INK_VIDEO_PRICING` (deployment.md §6.7). Every Book carries the
+      fully-qualified route; the short-form identifier that 404ed is gone — **L**
+- [x] J2 **Convertibility verdict** — every reply of a video-enabled Book is judged at the
+      END of the stream, so first ink is untouched. Structured `verdict` event, never prose.
+      Positive verdicts store a server-side brief; a negative one is simply not sent, so
+      absence means no and older clients agree with the bias toward not offering. Per-Book
+      `motionHint` tunes it — **M**
+  - AC: the Tutor's hint forbids it outright (worked solutions are never scenes); the
+    Oracle's biases to STILL and a reply under 80 chars never reaches the classifier;
+    Storyteller and GM hints bias to MOVE on a concrete scene.
+- [x] J3 **"Make this move" affordance in the response area** — `MovingPictureOffer`, on a
+      positive verdict only, in the register of the tool tray. Names the purse before the
+      tap (a gifted moment or a vial); offline disables it with an in-fiction reason rather
+      than a dead button. Lives on the reply side, never the writing hand's region — **M**
+- [x] J4 **Generation flow** — tap → reserve → provider → bloom → settle, over `POST /v1/video`.
+      Every failure path releases: moderation, provider error, timeout, and a reader who
+      disconnects mid-generation. Idempotent by `videoID`, so a double-tap or a retry is one
+      clip and one charge; `PageInteractor.releaseVideoCredit()` is implemented — **L**
+- [x] J5 **Immersive playback** — tap the clip and it fills the screen, looping, no chrome or
+      scrubber; tap or swipe down to return. Expansion scales from the frame (through the
+      page, not a modal), cross-fading under Reduce Motion. `AVPlayerLooper` over a fully
+      downloaded file, cached so a revisited page replays from disk — **L**
+  - AC: audio session is `.ambient` and the player muted, so the reader's music keeps
+    playing. **Still to verify on a physical iPad: 60fps expand, both orientations.**
+- [x] J6 **Keeper consent gate** — `KeeperClipConsent` before the FIRST sealed page travels,
+      naming exactly what leaves the device and what does not, remembered per user after.
+      Same treatment as the report sheet; never a silent tap — **S**
+- [x] J7 **Video moderation, strictest tier** — the prompt is moderated before generation and
+      a flagged output maps to `moderated`; both always release the hold. With no moderator
+      bound the route refuses rather than generating. Prompts are composed server-side from
+      the stored brief and carry an illustrative-style, no-real-people clause, so the
+      reader's handwriting never reaches fal as instructions — **M**
+- [x] J8 **Free-clip accounting** — 2 per user lifetime, server-authoritative, with holds
+      counting immediately so concurrent taps cannot overrun. Global monthly ceiling fails
+      closed *in fiction* ("the ink must rest"). Both numbers are server-tunable and served
+      by `GET /v1/config`. Replaces `onboardingCreditGrant`: wallets now start empty and
+      only a verified purchase funds them — **M**
+- [x] J9 **Analytics** — `video_offered`, `video_requested` (with `free`), `video_delivered`
+      (with `waited_ms`), `video_failed` (coarse reason buckets only), `video_immersive_opened`;
+      server-side per-clip cost, outcome and reject-reason logging — **S**
+- [x] J10 **Red-team the video path** — prompt injection into generation, cost exhaustion,
+      credit stranding, moderation bypass, abuse and minors. Findings and their resolutions
+      are recorded in `design/app-store-assets/credits.md` §7 — **M**
 
 ### Epic H — Ritual & launch (D5–D6)
 - [x] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s; **fully pen-driven — name written in ink on the flyleaf, zero keyboard on iPad anywhere in onboarding (launch-blocking)** — **M**
@@ -159,8 +184,11 @@ nothing here has a flag-off escape hatch. Full build spec in the handover; econo
 
 - [ ] All stories merged with passing tests; friends TestFlight smoke pass on iPad mini/Air/Pro + iPhone
 - [ ] Latency budget met (ink ≤4s, image ≤8s) on iPad Air
-- [ ] **Moving pictures end to end: verdict → tap → clip → immersive loop, on device**
-- [ ] **Credit reserve/settle/release + refund-on-failure + 2-free-clip ceiling verified**
+- [ ] **Moving pictures end to end: verdict → tap → clip → immersive loop, ON A PHYSICAL iPad.**
+      Built and green in simulation; the device pass is what closes it — 60fps expand, both
+      orientations, music uninterrupted, and the Tutor never offering
+- [ ] **Credit reserve/settle/release + refund-on-failure + 2-free-clip ceiling verified** —
+      including killing the app mid-generation and confirming the credit comes back
 - [ ] All 8 Books answer with distinct voices; kill-switch verified per Book/modality
 - [ ] Purchase/restore/trial + credit buy/spend/refund + Bindery tested
 - [ ] Crisis + image + video moderation red-team signed off

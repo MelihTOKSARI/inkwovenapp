@@ -21,9 +21,10 @@
 //     plusImageDailySoftCap (config.js) sits at 8
 //   video (Epic J, LAUNCH SCOPE): kling-video-v3-standard — fal namespaces
 //     Kling 3.0 as fal-ai/kling-video/v3/standard/text-to-video and
-//     .../image-to-video (models.js binds both); the old 'kling-3' identifier
-//     named no real endpoint and 404ed. Standard tier, audio off — $0.084/sec;
-//     pro or audio roughly doubles unit cost and moves every number in
+//     .../image-to-video (models.js binds both). The short-form identifier
+//     these Books once carried named no real endpoint and 404ed; keep the
+//     fully-qualified route. Standard tier, audio off — $0.084/sec; pro or
+//     audio roughly doubles unit cost and moves every number in
 //     design/app-store-assets/credits.md §3.
 //
 // `motionHint` tunes the convertibility verdict (task J2) per Book. The

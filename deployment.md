@@ -299,13 +299,50 @@ fly secrets set INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"
 - **Keys must match the model IDs pinned in `books.js` character for character** — a
   mismatched key silently prices that model at null. This is half the reason the Books
   pin `gemini-3.5-flash-lite` instead of the floating `-latest` alias (§6.1).
-- **Known gap:** the card is token-based, but fal bills images and video **per unit**
-  (z-image $0.005/MP, flux-2 $0.012/MP on input + output megapixels, Kling per clip) —
-  those costs cannot ride this card and the cost log reports null for them. Track them
-  in the fal dashboard until per-unit accounting exists; do not fake them as token rates.
+- **Known gap (images):** the card is token-based, but fal bills images **per unit**
+  (z-image $0.005/MP, flux-2 $0.012/MP on input + output megapixels) — those costs
+  cannot ride this card and the cost log reports null for them. Track them in the fal
+  dashboard until per-unit accounting exists; do not fake them as token rates.
 - Update the card whenever the pinned model version changes, in the same deploy.
 
-### 6.7 Store everything in Fly
+### 6.7 `INK_VIDEO_PRICING` — the per-second card for moving pictures
+
+Video does **not** ride the token card above, because fal bills Kling per second of
+clip. It gets its own accounting path (`createVideoPricing` in config.js), and the
+`route: 'video'` cost log carries `clip_seconds` and `unit_cost` per clip:
+
+```sh
+fly secrets set INK_VIDEO_PRICING='{"kling-video-v3-standard":{"perSecond":0.084}}'
+```
+
+- $0.084/sec is **standard tier, audio off** — the tier the proxy requests. Pro is
+  $0.112/sec and audio adds ~50%; changing tier means changing this card in the same
+  deploy, and re-running every number in `design/app-store-assets/credits.md` §3.
+- The key must match `books.js`'s `models.video` character for character.
+- Failed clips are logged too, with `outcome` and `reject_reason`. That is the
+  instrument: the ratio of `outcome: 'delivered'` to everything else is the real
+  failure rate that replaces the assumed 8% in credits.md §2, and `payment_kind`
+  separates free clips from paid ones so the free-clip budget line is visible.
+
+### 6.8 `INK_IAP_MODE` — purchase-receipt posture (set it, or grants 501)
+
+Mirrors `INK_ATTESTATION_MODE`. `POST /v1/credits/grant` credits the server-side
+wallet from a StoreKit 2 JWS; StoreKit verified it on-device, and in `anonymous`
+mode the proxy decodes and cross-checks the claims (product, transaction) without
+verifying Apple's signature. With `NODE_ENV=production` and this unset the mode is
+`required`, which **fails closed** — every grant answers 501 and purchased vials
+never arrive. v1 ships with:
+
+```sh
+fly secrets set INK_IAP_MODE=anonymous
+```
+
+Binding real `x5c` verification against Apple's root retires this, the same way a
+real App Attest verifier retires `INK_ATTESTATION_MODE`. Until then the amount is
+always the server's (`VIAL_GRANTS` in server.js) and the transaction id is the
+idempotency key, so a replayed receipt credits exactly once.
+
+### 6.9 Store everything in Fly
 
 **Always single-quote values** — URLs contain `?` and `&`, which zsh otherwise mangles (`no matches found`):
 
@@ -317,7 +354,10 @@ fly secrets set \
   REVENUECAT_API_KEY='sk_...' \
   REDIS_URL='rediss://default:...@....upstash.io:6379' \
   DATABASE_URL='postgresql://...?sslmode=require' \
-  INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50},"gpt-5.4-mini":{"inputPer1M":0.75,"outputPer1M":4.50}}'
+  INK_ATTESTATION_MODE='anonymous' \
+  INK_IAP_MODE='anonymous' \
+  INK_MODEL_PRICING='{"gemini-3.5-flash-lite":{"inputPer1M":0.30,"outputPer1M":2.50},"gpt-5.4-mini":{"inputPer1M":0.75,"outputPer1M":4.50}}' \
+  INK_VIDEO_PRICING='{"kling-video-v3-standard":{"perSecond":0.084}}'
 ```
 
 Rules:
@@ -383,6 +423,10 @@ Scaling later is one command each: `fly scale memory 512`, `fly scale count 2`, 
 - [ ] `INK_ATTESTATION_MODE=anonymous` set (§6.5) — without it, production 401s every request
 - [ ] Model provider keys set; real routing on for one Book; cost logs visible in `fly logs`
 - [ ] `fly secrets list` shows GEMINI_API_KEY, OPENAI_API_KEY, and FAL_API_KEY actually present — a missing key silently drops that Book to echo mode
+- [ ] `INK_IAP_MODE=anonymous` set (§6.8) — without it every vial purchase 501s after the user has paid
+- [ ] `INK_VIDEO_PRICING` set (§6.7) — without it every clip logs a null cost and the free-clip budget line is invisible
+- [ ] **fal budget cap set before the first clip**: video is the only modality that can run a real bill on its own, and the free-clip ceiling protects the free path only
+- [ ] One real moving picture generated end to end from a release build: offer → tap → clip → full screen, and a killed app mid-generation returns the credit
 - [ ] Budget caps set at Fly + all three model providers
 - [ ] One real exchange verified from a **release build** against the production URL before App Store submission
 - [ ] App Attest verification on the auth hook

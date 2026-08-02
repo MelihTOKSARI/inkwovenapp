@@ -346,9 +346,9 @@ export function createImageProviderFactory(env = process.env) {
 }
 
 // -- moving pictures (Epic J) ------------------------------------------------
-// Video routes to fal's Kling 3.0. The endpoint namespace is
-// fal-ai/kling-video/v3/standard/... — NOT 'kling-3', which names no real
-// route and 404s. Standard tier, audio off: $0.084/sec, $0.42 per 5s clip;
+// Video routes to fal's Kling 3.0. The endpoint namespace is the fully
+// qualified fal-ai/kling-video/v3/standard/... — a short-form model name is
+// not a route and 404s. Standard tier, audio off: $0.084/sec, $0.42 per clip;
 // pro is $0.112/sec and audio adds ~50% — do not enable either without a
 // visible side-by-side quality win (credits.md §3 moves with it).
 //
