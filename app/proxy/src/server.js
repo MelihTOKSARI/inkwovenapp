@@ -960,7 +960,14 @@ export function build(options = {}) {
       await stores.failVideoJob(request.userID, videoID);
       const moderated = error instanceof ProviderError && error.kind === 'moderated';
       rejectReason = moderated ? `output_moderated:${error.detail ?? ''}` : String(error?.message ?? error);
-      outcome = moderated ? 'moderated' : 'failed';
+      // A reader who walked away is not a failed clip. Counting the abort as a
+      // failure would inflate the very number this log exists to measure —
+      // the real failure rate that replaces the 8% assumption in credits.md §2.
+      if (channel.clientGone) {
+        outcome = 'client_gone';
+      } else {
+        outcome = moderated ? 'moderated' : 'failed';
+      }
       if (!channel.clientGone) {
         await channel.send('video_error', {
           id: videoID,

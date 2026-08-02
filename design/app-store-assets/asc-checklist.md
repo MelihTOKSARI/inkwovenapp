@@ -52,9 +52,10 @@ Monetization → Subscriptions:
       **permanent** once submitted and can never be renamed or reused.
 - [ ] Add the localized display name + description each product requires, or they
       stay in "Missing Metadata" and cannot be submitted.
-- [ ] Create the three consumables from `credits.md` §3 — **only once `tasks.md`
-      Epic J is complete and video works end to end**. A product for a modality
-      that cannot execute is a 2.1 rejection:
+- [ ] Create the three consumables from `credits.md` §3 — Epic J is built as of
+      2026-08-02; do this once the physical-device pass and the fal budget cap
+      are done (`credits.md` §1). A product for a modality that cannot execute
+      is a 2.1 rejection:
       `vials_small` 3 @ $4.99 · `vials_medium` 8 @ $10.99 · `vials_large` 20 @ $24.99
 - [ ] Do **not** create Bindery products — it ships as a try-on room with no SKUs.
 - [ ] Enrol in the **App Store Small Business Program** (15% commission, not 30%).

@@ -35,10 +35,11 @@ count below was checked programmatically against App Store Connect's limits.
 - **Images are never sold separately.** `proxy/src/config.js` sets
   `exchangeCosts: { ink: 0, image: 0, video: 1 }` — images cost zero credits and are
   covered by the subscription (free tier within the daily 5, Plus up to the soft cap).
-- **Video is metered by credits and is launch-blocking.** See `credits.md`. The consumables
-  must not be created in App Store Connect until `tasks.md` Epic J is complete — a product
-  for a modality that cannot execute is a 2.1 rejection — and then they ship attached to
-  the same version as the subscriptions.
+- **Video is metered by credits and is launch-blocking.** See `credits.md`. Epic J is
+  built as of 2026-08-02; the consumables are created in App Store Connect once the
+  physical-device pass and the fal budget cap are done (`credits.md` §1), and then they
+  ship attached to the same version as the subscriptions. A product for a modality that
+  cannot execute is a 2.1 rejection, so the order matters.
 
 ---
 

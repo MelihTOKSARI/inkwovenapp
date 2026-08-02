@@ -12,18 +12,25 @@ consumable layer and, more importantly, records why the prices currently sitting
 
 ## 1. State of the build
 
-Everything around video exists: the credit wallet, an idempotent ledger with
-`/v1/credits/reserve|settle|release`, `creditGrants()` in `PurchaseService`,
-`VialsView.swift` (the wax-sealed shop, styled), and `VideoLoopDriver.swift` on the client.
+**Epic J landed on 2026-08-02.** The provider is bound (`createVideoProviderFactory` in
+`proxy/src/models.js`, fal's queue API against
+`fal-ai/kling-video/v3/standard/{text,image}-to-video`), `POST /v1/video` reserves before
+generating and releases on every failure, the convertibility verdict rides every reply, and
+the client offers only what the reader taps. `PageInteractor.releaseVideoCredit()` is
+implemented rather than a stub. The short-form endpoint identifier that 404ed is gone.
 
-**The provider does not.** `proxy/src/models.js` contains no video route at all,
-`PageInteractor.swift:508` records the path as unbound end to end, and the endpoint named
-in `books.js` — `kling-3` — is not a real fal route. That is the critical path: `tasks.md`
-Epic J.
+**What is still open before these products may be created in App Store Connect:**
 
-Until J1–J8 land, these consumables must **not** be created in App Store Connect — selling
-a currency for a modality that cannot execute is a guideline **2.1** rejection. They are
-created and attached in the same submission that ships video, not before.
+- The physical-iPad pass in `tasks.md`'s Definition of Done — verdict → tap → clip →
+  immersive loop, plus killing the app mid-generation and seeing the credit return.
+- The fal budget cap (`deployment.md` §9). Video is the only modality that can run a real
+  bill on its own.
+- `INK_VIDEO_PRICING` and `INK_IAP_MODE` set in production (`deployment.md` §6.7–6.8).
+  Without the second, every purchase 501s *after* the user has paid.
+
+Selling a currency for a modality that cannot execute is a guideline **2.1** rejection, so
+these are created and attached in the same submission that ships video — once the list
+above is closed, not before.
 
 **Images are not part of this.** `proxy/src/config.js` sets
 `exchangeCosts: { ink: 0, image: 0, video: 1 }` — images cost zero credits and are covered
