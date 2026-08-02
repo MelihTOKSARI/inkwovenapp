@@ -83,10 +83,18 @@
 - [ ] F4 Sign in with Apple (optional) + in-app account deletion — **M**
 - [x] F5 Export (PDF/text) + delete-all — **S**
 - [x] F6 AI disclosure onboarding; privacy labels; subscription + credit terms — **S**
+- [x] F7 Report-a-reply (guideline 1.2): long-press report sheet with Keeper-aware consent, `POST /v1/report` behind auth + low rate limits, 90-day retention enforced by a tested sweep, Drawer "Write to the binder" contact row — **M**
 
 ### Epic G — Monetization (D4)
-- [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (20/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
-  - AC: free user's 6th moment → paywall before any model call. Plus user's 21st image of the day → "the ink must rest" cooldown path, no error state, event logged.
+
+> **Pricing change, 2026-08-01:** v1 sells weekly ($4.99, 3-day free trial) + monthly
+> ($9.99, the value plan — 54% less than weekly annualised); annual dropped. Product IDs
+> renamed to `plus_weekly` / `plus_monthly` while the rename was still free (nothing live
+> in ASC). Image soft cap 20 → 8, from the flux-2 cost model — rationale and unit
+> economics in `design/app-store-assets/subscriptions.md`.
+
+- [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (8/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
+  - AC: free user's 6th moment → paywall before any model call. Plus user's 9th image of the day → "the ink must rest" cooldown path, no error state, event logged.
 - [x] G2 In-fiction paywall; purchase, restore, trial messaging — **M**
 - [ ] G3 Entitlement sync + edge cases (refund, expiry, offline) — **M**
 - [ ] G4 **Credit wallet: buy/spend/balance/refund-on-failure — LAUNCH-BLOCKING (funds Epic J)** — **M**
@@ -127,7 +135,7 @@ nothing here has a flag-off escape hatch. Full build spec in the handover; econo
 
 ### Epic H — Ritual & launch (D5–D6)
 - [x] H1 Onboarding vignette: notebook introduces itself in ink; first answered page ≤90s; **fully pen-driven — name written in ink on the flyleaf, zero keyboard on iPad anywhere in onboarding (launch-blocking)** — **M**
-- [ ] H2 Notification ritual per Book + quiet hours — **M**
+- [x] H2 Notification ritual per Book + quiet hours — **M** *(ships as one nightly local reminder in the last-opened Book's voice, opt-in after the first answered page; "quiet hours" is the single on/off toggle plus wrote-today suppression, not a full quiet-hours range)*
 - [ ] H3 Settings: hand/ink, reply length, fade timing, left-handed mode — **S**
 - [ ] H4 Haptics/sound on absorb & develop; perf pass iPad mini→Pro — **M**
 - [ ] H5 Share-card export (watermarked) — **S**

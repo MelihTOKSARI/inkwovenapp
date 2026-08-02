@@ -91,6 +91,7 @@
 **Safety & compliance:**
 - Crisis classifier on all Books (break character, care, resources — red-teamed, incl. Tutor frustration and GM dark scenarios).
 - Image AND video moderation (prompt + output) — App Review requirement.
+- User-triggered reporting of any AI reply (long-press → report sheet → server store, 90-day retention) + published support contact in the Drawer — App Review requirement (guideline 1.2). Nothing reports automatically; content leaves the device only on send.
 - Optional Sign in with Apple, in-app account deletion, export/delete-all, privacy labels, AI disclosure, subscription + credit terms, 13+ rating.
 
 **Monetization:**
