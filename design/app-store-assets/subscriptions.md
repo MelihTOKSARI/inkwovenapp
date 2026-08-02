@@ -157,7 +157,7 @@ A handwriting snapshot at ~1024px costs **1,032 input tokens** under Gemini's ti
 (4 tiles × 258), not the 258-token flat rate — that only applies below 384px.
 
 > Two corrections to `prd.md` §7: the endpoint is `fal-ai/kling-video/v3/...`, not
-> `fal-ai/kling-3`; and **flux-2 bills input + output megapixels**, so an Artist img2img is
+> a short-form model name rather than a fal route; and **flux-2 bills input + output megapixels**, so an Artist img2img is
 > 2 MP, roughly double what the PRD assumed.
 
 ### Cost per user per month

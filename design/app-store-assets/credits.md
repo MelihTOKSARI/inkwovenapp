@@ -184,7 +184,8 @@ Both are server-tunable — the count and the ceiling change without a release. 
 ## 6. Launch checklist
 
 - [ ] `tasks.md` Epic J complete — J1 (provider) through J8 (free-clip accounting)
-- [ ] Endpoint identifier fixed: `fal-ai/kling-video/v3/standard/...`, **not** `kling-3`
+- [x] Endpoint identifier fixed: the fully-qualified `fal-ai/kling-video/v3/standard/...`
+      routes, bound 2026-08-02; the short-form name that 404ed is gone from the source
 - [ ] Tier chosen deliberately — standard/audio-off $0.42 vs pro/audio-on $0.84 is a 2×
       swing that changes every number above. Ship standard/audio-off unless the quality
       difference is visible in a side-by-side
