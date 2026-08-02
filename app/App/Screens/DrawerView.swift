@@ -1,11 +1,13 @@
 import SwiftUI
 import StoreKit
+import InkAnalytics
 
 /// The Drawer: settings kept in the room's fiction. Hand, voice, options,
 /// books & shelf curation, account.
 struct DrawerView: View {
     @Bindable var model: AppModel
     let archive: PageArchive
+    let analytics: Analytics
     @Environment(\.room) private var room
 
     /// A generated export, ready for the share sheet.
@@ -20,6 +22,8 @@ struct DrawerView: View {
     @State private var drawerNote: String?
     /// The "Written in" row folds its nine choices away until asked.
     @State private var showHands = false
+    /// The ritual's hour row folds its wheel away the same way.
+    @State private var showRitualTime = false
 
     private let inkChoices: [UInt32] = [0x2E2418, 0x6B4A2B, 0x1F5A63, 0x7A2E2B]
 
@@ -80,6 +84,25 @@ struct DrawerView: View {
                                 GoldToggle(isOn: model.reduceMotionOverride) {
                                     model.reduceMotionOverride.toggle()
                                 }
+                            }
+                        }
+
+                        section("The Ritual") {
+                            row("The evening ritual", divider: true) {
+                                GoldToggle(isOn: model.ritualEffectivelyOn) { ritualToggleTapped() }
+                                    .accessibilityLabel("The evening ritual")
+                            }
+                            if model.ritualAuthorization == .denied {
+                                QuietBanner(
+                                    text: "The device keeps its bell silenced — Settings can allow it again.",
+                                    size: 13.5
+                                )
+                                .padding(EdgeInsets(top: 0, leading: 18, bottom: 12, trailing: 18))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            ritualTimeRow
+                            if showRitualTime {
+                                ritualTimePicker
                             }
                         }
 
@@ -254,6 +277,87 @@ struct DrawerView: View {
             ownSelected: model.shelfHand == .own
         ) { model.setAllHands($0) }
             .overlay(alignment: .bottom) { hairline }
+    }
+
+    // MARK: - The Ritual
+
+    /// One tap, three meanings: flip the wish when the device allows it, walk
+    /// to Settings when it does not, or make the one-and-only ask when the
+    /// writer got here before their first answered page.
+    private func ritualToggleTapped() {
+        switch model.ritualAuthorization {
+        case .granted:
+            model.ritualEnabled.toggle()
+            if !model.ritualEnabled {
+                withAnimation(.easeInOut(duration: 0.25)) { showRitualTime = false }
+            }
+        case .denied:
+            // The system prompt cannot be shown twice; the only way back on.
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        case .notDetermined:
+            Task {
+                if let granted = await model.promptRitualIfNeeded() {
+                    await analytics.track(.notificationPermissionAnswered(granted: granted))
+                } else {
+                    // Asked before but never resolved — re-read where we stand.
+                    await model.rearmRitual()
+                }
+            }
+        }
+    }
+
+    private var ritualTimeLabel: String {
+        model.ritualTimeDate.formatted(date: .omitted, time: .shortened)
+    }
+
+    private var ritualTimeRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) { showRitualTime.toggle() }
+        } label: {
+            HStack(spacing: 12) {
+                Text("At the hour of").font(InkFont.body(16)).foregroundStyle(room.text)
+                Spacer(minLength: 8)
+                Text(ritualTimeLabel)
+                    .font(InkFont.body(15))
+                    .foregroundStyle(room.accent)
+                Text("›")
+                    .font(InkFont.body(15))
+                    .foregroundStyle(room.accent)
+                    .rotationEffect(.degrees(showRitualTime ? 90 : 0))
+            }
+            .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.ritualEffectivelyOn)
+        .opacity(model.ritualEffectivelyOn ? 1 : 0.45)
+        .overlay(alignment: .bottom) {
+            if showRitualTime { hairline }
+        }
+        .accessibilityLabel("At the hour of. \(ritualTimeLabel)")
+        .accessibilityHint(showRitualTime ? "Closes the hour wheel." : "Opens the hour wheel.")
+    }
+
+    /// The first system picker in the room — an arbitrary hour needs a real
+    /// wheel, not another row of pills. It follows the room's light so its
+    /// digits stay legible on both papers.
+    private var ritualTimePicker: some View {
+        DatePicker(
+            "The hour of the evening ritual",
+            selection: Binding(
+                get: { model.ritualTimeDate },
+                set: { model.setRitualTime(from: $0) }
+            ),
+            displayedComponents: .hourAndMinute
+        )
+        .datePickerStyle(.wheel)
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
+        .frame(height: 180)
+        .environment(\.colorScheme, model.themeVariant == .daylight ? .light : .dark)
+        .padding(.horizontal, 18)
     }
 
     // MARK: - The Hand

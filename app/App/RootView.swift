@@ -5,9 +5,14 @@ import InkCore
 /// and reduce-motion resolve here and flow down the environment.
 struct RootView: View {
     let di: AppDI
-    @State private var model = AppModel()
+    @State private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.scenePhase) private var scenePhase
+
+    init(di: AppDI) {
+        self.di = di
+        _model = State(initialValue: AppModel(ritual: di.ritual, ritualDiary: di.archive))
+    }
 
     var body: some View {
         ZStack {
@@ -42,7 +47,8 @@ struct RootView: View {
             case .bindery:
                 BinderyView(model: model).transition(.opacity)
             case .drawer:
-                DrawerView(model: model, archive: di.archive).transition(.opacity)
+                DrawerView(model: model, archive: di.archive, analytics: di.analytics)
+                    .transition(.opacity)
             case .keeperGate:
                 keeperGate
             case .crisis:
@@ -62,7 +68,17 @@ struct RootView: View {
         .persistentSystemOverlays(.hidden)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { relockKeeper() }
+            // Every return to the room re-arms the week of evening reminders
+            // (and re-reads authorization — the writer may have visited
+            // Settings while away).
+            if phase == .active { model.scheduleRitualRearm() }
         }
+        .onChange(of: di.archive.lastWrittenAt) { _, _ in
+            // A page written today — any Book, the Keeper included — keeps
+            // tonight silent the moment it lands, not on the next foreground.
+            model.scheduleRitualRearm()
+        }
+        .task { model.scheduleRitualRearm() }
     }
 
     private var keeperGate: some View {

@@ -112,6 +112,40 @@ final class AppModel {
     }
     var showDeleteConfirm = false
 
+    // The evening ritual. Off until the writer grants notifications after
+    // their first answered page; never required for the app to function.
+    var ritualEnabled: Bool {
+        didSet {
+            defaults.set(ritualEnabled, forKey: "ink.ritualEnabled")
+            scheduleRitualRearm()
+        }
+    }
+    var ritualHour: Int {
+        didSet {
+            defaults.set(ritualHour, forKey: "ink.ritualHour")
+            scheduleRitualRearm()
+        }
+    }
+    var ritualMinute: Int {
+        didSet {
+            defaults.set(ritualMinute, forKey: "ink.ritualMinute")
+            scheduleRitualRearm()
+        }
+    }
+    /// The system prompt can be shown once, ever — re-triggering it does
+    /// nothing. This flag is what makes the ask honest about that.
+    private(set) var ritualAsked: Bool {
+        didSet { defaults.set(ritualAsked, forKey: "ink.ritualAsked") }
+    }
+    private(set) var ritualAuthorization: RitualAuthorization = .notDetermined
+    /// The Book whose voice the ritual speaks in — the last one actually
+    /// opened to its page. BookState.lastOpenedAt in the InkData schema is
+    /// this fact's future home, but that layer is dormant at runtime, so the
+    /// defaults key is the record.
+    private(set) var lastOpenedBookID: BookID? {
+        didSet { defaults.set(lastOpenedBookID?.rawValue, forKey: "ink.lastOpenedBook") }
+    }
+
     var keeperUnlocked = false
     var signedName: String {
         didSet { defaults.set(signedName, forKey: "ink.signedName") }
@@ -139,10 +173,14 @@ final class AppModel {
 
     init(
         defaults: UserDefaults = .standard,
-        purchases: any PurchaseServicing = LiveCommerce.purchases
+        purchases: any PurchaseServicing = LiveCommerce.purchases,
+        ritual: RitualScheduler? = nil,
+        ritualDiary: (any RitualDiary)? = nil
     ) {
         self.defaults = defaults
         self.purchases = purchases
+        self.ritual = ritual
+        self.ritualDiary = ritualDiary
         // The review/UITest affordances stay, but only in Debug. They read the
         // whole search list — argument domain AND the persistent plist, which
         // rides along in an unencrypted device backup — and `-ink.startScreen
@@ -196,6 +234,19 @@ final class AppModel {
             ?? 0x2E2418
         leftHanded = defaults.bool(forKey: "ink.leftHanded")
         replyLength = ReplyLength(rawValue: defaults.string(forKey: "ink.replyLength") ?? "") ?? .measured
+        ritualEnabled = defaults.bool(forKey: "ink.ritualEnabled")
+        // Out-of-range hours (the argument domain, a forged plist) fall back
+        // to eight in the evening rather than to a night that never comes.
+        let storedHour = defaults.object(forKey: "ink.ritualHour") as? Int
+        ritualHour = storedHour.flatMap { (0...23).contains($0) ? $0 : nil } ?? 20
+        let storedMinute = defaults.object(forKey: "ink.ritualMinute") as? Int
+        ritualMinute = storedMinute.flatMap { (0...59).contains($0) ? $0 : nil } ?? 0
+        ritualAsked = defaults.bool(forKey: "ink.ritualAsked")
+        // Only a Book the shelf actually carries may speak the ritual.
+        let storedVoice = defaults.string(forKey: "ink.lastOpenedBook").map { BookID(rawValue: $0) }
+        lastOpenedBookID = storedVoice.flatMap { id in
+            Book.all.contains { $0.id == id } ? id : nil
+        }
         signedName = defaults.string(forKey: "ink.signedName") ?? ""
         signatureData = defaults.data(forKey: "ink.signature")
         // The old forgeable entitlement flag: remove it so nothing can revive
@@ -304,6 +355,77 @@ final class AppModel {
         return .mixed
     }
 
+    // MARK: - The evening ritual
+
+    private let ritual: RitualScheduler?
+    private let ritualDiary: (any RitualDiary)?
+    /// The re-arm in flight, held so tests can await it instead of polling.
+    private(set) var ritualTask: Task<Void, Never>?
+
+    /// The voice on tonight's notification: the Book last opened, or the
+    /// Keeper for a writer with no history yet.
+    var ritualVoice: BookID { lastOpenedBookID ?? .keeper }
+
+    /// What the Drawer's toggle shows. The wish and the permission both have
+    /// to hold — a toggle reading "on" while the device blocks delivery would
+    /// be a lie.
+    var ritualEffectivelyOn: Bool {
+        ritualEnabled && ritualAuthorization == .granted
+    }
+
+    var ritualTimeDate: Date {
+        Calendar.current.date(bySettingHour: ritualHour, minute: ritualMinute, second: 0, of: .now) ?? .now
+    }
+
+    func setRitualTime(from date: Date, calendar: Calendar = .current) {
+        let time = calendar.dateComponents([.hour, .minute], from: date)
+        ritualHour = time.hour ?? 20
+        ritualMinute = time.minute ?? 0
+    }
+
+    /// The value moment — called after the first answered page, mirroring how
+    /// the paywall waits. Asks the system exactly once, ever; a grant turns
+    /// the ritual on, a denial leaves it silently off. Returns nil when there
+    /// was nothing to ask, so the caller knows whether an answer happened.
+    func promptRitualIfNeeded() async -> Bool? {
+        guard let ritual, !ritualAsked else { return nil }
+        ritualAsked = true
+        let granted = await ritual.requestAuthorization()
+        ritualAuthorization = granted ? .granted : .denied
+        if granted {
+            ritualEnabled = true
+        }
+        return granted
+    }
+
+    /// Fire-and-track re-arm for synchronous call sites (didSets, scene
+    /// changes). The task replaces any previous one; last write wins.
+    func scheduleRitualRearm() {
+        guard ritual != nil else { return }
+        ritualTask = Task { await rearmRitual() }
+    }
+
+    /// Replace the pending week with the next one: refresh where authorization
+    /// stands, then either lay out the nights or clear the queue. Runs on
+    /// every foreground and after every archived page, so tonight's request
+    /// disappears the moment a page is written.
+    func rearmRitual(now: Date = .now, calendar: Calendar = .current) async {
+        guard let ritual else { return }
+        ritualAuthorization = await ritual.authorization()
+        guard ritualAsked, ritualEnabled, ritualAuthorization == .granted else {
+            await ritual.cancelAll()
+            return
+        }
+        await ritual.schedule(RitualPlanner.plan(
+            now: now,
+            calendar: calendar,
+            hour: ritualHour,
+            minute: ritualMinute,
+            voice: ritualVoice,
+            lastWrittenAt: ritualDiary?.lastWrittenAt
+        ))
+    }
+
     // MARK: - Navigation
 
     func go(_ target: AppScreen) {
@@ -319,6 +441,9 @@ final class AppModel {
         if book.locked && !keeperUnlocked {
             go(.keeperGate)
         } else {
+            // Recorded only when the page actually opens — a Book that turned
+            // the visitor away at the gate never becomes the ritual's voice.
+            lastOpenedBookID = book.id
             go(.page)
         }
     }

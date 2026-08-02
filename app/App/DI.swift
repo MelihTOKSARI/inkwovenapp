@@ -3,6 +3,7 @@ import InkCore
 import InkNet
 import InkMoney
 import InkAnalytics
+import UserNotifications
 
 /// Composition root. All cross-package boundaries are protocols; the live
 /// implementations are bound here and nowhere else.
@@ -13,11 +14,20 @@ final class AppDI {
     let analytics: Analytics
     let keeperAuth: any KeeperAuthenticating
     let archive = PageArchive()
+    let ritual = RitualScheduler()
+    /// Retained for the app's lifetime — the notification centre holds its
+    /// delegate weakly, and a deallocated delegate silently drops the tap
+    /// that should attribute an open to the ritual.
+    private let ritualDelegate: RitualNotificationDelegate
 
     init(proxy: ProxyClient, analytics: Analytics, keeperAuth: any KeeperAuthenticating) {
         self.proxy = proxy
         self.analytics = analytics
         self.keeperAuth = keeperAuth
+        // Installed during App init so a cold launch from a notification tap
+        // still reaches the delegate before the response is delivered.
+        ritualDelegate = RitualNotificationDelegate(analytics: analytics)
+        UNUserNotificationCenter.current().delegate = ritualDelegate
     }
 
     static func live() -> AppDI {

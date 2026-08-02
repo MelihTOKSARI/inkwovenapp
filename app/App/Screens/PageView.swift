@@ -1,6 +1,7 @@
 import SwiftUI
 import PencilKit
 import InkCore
+import InkAnalytics
 
 /// The core surface: one screen, many states. Zero chrome while writing —
 /// per-Book paper, hand and ink; the engine (PageInteractor) drives the
@@ -18,6 +19,9 @@ struct PageView: View {
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
     @State private var showHandPicker = false
+    /// `.answered` also lands from revisits and canvas restores; only an
+    /// exchange sent this visit is the value moment the ritual ask waits for.
+    @State private var sentThisVisit = false
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
@@ -26,11 +30,13 @@ struct PageView: View {
     /// still open.
     private var book: Book { model.activeBook }
     private let archive: PageArchive
+    private let analytics: Analytics
     private var net: Reachability { .shared }
 
     init(model: AppModel, di: AppDI) {
         self.model = model
         self.archive = di.archive
+        self.analytics = di.analytics
         _interactor = State(initialValue: PageInteractor(
             proxy: di.proxy, analytics: di.analytics, book: model.activeBookID, archive: di.archive
         ))
@@ -632,6 +638,7 @@ struct PageView: View {
         case .sending:
             // A fresh exchange gets a fresh darkroom.
             developStep = 0
+            sentThisVisit = true
             withAnimation(.easeIn(duration: reduceMotion ? 0.3 : 0.9)) {
                 canvasAbsorbed = true
             }
@@ -644,6 +651,15 @@ struct PageView: View {
             // absorption veil so the (now empty) canvas is ready to write on.
             withAnimation(.easeOut(duration: 0.25)) {
                 canvasAbsorbed = false
+            }
+            // The value moment: the first answered page, and only then, earns
+            // the notification ask — mirroring how the paywall waits.
+            if sentThisVisit {
+                Task {
+                    if let granted = await model.promptRitualIfNeeded() {
+                        await analytics.track(.notificationPermissionAnswered(granted: granted))
+                    }
+                }
             }
         case .declined, .cooldown:
             // Failed send: the ink must come back at FULL strength — an error

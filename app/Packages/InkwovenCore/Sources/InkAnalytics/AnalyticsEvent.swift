@@ -26,6 +26,10 @@ public enum AnalyticsEvent: Equatable, Sendable {
     case crisisFlow(book: BookID)
     case cooldownHit(seconds: Double)
     case memoryTorn(book: BookID)
+    case notificationPermissionAnswered(granted: Bool)
+    /// An app open attributed to the evening ritual's notification; `book` is
+    /// the voice that asked.
+    case ritualOpened(book: BookID)
 
     public var name: String {
         switch self {
@@ -41,6 +45,8 @@ public enum AnalyticsEvent: Equatable, Sendable {
         case .crisisFlow: "crisis_flow"
         case .cooldownHit: "cooldown_hit"
         case .memoryTorn: "memory_torn"
+        case .notificationPermissionAnswered: "notification_permission_answered"
+        case .ritualOpened: "ritual_opened"
         }
     }
 
@@ -67,6 +73,10 @@ public enum AnalyticsEvent: Equatable, Sendable {
         case .cooldownHit(let seconds):
             ["seconds": .double(seconds)]
         case .memoryTorn(let book):
+            ["book": .string(book.rawValue)]
+        case .notificationPermissionAnswered(let granted):
+            ["granted": .bool(granted)]
+        case .ritualOpened(let book):
             ["book": .string(book.rawValue)]
         }
     }
