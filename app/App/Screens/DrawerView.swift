@@ -80,16 +80,25 @@ struct DrawerView: View {
                                     selection: model.spreadLayout
                                 ) { model.spreadLayout = $0 }
                             }
-                            // Deliberately its own row, next to Reduce motion
-                            // rather than folded into it: a haptic is not
-                            // motion, and someone who wants the room still may
-                            // still want to feel the reply land.
-                            row("A gentle pulse", divider: true) {
-                                GoldToggle(isOn: Feel.shared.hapticsEnabled) {
-                                    Feel.shared.hapticsEnabled.toggle()
+                            // Only where the hardware can actually answer. No
+                            // iPad has a Taptic Engine, so on the device this
+                            // app is built for this switch did nothing at all
+                            // — a settings row that claims a capability the
+                            // device hasn't got is worse than no row.
+                            //
+                            // Deliberately its own row where it does appear,
+                            // next to Reduce motion rather than folded into
+                            // it: a haptic is not motion, and someone who
+                            // wants the room still may still want to feel the
+                            // reply land.
+                            if Feel.isSupported {
+                                row("A gentle pulse", divider: true) {
+                                    GoldToggle(isOn: Feel.shared.hapticsEnabled) {
+                                        Feel.shared.hapticsEnabled.toggle()
+                                    }
+                                    .accessibilityLabel("A gentle pulse")
+                                    .accessibilityHint("Haptic feedback at the few moments the room marks.")
                                 }
-                                .accessibilityLabel("A gentle pulse")
-                                .accessibilityHint("Haptic feedback at the few moments the room marks.")
                             }
                             row("Reduce motion") {
                                 GoldToggle(isOn: model.reduceMotionOverride) {

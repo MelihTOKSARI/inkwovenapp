@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreHaptics
 
 /// The room's sense of touch. Every haptic in the app passes through here,
 /// named for the moment it marks — never for the hardware that renders it —
@@ -62,6 +63,21 @@ final class Feel {
         case tick
     }
 
+    /// Whether this device can render a haptic at all.
+    ///
+    /// **No iPad has a Taptic Engine.** Every generator below is a silent
+    /// no-op there — which mattered because Inkwoven is iPad-first, so the
+    /// whole of this file does nothing on the device most writers hold. The
+    /// Apple Pencil Pro can buzz, but only through `UICanvasFeedbackGenerator`
+    /// during pencil-on-canvas interaction, and not one of the moments above
+    /// is that: the pen is lifted or absent for all six.
+    ///
+    /// This exists so the Drawer can stop offering a switch that cannot do
+    /// anything. Hardware capability only — whether the writer has turned
+    /// system haptics off is the OS's business, and `UIFeedbackGenerator`
+    /// already honours it.
+    nonisolated static let isSupported = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+
     var hapticsEnabled: Bool {
         didSet { defaults.set(hapticsEnabled, forKey: "ink.haptics") }
     }
@@ -81,7 +97,7 @@ final class Feel {
     }
 
     func play(_ event: Event) {
-        guard hapticsEnabled else { return }
+        guard Self.isSupported, hapticsEnabled else { return }
         pulse(event)
     }
 
