@@ -70,10 +70,17 @@ struct RootView: View {
             }
 
             // Topmost: the cold-launch veil. Its first frame matches the
-            // system launch screen, so the app appears to light itself.
+            // system launch screen, so the app appears to light itself. The
+            // room is already built underneath — the veil only ever draws on
+            // top, and never delays initialization.
             if launchVeil {
                 LaunchGlowView {
-                    withAnimation(.easeOut(duration: 0.45)) { launchVeil = false }
+                    // The lift is the veil's own final beat, so its duration
+                    // comes from the same place as the rest of the sequence.
+                    let lift = systemReduceMotion || model.reduceMotionOverride
+                        ? LaunchGlowView.Beat.reducedLift
+                        : LaunchGlowView.Beat.lift
+                    withAnimation(.easeOut(duration: lift)) { launchVeil = false }
                 }
                 .zIndex(2)
                 .transition(.opacity)
