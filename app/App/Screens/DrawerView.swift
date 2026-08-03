@@ -80,17 +80,16 @@ struct DrawerView: View {
                                     selection: model.spreadLayout
                                 ) { model.spreadLayout = $0 }
                             }
+                            // Deliberately its own row, next to Reduce motion
+                            // rather than folded into it: a haptic is not
+                            // motion, and someone who wants the room still may
+                            // still want to feel the reply land.
                             row("A gentle pulse", divider: true) {
                                 GoldToggle(isOn: Feel.shared.hapticsEnabled) {
                                     Feel.shared.hapticsEnabled.toggle()
                                 }
-                                .accessibilityLabel("Haptics")
-                            }
-                            row("Quiet sounds", divider: true) {
-                                GoldToggle(isOn: Feel.shared.soundsEnabled) {
-                                    Feel.shared.soundsEnabled.toggle()
-                                }
-                                .accessibilityLabel("Sounds")
+                                .accessibilityLabel("A gentle pulse")
+                                .accessibilityHint("Haptic feedback at the few moments the room marks.")
                             }
                             row("Reduce motion") {
                                 GoldToggle(isOn: model.reduceMotionOverride) {

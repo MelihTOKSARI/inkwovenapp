@@ -1,55 +1,69 @@
 import SwiftUI
 import UIKit
-import AVFoundation
 
-/// The room's sense of touch and hearing. Every haptic and every sound in
-/// the app passes through here, named for the moment it marks — never for
-/// the hardware that renders it — so a call site reads as intent
-/// (`Feel.shared.play(.sealPress)`) and the texture of each moment is tuned
-/// in exactly one place.
+/// The room's sense of touch. Every haptic in the app passes through here,
+/// named for the moment it marks — never for the hardware that renders it —
+/// so a call site reads as intent (`Feel.shared.play(.replyArrived)`) and the
+/// texture of each moment is tuned in exactly one place.
 ///
-/// Two writer-facing switches live in the Drawer ("A gentle pulse", "Quiet
-/// sounds"); both default on. Sounds ride the `.ambient` category: they mix
-/// under whatever the writer is listening to and fall silent with the ring
-/// switch, the same posture `MovingPicture` takes for its clips. Writing
-/// itself is deliberately unfelt — the pen on the page is the sensation —
-/// and the Crisis room stays entirely still: no pulse, no chime, nothing
-/// but the words.
+/// **This is a budget, not a coverage problem.** Inkwoven is a quiet
+/// candlelit room, and the whole value of a felt moment is that there are so
+/// few of them. Six exist, listed below, plus a selection tick in the two
+/// places that are genuinely choices (the hand picker, the Drawer's controls).
+/// Adding a seventh should feel like it needs an argument.
+///
+/// Three silences are load-bearing rather than incidental:
+///
+/// - **Nothing while the pen is on the page.** The Pencil already has real
+///   feedback against glass; a haptic competing with it breaks the illusion
+///   instantly. No stroke, undo, redo or eraser feedback, ever.
+/// - **Nothing in the crisis flow.** Someone in distress does not need the
+///   phone buzzing at them.
+/// - **Nothing on navigation, the tool tray, streamed chunks, or launch.**
+///   Those are all visible on screen; a haptic adds no information.
+///
+/// One writer-facing switch lives in the Drawer ("A gentle pulse"), default
+/// on, deliberately separate from Reduce Motion — haptics are not motion, and
+/// someone who dislikes animation may still want to feel the reply land.
+/// `UIFeedbackGenerator` already honours the system haptics setting, so
+/// nothing here tries to detect or mirror it.
 @Observable
 @MainActor
 final class Feel {
     static let shared = Feel()
 
-    /// The moments the room marks. Add here, texture below — call sites
-    /// never compose their own patterns.
+    /// The moments the room marks. Add here, texture below — call sites never
+    /// compose their own patterns.
     enum Event {
-        /// A Book comes off the shelf; its cover settles open.
-        case bookOpen
-        /// TURN PAGE — the manual archive-and-clear.
-        case pageTurn
-        /// The page absorbs the ink and the exchange leaves for the Book —
-        /// also the press of any wax seal (binding included).
-        case sealPress
-        /// The Book's reply has fully arrived on the facing page.
+        /// THE REPLY ARRIVES. The most important one in the app: the only
+        /// event that happens while the writer's attention is probably
+        /// elsewhere. Fires only for an exchange sent in this visit —
+        /// revisits and archive restores stay silent.
         case replyArrived
-        /// The Keeper's lock recognises the hand.
+        /// THE SEND COMMITS ON STILLNESS. The page leaves after ~4s of pen-down
+        /// stillness, an irreversible-ish thing triggered by doing nothing
+        /// against a deadline nobody can perceive. This is the only signal
+        /// that it passed — not polish.
+        case sendCommitted
+        /// THE KEEPER'S LOCK OPENS. Rare, and the one moment the app says
+        /// "I recognise you."
         case unlock
-        /// A quiet no: a declined page, a cooldown. Gentler than an error —
-        /// the room refuses softly.
+        /// A BOOK COMES OFF THE SHELF — the cover actually opening, not the
+        /// peek that precedes it.
+        case bookOpen
+        /// A QUIET REFUSAL: a declined page, a cooldown. The room turning you
+        /// away gently, never reporting a fault.
         case refusal
-        /// A verified purchase landed.
+        /// A PURCHASE VERDICT. Ask-to-Buy is a pause, not a verdict, and stays
+        /// silent.
         case purchaseSuccess
-        /// The seal would not take.
         case purchaseFailed
-        /// Small selections: toggles, pills, choosing a hand.
+        /// A choice was made: a hand picked, a toggle thrown, a pill chosen.
         case tick
     }
 
     var hapticsEnabled: Bool {
         didSet { defaults.set(hapticsEnabled, forKey: "ink.haptics") }
-    }
-    var soundsEnabled: Bool {
-        didSet { defaults.set(soundsEnabled, forKey: "ink.sounds") }
     }
 
     private let defaults: UserDefaults
@@ -57,120 +71,80 @@ final class Feel {
     // Kept alive so repeated moments stay low-latency; UIKit no-ops them on
     // hardware without a Taptic Engine.
     private let softTap = UIImpactFeedbackGenerator(style: .soft)
-    private let lightTap = UIImpactFeedbackGenerator(style: .light)
     private let rigidTap = UIImpactFeedbackGenerator(style: .rigid)
     private let verdict = UINotificationFeedbackGenerator()
     private let selection = UISelectionFeedbackGenerator()
 
-    private var players: [String: AVAudioPlayer] = [:]
-
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         hapticsEnabled = defaults.object(forKey: "ink.haptics") as? Bool ?? true
-        soundsEnabled = defaults.object(forKey: "ink.sounds") as? Bool ?? true
-        // Ambient before anything plays: the room's sounds sit UNDER the
-        // writer's own listening and never take the audio route from it.
-        // (MovingPicture sets the same category; agreeing here means neither
-        // ever interrupts the other.)
-        try? AVAudioSession.sharedInstance().setCategory(
-            .ambient, mode: .default, options: [.mixWithOthers]
-        )
-        preloadSounds()
     }
 
     func play(_ event: Event) {
-        if hapticsEnabled { pulse(event) }
-        if soundsEnabled { sound(event) }
+        guard hapticsEnabled else { return }
+        pulse(event)
     }
 
-    /// Sugar for the most common moment.
+    /// Sugar for the one event call sites reach for constantly.
     func tick() { play(.tick) }
 
-    // MARK: - Touch
+    // MARK: - Texture
 
-    /// The textures. Layered from the stock generators on purpose: a
-    /// CHHapticEngine would buy finer grain at the price of lifecycle
-    /// tending (it stops on every backgrounding), and these moments are
-    /// short enough that two well-timed taps read as one gesture.
+    /// Built from the stock generators on purpose. `CHHapticEngine` would buy
+    /// finer grain at the price of lifecycle tending — it stops on every
+    /// backgrounding — and every moment here is short enough that two
+    /// well-timed taps already read as one gesture.
     private func pulse(_ event: Event) {
         switch event {
-        case .bookOpen:
-            softTap.impactOccurred(intensity: 0.8)
-            secondBeat(after: 90, .light, intensity: 0.5)
-        case .pageTurn:
-            lightTap.impactOccurred(intensity: 0.6)
-        case .sealPress:
-            rigidTap.impactOccurred(intensity: 1.0)
-            secondBeat(after: 110, .soft, intensity: 0.7)
         case .replyArrived:
+            // Two soft beats, the second a little stronger: an arrival, not an
+            // alert. The rise is what makes it read as something coming TO
+            // you rather than a notification firing AT you.
             softTap.impactOccurred(intensity: 0.55)
-            secondBeat(after: 130, .soft, intensity: 0.9)
+            secondBeat(after: 130, intensity: 0.85)
+
+        case .sendCommitted:
+            // The sharpest thing in the app, and a single tap — the writer did
+            // not touch anything, so the feedback has to be unambiguous rather
+            // than decorative.
+            rigidTap.impactOccurred(intensity: 1.0)
+            // The reply follows this within seconds and is the moment that
+            // matters most; warm its generator now, while we are already here.
+            softTap.prepare()
+
         case .unlock:
-            rigidTap.impactOccurred(intensity: 0.7)
+            // Firm and crisp, distinct from the soft settle used for ordinary
+            // confirmations. The seal giving way.
+            rigidTap.impactOccurred(intensity: 0.9)
+
+        case .bookOpen:
+            // A settle, not a click: the cover coming to rest open.
+            softTap.impactOccurred(intensity: 0.75)
+
         case .refusal:
-            verdict.notificationOccurred(.warning)
+            // Deliberately NOT `UINotificationFeedbackGenerator.warning`,
+            // which is a two-part buzz that reads as a fault report. A quiet
+            // no is one soft, low tap and nothing more.
+            softTap.impactOccurred(intensity: 0.45)
+
         case .purchaseSuccess:
             verdict.notificationOccurred(.success)
+
         case .purchaseFailed:
             verdict.notificationOccurred(.error)
+
         case .tick:
             selection.selectionChanged()
         }
     }
 
-    /// The trailing half of a two-part texture. Takes the style by value
-    /// rather than a closure: everything crossing into the `Task` is then a
-    /// plain Sendable scalar, with no escaping-closure capture for strict
-    /// concurrency to weigh up.
-    private func secondBeat(
-        after milliseconds: Int,
-        _ style: UIImpactFeedbackGenerator.FeedbackStyle,
-        intensity: CGFloat
-    ) {
+    /// The trailing half of the reply's two-part texture. The intensity
+    /// crosses into the `Task` as a plain Sendable scalar, so strict
+    /// concurrency has no escaping capture to weigh up.
+    private func secondBeat(after milliseconds: Int, intensity: CGFloat) {
         Task {
             try? await Task.sleep(for: .milliseconds(milliseconds))
-            generator(style).impactOccurred(intensity: intensity)
-        }
-    }
-
-    private func generator(
-        _ style: UIImpactFeedbackGenerator.FeedbackStyle
-    ) -> UIImpactFeedbackGenerator {
-        switch style {
-        case .light: return lightTap
-        case .rigid: return rigidTap
-        default: return softTap
-        }
-    }
-
-    // MARK: - Sound
-
-    /// Only the paper-and-wax moments speak; verdicts and small selections
-    /// stay touch-only. Files live in Resources/Sounds — synthesized
-    /// placeholders for now, each a fraction of a second, mastered quiet.
-    private static let voices: [Event: (file: String, volume: Float)] = [
-        .bookOpen: ("book-open", 0.5),
-        .pageTurn: ("page-turn", 0.45),
-        .sealPress: ("seal-press", 0.5),
-        .replyArrived: ("reply-arrives", 0.4),
-    ]
-
-    private func sound(_ event: Event) {
-        guard let voice = Self.voices[event], let player = players[voice.file] else { return }
-        player.currentTime = 0
-        player.play()
-    }
-
-    private func preloadSounds() {
-        for (file, volume) in Self.voices.values {
-            guard let url = Bundle.main.url(forResource: file, withExtension: "wav") else {
-                continue
-            }
-            if let player = try? AVAudioPlayer(contentsOf: url) {
-                player.volume = volume
-                player.prepareToPlay()
-                players[file] = player
-            }
+            softTap.impactOccurred(intensity: intensity)
         }
     }
 }

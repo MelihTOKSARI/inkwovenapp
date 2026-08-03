@@ -17,15 +17,12 @@ struct PageToolTray: View {
             trayButton("arrow.uturn.backward", label: "Undo") { interactor.undo() }
             trayButton("arrow.uturn.forward", label: "Redo") { interactor.redo() }
             trayButton("eraser", label: "Eraser", active: interactor.eraserOn) {
-                Feel.shared.tick()
                 interactor.eraserOn.toggle()
             }
             trayButton("hourglass", label: "Hold — the page waits", active: interactor.isHeld) {
-                Feel.shared.tick()
                 interactor.toggleHold()
             }
             trayButton("book.pages", label: "Turn the page") {
-                Feel.shared.play(.pageTurn)
                 interactor.turnPage()
             }
             trayButton("signature", label: "The hand it writes in") { onHand() }

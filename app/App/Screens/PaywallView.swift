@@ -243,7 +243,6 @@ struct PaywallView: View {
                         confirmButton("Bind it", prominent: true) {
                             // The commitment press; the verdict pulse follows
                             // from PurchaseNoteOverlay when StoreKit answers.
-                            Feel.shared.play(.sealPress)
                             model.confirmBind()
                         }
                     }

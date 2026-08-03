@@ -108,7 +108,8 @@ struct ShelfView: View {
         label: String, destination: AppScreen, @ViewBuilder icon: () -> some View
     ) -> some View {
         Button {
-            Feel.shared.play(.tick)
+            // No haptic: opening a room is navigation, and navigation is not
+            // an event the hand needs told about.
             // The shop remembers it was opened from the shelf, so closing it
             // comes back here rather than to whatever room opened it last.
             if destination == .wallet {

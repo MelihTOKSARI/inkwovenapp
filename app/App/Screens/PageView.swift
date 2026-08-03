@@ -803,8 +803,9 @@ struct PageView: View {
         announce(status)
         switch status {
         case .sending:
-            // The page drinks the ink: the seal-press moment.
-            Feel.shared.play(.sealPress)
+            // The deadline passed and the page went without the writer
+            // touching anything — this tap is the only way they can know.
+            Feel.shared.play(.sendCommitted)
             // A fresh exchange gets a fresh darkroom.
             developStep = 0
             sentThisVisit = true
