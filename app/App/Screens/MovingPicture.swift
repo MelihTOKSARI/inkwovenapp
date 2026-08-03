@@ -23,19 +23,23 @@ struct MovingPictureOffer: View {
     let wallet: WalletView?
     let isOffline: Bool
     let onRequest: () -> Void
+    /// Opens the shop. An empty purse is a thing the reader can FIX, so the
+    /// affordance changes what it does rather than going grey and stopping the
+    /// journey dead — the one state where a disabled button would be a wall.
+    let onOpenVials: () -> Void
 
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button(action: onRequest) {
+            Button(action: needsVials ? onOpenVials : onRequest) {
                 HStack(spacing: 11) {
-                    VialView(width: 15, height: 30, fill: available ? 0.55 : 0.12)
+                    VialView(width: 15, height: 30, fill: hasFunds ? 0.55 : 0.12)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("let this one move")
+                        Text(needsVials ? "fill the vials" : "let this one move")
                             .font(InkFont.bodyItalic(16))
-                            .foregroundStyle(available ? Ink.wax : Ink.inkFaded)
+                            .foregroundStyle(isOffline ? Ink.inkFaded : Ink.wax)
                         Text(costLine)
                             .font(InkFont.body(12))
                             .foregroundStyle(Ink.inkFaded)
@@ -48,21 +52,23 @@ struct MovingPictureOffer: View {
                 .background(
                     Capsule()
                         .fill(Ink.ink.opacity(0.05))
-                        .overlay(Capsule().stroke(Ink.ink.opacity(available ? 0.2 : 0.1), lineWidth: 1))
+                        .overlay(Capsule().stroke(Ink.ink.opacity(isOffline ? 0.1 : 0.2), lineWidth: 1))
                 )
             }
             .buttonStyle(PressScaleStyle(scale: 0.96))
-            .disabled(!available)
-            .accessibilityLabel("Let this reply move")
+            // Offline is the only dead state, because it is the only one the
+            // reader cannot do anything about from here.
+            .disabled(isOffline)
+            .accessibilityLabel(needsVials ? "Fill the vials" : "Let this reply move")
             .accessibilityHint(spokenHint)
         }
         .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
     }
 
-    /// Offline is a disabled affordance with a reason, never a dead button.
-    private var available: Bool {
-        !isOffline && (wallet?.canAffordClip ?? true)
-    }
+    /// Unknown counts as funded: the server decides for real, and the failure
+    /// is in-fiction — better than refusing a tap on a purse we never read.
+    private var hasFunds: Bool { wallet?.canAffordClip ?? true }
+    private var needsVials: Bool { !isOffline && !hasFunds }
 
     /// Honest before the tap: which purse this comes out of, in the room's
     /// own words. Unknown stays quiet rather than guessing.
@@ -77,15 +83,15 @@ struct MovingPictureOffer: View {
         if wallet.available > 0 {
             return wallet.available == 1 ? "your last vial" : "one of \(wallet.available) vials"
         }
-        return "the vials are empty"
+        return "none left — three from $4.99"
     }
 
     private var spokenHint: String {
         if isOffline {
             return "The road is dark — a moving picture cannot be made until the connection returns."
         }
-        if wallet?.canAffordClip == false {
-            return "The vials are empty. Visit the vials to fill them."
+        if needsVials {
+            return "Your vials and gifted moments are spent. Opens the shop; the offer stays on this page."
         }
         return "Spends \(costLine). The picture takes a moment to develop."
     }

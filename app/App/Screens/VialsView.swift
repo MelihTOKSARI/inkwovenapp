@@ -7,8 +7,47 @@ import InkMoney
 /// shop comes out from behind the curtain. Prices and pack sizes are the ones
 /// costed in `design/app-store-assets/credits.md` §3; the balance shown is the
 /// server's, never a local tally.
+///
+/// Reachable two ways, because the shop is visited for two different reasons:
+/// deliberately from the Drawer (this room), and mid-errand from a page whose
+/// picture wants to move (`VialsSheet`). The second cannot be a room: RootView
+/// rebuilds `PageView` on every navigation, so travelling to a shop would throw
+/// away the reply and the offer the reader was trying to spend on.
 struct VialsView: View {
     @Bindable var model: AppModel
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                // Back to wherever the shop was opened from — the Drawer, not
+                // the shelf, when that is where the reader came from.
+                RoomNavBar(title: "The Vials") { model.closeVials() }
+                ScrollView(showsIndicators: false) {
+                    VialsShop(model: model)
+                        .frame(maxWidth: 720)
+                        .padding(EdgeInsets(top: 36, leading: 56, bottom: 60, trailing: 56))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            PurchaseNoteOverlay(
+                state: model.purchaseState,
+                successTitle: "Sealed and delivered",
+                successBody: "The vials are yours — they wait, sealed, until a picture asks to move.",
+                successAction: "very well",
+                onDismiss: { model.clearPurchaseNote() },
+                onSuccess: { model.clearPurchaseNote() }
+            )
+        }
+    }
+}
+
+/// The shop's contents, independent of how they are presented.
+struct VialsShop: View {
+    @Bindable var model: AppModel
+    /// Shown when the shop is opened because a picture is waiting on a vial —
+    /// the errand needs a sentence the deliberate visit does not.
+    var errandNote: String?
     @Environment(\.room) private var room
 
     /// Fallbacks are shown only until StoreKit answers with the storefront's
@@ -21,46 +60,29 @@ struct VialsView: View {
     ]
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                RoomNavBar(title: "The Vials") { model.go(.shelf) }
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        Text("The Vials")
-                            .font(InkFont.display(34))
-                            .foregroundStyle(room.heading)
-                        Text("Moving-picture credits, sealed in wax until you spend them.")
-                            .font(InkFont.bodyItalic(16))
-                            .foregroundStyle(room.dim)
-                            .padding(.top, 6)
+        VStack(spacing: 0) {
+            Text("The Vials")
+                .font(InkFont.display(34))
+                .foregroundStyle(room.heading)
+            Text(errandNote ?? "Moving-picture credits, sealed in wax until you spend them.")
+                .font(InkFont.bodyItalic(16))
+                .foregroundStyle(room.dim)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .padding(.top, 6)
 
-                        balance
-                            .padding(.vertical, 34)
+            balance
+                .padding(.vertical, 34)
 
-                        HStack(alignment: .bottom, spacing: 16) {
-                            ForEach(Array(packs.enumerated()), id: \.offset) { index, pack in
-                                packCard(pack: pack, big: index == 2, index: index)
-                            }
-                        }
-                        .task { await model.refreshWallet() }
-
-                        refundNote
-                            .padding(.top, 24)
-                    }
-                    .frame(maxWidth: 720)
-                    .padding(EdgeInsets(top: 36, leading: 56, bottom: 60, trailing: 56))
-                    .frame(maxWidth: .infinity)
+            HStack(alignment: .bottom, spacing: 16) {
+                ForEach(Array(packs.enumerated()), id: \.offset) { index, pack in
+                    packCard(pack: pack, big: index == 2, index: index)
                 }
             }
+            .task { await model.refreshWallet() }
 
-            PurchaseNoteOverlay(
-                state: model.purchaseState,
-                successTitle: "Sealed and delivered",
-                successBody: "The vials are yours — they wait, sealed, until a picture asks to move.",
-                successAction: "very well",
-                onDismiss: { model.clearPurchaseNote() },
-                onSuccess: { model.clearPurchaseNote() }
-            )
+            refundNote
+                .padding(.top, 24)
         }
     }
 
@@ -170,5 +192,77 @@ struct VialsView: View {
                 .fill(Ink.successHerb.opacity(0.12))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Ink.successHerb.opacity(0.3), lineWidth: 1))
         )
+    }
+}
+
+/// The shop as an errand, over the page rather than instead of it.
+///
+/// A reader who taps "fill the vials" is mid-sentence with a reply on the
+/// facing page and a picture waiting to move. `RootView` rebuilds `PageView`
+/// on every navigation, so sending them to the Vials *room* would discard the
+/// reply, the verdict and the offer — they would buy a vial and come back to a
+/// blank page with nothing to spend it on. Presented here it costs them
+/// nothing: the page is still underneath, and the offer is still on it.
+struct VialsSheet: View {
+    @Bindable var model: AppModel
+    let onClose: () -> Void
+
+    @Environment(\.room) private var room
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+                .accessibilityLabel("Close the vials")
+
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(room.dim)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.trailing, 6)
+
+                ScrollView(showsIndicators: false) {
+                    VialsShop(
+                        model: model,
+                        errandNote: "A picture is waiting to move. Fill the vials and it will."
+                    )
+                    .padding(EdgeInsets(top: 4, leading: 34, bottom: 34, trailing: 34))
+                }
+            }
+            .frame(maxWidth: 720)
+            .frame(maxHeight: 720)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(colors: [room.cardTop, room.cardBottom], startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(room.accent.opacity(0.3), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 30, y: 14)
+            )
+            .padding(40)
+
+            PurchaseNoteOverlay(
+                state: model.purchaseState,
+                successTitle: "Sealed and delivered",
+                successBody: "The vials are yours. The picture on the page can move now.",
+                successAction: "very well",
+                onDismiss: { model.clearPurchaseNote() },
+                // Dismissing the receipt closes the errand too: the reader came
+                // here to buy one thing, and the page they left is the point.
+                onSuccess: {
+                    model.clearPurchaseNote()
+                    onClose()
+                }
+            )
+        }
+        .transition(.opacity)
     }
 }

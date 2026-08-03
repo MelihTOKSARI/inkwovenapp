@@ -591,6 +591,22 @@ final class AppModel {
     var vialBalance: Int? { wallet?.available }
     var freeClipsRemaining: Int? { wallet?.freeClipsRemaining }
 
+    // MARK: - Reaching the Vials
+
+    /// Where the shop was opened from. Closing it returns there rather than
+    /// dumping the reader on the shelf — someone who stepped out of the Drawer
+    /// to look at the vials means to come back to the Drawer.
+    private(set) var vialsReturn: AppScreen = .shelf
+
+    func openVials(from origin: AppScreen) {
+        vialsReturn = origin
+        go(.wallet)
+    }
+
+    func closeVials() {
+        go(vialsReturn)
+    }
+
     func toggleShelf(book: Book) {
         if hiddenBooks.contains(book.id) {
             hiddenBooks.remove(book.id)

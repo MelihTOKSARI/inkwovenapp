@@ -148,6 +148,26 @@ struct DrawerView: View {
                             }
                             .buttonStyle(.plain)
                             .overlay(alignment: .bottom) { hairline }
+                            // The vials are a separate purse from the binding:
+                            // the subscription buys ink and pictures, a vial
+                            // buys one moving picture. Two rows, because
+                            // conflating them is how someone pays twice for
+                            // what they thought they already had.
+                            Button { model.openVials(from: .drawer) } label: {
+                                HStack {
+                                    Text("The Vials").font(InkFont.body(16)).foregroundStyle(room.text)
+                                    Spacer()
+                                    Text("\(vialsSummary) ›")
+                                        .font(InkFont.body(15))
+                                        .foregroundStyle(room.accent)
+                                }
+                                .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .overlay(alignment: .bottom) { hairline }
+                            .accessibilityLabel("The Vials. \(vialsSummary)")
+                            .accessibilityHint("Moving-picture credits.")
                             Button { model.showDeleteConfirm = true } label: {
                                 HStack {
                                     Text("Delete all pages")
@@ -204,6 +224,9 @@ struct DrawerView: View {
                 PolicySheet { model.showPolicies = false }
             }
         }
+        // So the vials row states a balance rather than an invitation to fill
+        // a purse that is already full.
+        .task { await model.refreshWallet() }
         .manageSubscriptionsSheet(isPresented: $model.showManageSubs)
         .sheet(item: $exportItem) { item in
             ShareSheet(items: [item.url])
@@ -241,6 +264,18 @@ struct DrawerView: View {
 
     private var hairline: some View {
         Rectangle().fill(room.accent.opacity(0.1)).frame(height: 1)
+    }
+
+    /// What the row says before it is tapped. The free clips are named while
+    /// they last — they are the reason a new reader has no business in the
+    /// shop yet, and saying so is friendlier than showing them a zero.
+    private var vialsSummary: String {
+        guard let balance = model.vialBalance else { return "Fill the vials" }
+        if let free = model.freeClipsRemaining, free > 0, balance == 0 {
+            return free == 1 ? "1 gifted moment" : "\(free) gifted moments"
+        }
+        if balance == 0 { return "Fill the vials" }
+        return balance == 1 ? "1 moment" : "\(balance) moments"
     }
 
     // MARK: - The Voice: script hand

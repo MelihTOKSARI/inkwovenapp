@@ -72,9 +72,19 @@ final class PageInteractor {
         case delivered(URL)
         /// It did not arrive; the credit went back. Carries the in-fiction line.
         case failed(String)
+        /// It did not arrive because there was nothing to spend. Distinct from
+        /// `.failed` because the way forward is the shop, not a retry — and
+        /// nothing was charged, so this is not really a failure at all.
+        case needsVials(String)
     }
 
     private(set) var video: VideoState = .none
+    /// The verdict for the reply standing on the page, held SEPARATELY from
+    /// the state so it survives a failed attempt. A reader who taps with an
+    /// empty purse, buys a vial and comes back must find the offer still
+    /// there — otherwise they have paid for a moment they can no longer spend
+    /// without writing a whole new page.
+    private var offer: ConvertibilityVerdict?
     /// What a tap would spend, as the server last reported it. Nil until the
     /// wallet is read — the affordance simply says less until then, and the
     /// server decides for real either way.
@@ -168,6 +178,7 @@ final class PageInteractor {
         // is what tells the server to release its hold.
         videoTask?.cancel()
         video = .none
+        offer = nil
         upload.abort()
         machine.reset()
         typedDraft = ""
@@ -332,6 +343,7 @@ final class PageInteractor {
         exchangeTask?.cancel()
         videoTask?.cancel()
         video = .none
+        offer = nil
         upload.abort()
         completeExchange()
         streamedText = ""
@@ -440,6 +452,7 @@ final class PageInteractor {
         // belongs to the reply that earned it.
         videoTask?.cancel()
         video = .none
+        offer = nil
         // The dedupe was dead code: `previousDigest` was only ever assigned
         // nil, so `SnapshotResult.skipDuplicate` was unreachable and an
         // unchanged page could commit the same exchange — and the same bill —
@@ -519,6 +532,7 @@ final class PageInteractor {
                         // The page may now OFFER (task J3). It does not
                         // generate, does not reserve, and does not spend —
                         // `requestVideo()` runs only from a tap.
+                        offer = verdict
                         video = .offered(verdict)
                         await analytics.track(.videoOffered(book: book))
                         // What the tap would cost, so the affordance can be
@@ -570,6 +584,10 @@ final class PageInteractor {
 
     /// Re-reads the server's wallet: the client never decides what a clip
     /// costs or whether a free one remains, it only shows what it was told.
+    ///
+    /// Refilling the purse also revives the offer. A reader who left to buy a
+    /// vial comes back to a page that is simply ready again — no second tap on
+    /// a dead card, no re-writing the page to earn a new verdict.
     func refreshWallet() {
         walletTask?.cancel()
         walletTask = Task { [weak self] in
@@ -577,6 +595,9 @@ final class PageInteractor {
             let view = try? await self.proxy.wallet()
             guard !Task.isCancelled, let view else { return }
             self.wallet = view
+            if case .needsVials = self.video, view.canAffordClip, let offer = self.offer {
+                self.video = .offered(offer)
+            }
         }
     }
 
@@ -589,7 +610,9 @@ final class PageInteractor {
     /// the app drops the stream, and the route refunds rather than charging
     /// for a clip delivered to nobody.
     func requestVideo() {
-        guard case .offered(let verdict) = video else { return }
+        // Guarded on the STATE (only an offer on screen may be acted on) but
+        // driven by the retained verdict, so the two cannot drift.
+        guard case .offered = video, let verdict = offer else { return }
         // Double-tap protection is layered: the state moves out of `.offered`
         // immediately, and the videoID makes the SERVER idempotent even if a
         // retry gets past this.
@@ -660,7 +683,11 @@ final class PageInteractor {
     /// No clip, and the vial came back. The reader gets the Book's line, never
     /// a provider string; the analytics get the coarse bucket (task J9).
     private func failVideo(_ error: ProxyError) {
-        video = .failed(Self.videoDeclineCopy(for: error))
+        let line = Self.videoDeclineCopy(for: error)
+        // An empty purse is not a failure of the picture — it is a purchase
+        // the reader has not made yet, and the page should say so and offer
+        // the way forward rather than apologising.
+        video = error == .paymentRequired ? .needsVials(line) : .failed(line)
         refreshWallet()
         let reason = Self.videoFailureReason(for: error)
         Task { [analytics, book] in
@@ -679,7 +706,7 @@ final class PageInteractor {
         case .pageIsQuiet:
             "The road is dark — a moving picture cannot travel it tonight. Nothing was spent."
         case .vialsEmpty:
-            "The vials are empty. Nothing was spent."
+            "The vials are empty, and your gifted moments are spent. Nothing was charged."
         case .inkRanDry:
             "The picture would not settle. Your vial has been returned."
         }

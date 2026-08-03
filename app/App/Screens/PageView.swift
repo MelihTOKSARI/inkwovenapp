@@ -29,6 +29,8 @@ struct PageView: View {
     /// consent gate in front of the first sealed page to travel (task J6).
     @State private var immersiveClip: ImmersiveClip?
     @State private var askingKeeperConsent = false
+    /// The shop, over this page rather than instead of it — see `VialsSheet`.
+    @State private var showingVials = false
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
 
@@ -115,6 +117,19 @@ struct PageView: View {
                             interactor.requestVideo()
                         }
                     )
+                }
+
+                if showingVials {
+                    VialsSheet(model: model) {
+                        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) {
+                            showingVials = false
+                        }
+                        // Re-read the purse on the way out. If it is no longer
+                        // empty the offer revives itself, so a reader who just
+                        // bought a vial finds the page ready rather than a
+                        // spent card they have to work out how to restart.
+                        interactor.refreshWallet()
+                    }
                 }
             }
             // The clip goes THROUGH the page: a full-screen cover over the
@@ -675,7 +690,8 @@ struct PageView: View {
                 book: book,
                 wallet: interactor.wallet,
                 isOffline: net.isOffline,
-                onRequest: requestMovingPicture
+                onRequest: requestMovingPicture,
+                onOpenVials: openVials
             )
         case .generating:
             MovingPictureDeveloping(book: book)
@@ -686,6 +702,31 @@ struct PageView: View {
             // the same breath, that nothing was spent.
             QuietBanner(text: line)
                 .frame(maxWidth: 440, alignment: .leading)
+        case .needsVials(let line):
+            // Not an apology: nothing was charged, and the thing standing
+            // between the reader and their picture is a purchase they can make
+            // from here without losing the page.
+            VStack(alignment: .leading, spacing: 12) {
+                QuietBanner(text: line)
+                WaxSealButton(
+                    label: "fill the vials",
+                    diameter: 30,
+                    labelFont: InkFont.bodyItalic(14),
+                    action: openVials
+                )
+            }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+            .frame(maxWidth: 440, alignment: .leading)
+            .background(parchmentCard)
+        }
+    }
+
+    /// Opens the shop over the page. Deliberately not `model.go(.wallet)`:
+    /// RootView rebuilds PageView on navigation, and the reply the reader is
+    /// trying to animate would not survive the trip.
+    private func openVials() {
+        withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.25)) {
+            showingVials = true
         }
     }
 
