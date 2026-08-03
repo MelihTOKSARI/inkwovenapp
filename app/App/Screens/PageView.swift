@@ -803,6 +803,8 @@ struct PageView: View {
         announce(status)
         switch status {
         case .sending:
+            // The page drinks the ink: the seal-press moment.
+            Feel.shared.play(.sealPress)
             // A fresh exchange gets a fresh darkroom.
             developStep = 0
             sentThisVisit = true
@@ -814,6 +816,9 @@ struct PageView: View {
                 canvasAbsorbed = false
             }
         case .answered:
+            // Only an exchange sent this visit pulses — `.answered` also
+            // lands from revisits and restores, which must stay silent.
+            if sentThisVisit { Feel.shared.play(.replyArrived) }
             // The interactor has archived and removed the strokes; lift the
             // absorption veil so the (now empty) canvas is ready to write on.
             withAnimation(.easeOut(duration: 0.25)) {
@@ -829,6 +834,8 @@ struct PageView: View {
                 }
             }
         case .declined, .cooldown:
+            // A quiet no — deliberately softer than an error.
+            Feel.shared.play(.refusal)
             // Failed send: the ink must come back at FULL strength — an error
             // may never leave the page ghosted.
             withAnimation(.easeOut(duration: 0.2)) {
@@ -838,6 +845,7 @@ struct PageView: View {
             canvasAbsorbed = false
             model.go(.paywall)
         case .crisis:
+            // Deliberately no haptic and no sound — the crisis room is still.
             canvasAbsorbed = false
             model.go(.crisis)
         default:

@@ -241,6 +241,9 @@ struct PaywallView: View {
                             model.showBindConfirm = false
                         }
                         confirmButton("Bind it", prominent: true) {
+                            // The commitment press; the verdict pulse follows
+                            // from PurchaseNoteOverlay when StoreKit answers.
+                            Feel.shared.play(.sealPress)
                             model.confirmBind()
                         }
                     }

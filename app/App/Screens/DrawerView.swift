@@ -80,6 +80,18 @@ struct DrawerView: View {
                                     selection: model.spreadLayout
                                 ) { model.spreadLayout = $0 }
                             }
+                            row("A gentle pulse", divider: true) {
+                                GoldToggle(isOn: Feel.shared.hapticsEnabled) {
+                                    Feel.shared.hapticsEnabled.toggle()
+                                }
+                                .accessibilityLabel("Haptics")
+                            }
+                            row("Quiet sounds", divider: true) {
+                                GoldToggle(isOn: Feel.shared.soundsEnabled) {
+                                    Feel.shared.soundsEnabled.toggle()
+                                }
+                                .accessibilityLabel("Sounds")
+                            }
                             row("Reduce motion") {
                                 GoldToggle(isOn: model.reduceMotionOverride) {
                                     model.reduceMotionOverride.toggle()

@@ -315,7 +315,12 @@ struct GoldToggle: View {
     @Environment(\.reduceInkMotion) private var reduceMotion
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            action()
+            // After, not before: the tick reports the state the toggle now
+            // holds — switching haptics off ends in silence, on with a tick.
+            Feel.shared.tick()
+        } label: {
             Capsule()
                 .fill(isOn ? Ink.candle : Color(hex: 0x785A28, opacity: 0.24))
                 .overlay(
@@ -354,7 +359,10 @@ struct SegmentedPills<T: Hashable>: View {
         HStack(spacing: 0) {
             ForEach(options, id: \.value) { opt in
                 let selected = opt.value == selection
-                Button { choose(opt.value) } label: {
+                Button {
+                    if !selected { Feel.shared.tick() }
+                    choose(opt.value)
+                } label: {
                     Text(opt.label)
                         .font(selected ? InkFont.bodySemiBold(13) : InkFont.body(13))
                         .foregroundStyle(selected ? Color(hex: 0x241A10) : room.text)

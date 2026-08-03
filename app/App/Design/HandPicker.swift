@@ -37,6 +37,7 @@ struct HandPickerList: View {
         id: String?, name: String, sampleFont: Font?, selected: Bool, divider: Bool
     ) -> some View {
         Button {
+            if !selected { Feel.shared.tick() }
             onSelect(id)
         } label: {
             HStack(spacing: 12) {

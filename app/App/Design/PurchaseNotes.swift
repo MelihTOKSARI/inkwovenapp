@@ -19,6 +19,22 @@ struct PurchaseNoteOverlay: View {
     var onSuccess: () -> Void
 
     var body: some View {
+        notes
+            // One hook for every room that sells: the paywall and the vials
+            // both render this overlay, so the verdict pulse lives here and
+            // nowhere per-screen. Deferred stays silent — Ask-to-Buy is a
+            // pause, not a verdict.
+            .onChange(of: state) { _, landed in
+                switch landed {
+                case .succeeded: Feel.shared.play(.purchaseSuccess)
+                case .failed: Feel.shared.play(.purchaseFailed)
+                default: break
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var notes: some View {
         switch state {
         case .idle:
             EmptyView()

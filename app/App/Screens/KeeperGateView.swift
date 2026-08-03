@@ -177,8 +177,10 @@ struct KeeperGateView: View {
             let outcome = await auth.authenticate(reason: "The Keeper opens for your hand alone.")
             asking = false
             if outcome == .granted {
+                Feel.shared.play(.unlock)
                 granted()
             } else {
+                Feel.shared.play(.refusal)
                 withAnimation { refusal = outcome }
             }
         }
