@@ -6,6 +6,8 @@ struct ShelfView: View {
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
     @State private var glowPulse = false
+    /// Drives the vial's breathing glow and the highlight travelling its glass.
+    @State private var vialGlow = false
 
     var body: some View {
         GeometryReader { geo in
@@ -89,9 +91,11 @@ struct ShelfView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                // The Vials door is off the shelf for v1: the moving-picture
-                // modality ships flag-off, and a credit shop for a hidden
-                // feature is a shop selling nothing (PRD kill-switch rule).
+                // The Vials are back on the shelf: the modality they fund works
+                // end to end (Epic J), so the shop has something to sell. It
+                // sits first because it is the only door here that leads to the
+                // hero feature.
+                roomButton(label: "Vials", destination: .wallet) { vialsIcon }
                 roomButton(label: "Bindery", destination: .bindery) { binderyDoorIcon }
                 roomButton(label: "Drawer", destination: .drawer) { drawerIcon }
             }
@@ -103,7 +107,16 @@ struct ShelfView: View {
     private func roomButton(
         label: String, destination: AppScreen, @ViewBuilder icon: () -> some View
     ) -> some View {
-        Button { model.go(destination) } label: {
+        Button {
+            Feel.shared.play(.tick)
+            // The shop remembers it was opened from the shelf, so closing it
+            // comes back here rather than to whatever room opened it last.
+            if destination == .wallet {
+                model.openVials(from: .shelf)
+            } else {
+                model.go(destination)
+            }
+        } label: {
             VStack(spacing: 5) {
                 icon().frame(height: 40, alignment: .bottom)
                 SmallCapsLabel(text: label, size: 10, tracking: 1.4, color: room.dim)
@@ -114,6 +127,39 @@ struct ShelfView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
+    }
+
+    /// The vial on the shelf, catching the candle. The glow breathes and a
+    /// highlight slides down the glass — slow enough to read as a lit object in
+    /// the room rather than a badge demanding attention. Reduce Motion keeps
+    /// the vial and a steady glow, simply held still.
+    private var vialsIcon: some View {
+        VialView(width: 22, height: 38, fill: 0.62)
+            .shadow(
+                color: Ink.candle.opacity(reduceMotion ? 0.35 : (vialGlow ? 0.6 : 0.22)),
+                radius: vialGlow ? 9 : 5
+            )
+            .overlay {
+                if !reduceMotion {
+                    // A single band of light travelling the length of the glass.
+                    LinearGradient(
+                        colors: [.clear, Ink.candleBright.opacity(0.5), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 14)
+                    .blur(radius: 3)
+                    .offset(y: vialGlow ? 17 : -17)
+                    .mask(VialView(width: 22, height: 38, fill: 1))
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(width: 30, height: 40)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
+                    vialGlow = true
+                }
+            }
     }
 
     private var binderyDoorIcon: some View {
@@ -167,7 +213,15 @@ struct ShelfView: View {
                     BookSpineView(
                         book: book,
                         focused: model.focusedBookID == book.id,
-                        tap: { model.tap(book: book) },
+                        tap: {
+                            // Peek is a tick; a cover actually coming open is
+                            // the fuller settle. A locked Book routes to the
+                            // gate — the unlock has its own moment there.
+                            let opens = model.focusedBookID == book.id
+                                && (!book.locked || model.keeperUnlocked)
+                            Feel.shared.play(opens ? .bookOpen : .tick)
+                            model.tap(book: book)
+                        },
                         hide: { model.toggleShelf(book: book) }
                     )
                 }

@@ -6,12 +6,19 @@ import InkCore
 struct RootView: View {
     let di: AppDI
     @State private var model: AppModel
+    /// The launch veil (Design/LaunchGlow.swift): true exactly once per
+    /// process, so foreground-resume never replays the ceremony.
+    @State private var launchVeil = LaunchGlowView.shouldShow
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     init(di: AppDI) {
         self.di = di
-        _model = State(initialValue: AppModel(ritual: di.ritual, ritualDiary: di.archive))
+        // The wallet reader was never bound, so `AppModel.wallet` stayed nil
+        // and every room that shows a balance showed a placeholder forever.
+        _model = State(initialValue: AppModel(
+            walletReader: di.wallet, ritual: di.ritual, ritualDiary: di.archive
+        ))
     }
 
     var body: some View {
@@ -60,6 +67,16 @@ struct RootView: View {
             // empty room over it.
             if model.keeperUnlocked && scenePhase != .active {
                 model.theme.roomBackground.ignoresSafeArea()
+            }
+
+            // Topmost: the cold-launch veil. Its first frame matches the
+            // system launch screen, so the app appears to light itself.
+            if launchVeil {
+                LaunchGlowView {
+                    withAnimation(.easeOut(duration: 0.45)) { launchVeil = false }
+                }
+                .zIndex(2)
+                .transition(.opacity)
             }
         }
         .environment(\.room, model.theme)

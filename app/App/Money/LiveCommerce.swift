@@ -38,6 +38,12 @@ enum LiveCommerce {
         delivery = ProxyVialDelivery(proxy: proxy)
     }
 
+    /// Binds a delivery directly — the composition root's seam for anything
+    /// that is not a bare proxy call (in Debug, the stand-in purse in DI.swift).
+    static func bind(delivery: any VialGrantDelivering) {
+        self.delivery = delivery
+    }
+
     static let purchases = StoreKitEntitlementStore(delivery: LazyVialDelivery())
     static let usage = DailyUsageStore()
     static let page = PageEntitlements(entitlements: purchases, usage: usage)

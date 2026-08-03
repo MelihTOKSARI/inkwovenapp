@@ -20,29 +20,48 @@ final class AppDI {
     /// that should attribute an open to the ritual.
     private let ritualDelegate: RitualNotificationDelegate
 
-    init(proxy: ProxyClient, analytics: Analytics, keeperAuth: any KeeperAuthenticating) {
+    init(
+        proxy: ProxyClient,
+        analytics: Analytics,
+        keeperAuth: any KeeperAuthenticating,
+        wallet: (any WalletReading)? = nil
+    ) {
         self.proxy = proxy
         self.analytics = analytics
         self.keeperAuth = keeperAuth
+        self.wallet = wallet ?? proxy
         // Installed during App init so a cold launch from a notification tap
         // still reaches the delegate before the response is delivered.
         ritualDelegate = RitualNotificationDelegate(analytics: analytics)
         UNUserNotificationCenter.current().delegate = ritualDelegate
     }
 
+    /// Reads the vial balance for the rooms. In Release this is the proxy and
+    /// nothing else; in Debug it is the stand-in below, which falls back to a
+    /// local purse when the server cannot be reached.
+    let wallet: any WalletReading
+
     static func live() -> AppDI {
         let endpoints = ProxyEndpoints(baseURL: proxyBaseURL())
         let proxy = ProxyClient(endpoints: endpoints, auth: AnonymousTokenProvider())
         // The vials are bought through StoreKit but spent from the server-side
         // wallet, so the purchase store needs a way to reach the proxy.
+        #if DEBUG
+        let wallet = DebugVialWallet(live: proxy)
+        LiveCommerce.bind(delivery: wallet)
+        #else
+        let wallet = proxy
         LiveCommerce.bind(proxy: proxy)
+        #endif
         // TODO(A3): bind the real SDK adapter here for both configurations.
         #if DEBUG
         let analytics = Analytics(sink: ConsoleAnalyticsSink())
         #else
         let analytics = Analytics(sink: NullAnalyticsSink())
         #endif
-        return AppDI(proxy: proxy, analytics: analytics, keeperAuth: LiveKeeperAuth())
+        return AppDI(
+            proxy: proxy, analytics: analytics, keeperAuth: LiveKeeperAuth(), wallet: wallet
+        )
     }
 
     /// Deployed proxy (keys live there as fly secrets). The `INKWOVEN_PROXY_URL`
@@ -106,6 +125,61 @@ struct NullAnalyticsSink: AnalyticsSink {
 struct ConsoleAnalyticsSink: AnalyticsSink {
     func track(name: String, parameters: [String: AnalyticsValue]) {
         print("[analytics] \(name) \(parameters)")
+    }
+}
+
+/// A purse that answers when the proxy cannot.
+///
+/// The Vials get designed, priced and demoed long before a server is reachable
+/// from a simulator, and a shop that can only ever show "—" cannot be judged —
+/// nor can a sandbox purchase be seen to land. This tries the real wallet
+/// first and keeps a local one once that fails, so the whole loop is visible:
+/// two gifted moments, buy a pack, watch the count rise.
+///
+/// **Debug only, and structurally so.** In a Release build this type does not
+/// exist, so no shipped path can read a balance the server never issued or
+/// credit a purchase the server never saw. That is the same reason the real
+/// `grantVials` call is tried first here: when the proxy IS up, this behaves
+/// exactly like production and the fallback never runs.
+actor DebugVialWallet: WalletReading, VialGrantDelivering {
+    private let live: ProxyClient
+    /// Sticky: once the server has failed, stop paying its timeout on every
+    /// read. Relaunch to try again.
+    private var serverIsAbsent = false
+    private var localCredits = 0
+    private var localFreeClips = 2
+
+    init(live: ProxyClient) { self.live = live }
+
+    func wallet() async throws -> WalletView {
+        if !serverIsAbsent {
+            do { return try await live.wallet() } catch { serverIsAbsent = true }
+        }
+        return WalletView(
+            balance: localCredits,
+            available: localCredits,
+            freeClipsRemaining: localFreeClips,
+            freeClipsOpen: true
+        )
+    }
+
+    func deliver(_ grant: VialGrant) async throws {
+        if !serverIsAbsent {
+            do {
+                try await live.grantVials(VialGrantPayload(
+                    productID: grant.productID,
+                    transactionID: grant.transactionID,
+                    jws: grant.jws
+                ))
+                return
+            } catch {
+                serverIsAbsent = true
+            }
+        }
+        // The pack sizes are the client's copy of the server's map — fine for
+        // a demo purse, never for a real one.
+        localCredits += ProductID.creditAmount(for: grant.productID) ?? 0
+        print("[vials] local purse credited \(grant.productID) → \(localCredits)")
     }
 }
 #endif
