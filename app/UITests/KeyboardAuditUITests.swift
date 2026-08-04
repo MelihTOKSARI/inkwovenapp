@@ -108,7 +108,11 @@ final class KeyboardAuditUITests: XCTestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "the page should be open")
         Thread.sleep(forTimeInterval: 2)
         app.typeText("hello, page")
-        let resting = NSPredicate(format: "value CONTAINS %@", "resting")
+        // The canvas's value is PageView.spokenStatus — in-fiction copy, not
+        // the enum case name. "still settling" appears only in the resting
+        // line; the old predicate waited on "resting", a string no status
+        // copy contains, so this failed unconditionally (audit I-2).
+        let resting = NSPredicate(format: "value CONTAINS %@", "still settling")
         expectation(for: resting, evaluatedWith: canvas)
         waitForExpectations(timeout: 5)
     }

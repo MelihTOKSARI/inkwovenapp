@@ -79,6 +79,44 @@ jobs:
           print(f"line coverage: {totals['percent']:.1f}% ({totals['covered']}/{totals['count']})")
           PY
 
+  swift-app:
+    # The app target itself (audit I-1): the package job above never compiled
+    # the ~5,000 lines of app-target Swift, so a compile break — or a failure
+    # in any of the eight app-target suites — reached main green. UITests stay
+    # local-only: PageHarnessUITests needs a hand-started proxy, and the
+    # keyboard audit drives the simulator keyboard, which CI images make flaky.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Select Xcode
+        run: |
+          # Same toolchain-pinning dance as swift-core, same reasoning.
+          for v in 16.4 16.3 16.2 16.1; do
+            if [ -d "/Applications/Xcode_$v.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_$v.app/Contents/Developer"
+              break
+            fi
+          done
+          if [ "$(xcode-select -p)" = "/Library/Developer/CommandLineTools" ] || [ ! -d "$(xcode-select -p)" ]; then
+            sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          fi
+          xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: app
+        run: xcodegen generate
+      - name: xcodebuild test (app target)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Inkwoven.xcodeproj \
+            -scheme Inkwoven \
+            -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
+            -only-testing:InkwovenTests \
+            CODE_SIGNING_ALLOWED=NO | tail -100
+
   proxy:
     runs-on: ubuntu-latest
     steps:
@@ -91,21 +129,14 @@ jobs:
         run: |
           npm ci
           npm test
-      - name: Dependency audit (report)
-        # Non-blocking: the pinned fastify 4.x tree currently carries 5 high
-        # advisories (fast-uri path traversal / host confusion, fastify
-        # sendWebStream DoS, Content-Type validation bypass, and X-Forwarded-*
-        # spoofing — the last one compounds the missing trustProxy config).
-        # Clearing them needs a fastify 5 major bump, which is a code change, not
-        # a CI change. Flip this step to the gate below once that lands.
-        continue-on-error: true
+      - name: Dependency audit (gate)
+        # Blocking at `high` (audit I-3): the fastify 5 bump cleared the five
+        # high advisories the 4.x tree carried — including the X-Forwarded-*
+        # spoofing that was the last ceiling on spend under minted identities.
+        # The two remaining lows live in @flydotio/dockerfile, a devDependency
+        # the proxy-image job independently asserts never reaches the runtime.
         working-directory: app/proxy
         run: npm audit --audit-level=high
-      - name: Dependency audit (gate)
-        # Blocking at `critical` so the pipeline says something today rather than
-        # nothing. Tighten to `high` the moment the fastify bump is in.
-        working-directory: app/proxy
-        run: npm audit --audit-level=critical
 
   proxy-image:
     runs-on: ubuntu-latest
