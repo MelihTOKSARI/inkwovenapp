@@ -1116,6 +1116,19 @@ export function build(options = {}) {
         return reply.code(400).send({ error: 'revoked_receipt' });
       }
 
+      // GLOBAL redemption claim (audit M-1): the per-user idempotency below
+      // keys as `${userID}:grant:${txn}`, so on its own a captured receipt
+      // replayed under rotated identities credited every one of them. The
+      // claim binds the transaction to its first redeemer forever; the same
+      // user passes through (honest double-tap, retry after a crash), anyone
+      // else gets a distinct terminal error — this receipt is real, it is
+      // just already spent.
+      const claim = await stores.claimTransaction(transactionID, request.userID);
+      if (claim.error) {
+        request.log?.warn?.({ route: 'grant', product: productID, reject: claim.error });
+        return reply.code(409).send({ error: claim.error });
+      }
+
       const result = await stores.idempotent(request.userID, `grant:${transactionID}`, () =>
         stores.grant(request.userID, amount, 'purchase'),
       );

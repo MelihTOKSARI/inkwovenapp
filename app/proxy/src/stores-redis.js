@@ -95,6 +95,11 @@ ALTER TABLE free_clips ADD COLUMN IF NOT EXISTS ip_key text;
 CREATE INDEX IF NOT EXISTS free_clips_user_idx ON free_clips (user_id);
 CREATE INDEX IF NOT EXISTS free_clips_month_idx ON free_clips (month);
 CREATE INDEX IF NOT EXISTS free_clips_ip_day_idx ON free_clips (ip_key, day);
+CREATE TABLE IF NOT EXISTS redeemed_transactions (
+  transaction_id text PRIMARY KEY,
+  user_id text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // The last line of defence behind validAmount(): a hold can never be negative,
@@ -242,6 +247,29 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
       } finally {
         client.release();
       }
+    },
+
+    /**
+     * Binds a StoreKit transaction to the FIRST identity that redeems it —
+     * the primary key makes the claim global and atomic (audit M-1). Same
+     * user again claims through (honest retry); a different user presenting
+     * the same transaction is a replayed receipt and is refused.
+     */
+    async claimTransaction(transactionID, userID) {
+      const { rows } = await pool.query(
+        `INSERT INTO redeemed_transactions (transaction_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (transaction_id) DO NOTHING
+         RETURNING user_id`,
+        [transactionID, userID],
+      );
+      if (rows.length > 0) return { claimed: true };
+      const { rows: existing } = await pool.query(
+        'SELECT user_id FROM redeemed_transactions WHERE transaction_id = $1',
+        [transactionID],
+      );
+      if (existing[0]?.user_id === userID) return { claimed: true };
+      return { error: 'receipt_already_redeemed' };
     },
 
     /** Credits a verified vial purchase; amount comes from the server-side product map. */

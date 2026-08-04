@@ -57,6 +57,11 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   // refunds the reader, not the bill we already ran at fal.
   const freeClipMonths = new Map();
   const freeClipIPs = new Map(); // ipKey → { day, count }
+  // transactionID → userID, forever. The GLOBAL redemption record behind
+  // /v1/credits/grant (audit M-1): per-user idempotency alone scoped the
+  // replay check to `${userID}:grant:${txn}`, so one captured receipt JWS
+  // replayed under rotated identities credited every one of them afresh.
+  const redeemedTransactions = new Map();
 
   /** Deletes reports past retention; returns how many went. */
   function sweepReports(now) {
@@ -148,6 +153,24 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       if (!w) return { balance: 0, available: 0 };
       reclaimStale(w);
       return { balance: balance(w), available: balance(w) - held(w) };
+    },
+
+    /**
+     * Binds a StoreKit transaction to the FIRST identity that redeems it,
+     * globally. Same user again → { claimed: true } (an honest double-tap or
+     * a retry after a crash; the per-user idempotency wrapper replays the
+     * response). A DIFFERENT user presenting the same transaction is a
+     * captured receipt replayed under a rotated token — refused with its own
+     * error code so the client can treat it as terminal, not a receipt bug.
+     */
+    claimTransaction(transactionID, userID) {
+      const owner = redeemedTransactions.get(transactionID);
+      if (owner === undefined) {
+        redeemedTransactions.set(transactionID, userID);
+        return { claimed: true };
+      }
+      if (owner === userID) return { claimed: true };
+      return { error: 'receipt_already_redeemed' };
     },
 
     /**
