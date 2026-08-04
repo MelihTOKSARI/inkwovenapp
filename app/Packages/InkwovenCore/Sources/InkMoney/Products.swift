@@ -67,3 +67,26 @@ public protocol EntitlementProviding: Sendable {
     func currentSnapshot() async -> EntitlementSnapshot
     func snapshots() -> AsyncStream<EntitlementSnapshot>
 }
+
+/// A verified subscription receipt on its way to the proxy, so the server's
+/// daily quota meters this identity as Plus rather than free (audit M-2).
+/// Carries the receipt, never a tier claim: the proxy re-verifies the JWS
+/// itself, so a tampered client can assert nothing.
+public struct EntitlementProof: Equatable, Sendable {
+    public var productID: String
+    public var transactionID: String
+    public var jws: String
+
+    public init(productID: String, transactionID: String, jws: String) {
+        self.productID = productID
+        self.transactionID = transactionID
+        self.jws = jws
+    }
+}
+
+/// Delivers a subscription proof to the server. Best-effort: a failure is
+/// ignored by the caller — the client's own gate still runs, and the next
+/// entitlement refresh re-proves. Nothing user-visible depends on it.
+public protocol PlusAttesting: Sendable {
+    func attest(_ proof: EntitlementProof) async throws
+}

@@ -15,6 +15,7 @@ public struct ProxyEndpoints: Sendable {
     public var video: URL { baseURL.appending(path: "v1/video") }
     public var credits: URL { baseURL.appending(path: "v1/credits") }
     public var creditsGrant: URL { credits.appending(path: "grant") }
+    public var entitlement: URL { baseURL.appending(path: "v1/entitlement") }
 }
 
 /// App-attest + anonymous user token; Sign in with Apple upgrades the token.
@@ -88,6 +89,37 @@ public struct VialGrantPayload: Equatable, Sendable, Encodable {
         self.productID = productID
         self.transactionID = transactionID
         self.jws = jws
+    }
+}
+
+/// A verified subscription receipt, forwarded so the server can widen this
+/// identity's daily exchange quota (audit M-2). Without it every identity
+/// meters as free server-side; the proxy re-verifies the JWS itself.
+public struct EntitlementProofPayload: Equatable, Sendable, Encodable {
+    public var productID: String
+    public var transactionID: String
+    public var jws: String
+
+    public init(productID: String, transactionID: String, jws: String) {
+        self.productID = productID
+        self.transactionID = transactionID
+        self.jws = jws
+    }
+}
+
+/// Server-tunable gate knobs as `GET /v1/config` serves them — the wire twin
+/// of `InkMoney.GateConfig`, which InkNet cannot see (both packages stand on
+/// InkCore alone). The App layer maps one into the other. Extra keys in the
+/// server's CONFIG are ignored by decoding.
+public struct RemoteGateConfig: Equatable, Sendable, Codable {
+    public var freeMomentsPerDay: Int
+    public var plusImageDailySoftCap: Int
+    public var cooldownCurveSeconds: [Double]
+
+    public init(freeMomentsPerDay: Int, plusImageDailySoftCap: Int, cooldownCurveSeconds: [Double]) {
+        self.freeMomentsPerDay = freeMomentsPerDay
+        self.plusImageDailySoftCap = plusImageDailySoftCap
+        self.cooldownCurveSeconds = cooldownCurveSeconds
     }
 }
 
@@ -304,6 +336,40 @@ public final class ProxyClient: Sendable {
             let (data, response) = try await session.data(for: request)
             try Self.check(response)
             return try JSONDecoder().decode(WalletView.self, from: data)
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
+    /// The server-tunable gate knobs, fetched at launch and on foreground so
+    /// cap and cooldown changes ship without an app release. Before this call
+    /// existed, `GateConfig` always ran on compiled-in defaults and the
+    /// "tunable without a release" promise in the proxy's config was not real.
+    public func gateConfig() async throws -> RemoteGateConfig {
+        var request = URLRequest(url: endpoints.config)
+        request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        do {
+            let (data, response) = try await session.data(for: request)
+            try Self.check(response)
+            return try JSONDecoder().decode(RemoteGateConfig.self, from: data)
+        } catch {
+            throw Self.mapped(error)
+        }
+    }
+
+    /// Forwards a verified subscription receipt so the server-side quota
+    /// meters this identity as Plus (audit M-2). Best-effort by design: the
+    /// caller ignores failures — the client's own gate still runs, this only
+    /// widens the server backstop.
+    public func attestEntitlement(_ payload: EntitlementProofPayload) async throws {
+        var request = URLRequest(url: endpoints.entitlement)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        request.httpBody = try JSONEncoder().encode(payload)
+        do {
+            let (_, response) = try await session.data(for: request)
+            try Self.check(response)
         } catch {
             throw Self.mapped(error)
         }

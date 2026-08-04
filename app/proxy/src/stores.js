@@ -62,6 +62,14 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   // replay check to `${userID}:grant:${txn}`, so one captured receipt JWS
   // replayed under rotated identities credited every one of them afresh.
   const redeemedTransactions = new Map();
+  // userID → { tier, expiresAt }: what /v1/entitlement proved from a verified
+  // subscription receipt. Expiry is the receipt's own; past it the identity
+  // reads as free again until the client re-proves.
+  const tiers = new Map();
+  // `${dayKey}:${key}` → count. The per-identity and global daily exchange
+  // quotas (audit M-2). Fixed-window by UTC day, refundable on the same
+  // conditions that release a wallet hold.
+  const dailyCounters = new Map();
 
   /** Deletes reports past retention; returns how many went. */
   function sweepReports(now) {
@@ -455,6 +463,61 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       }
       bucket.count += 1;
       return bucket.count <= limitPerMinute;
+    },
+
+    // -- daily quotas + tier (audit M-2) ------------------------------------
+    // The exchange route consults these BEFORE the provider handshake. The
+    // counter increments first and compares second (same shape as `allow`),
+    // so two concurrent requests can never both slip under the ceiling.
+
+    /** Counts one attempt against a per-UTC-day window; allowed while <= limit. */
+    allowDaily(key, limit, now = Date.now()) {
+      // Yesterday's windows are garbage the moment the day rolls; sweep them
+      // so a long-lived dev process doesn't hold every day it ever counted.
+      const today = dayKey(now);
+      for (const stored of dailyCounters.keys()) {
+        if (!stored.startsWith(`${today}:`)) dailyCounters.delete(stored);
+      }
+      const mapKey = `${today}:${key}`;
+      const count = (dailyCounters.get(mapKey) ?? 0) + 1;
+      dailyCounters.set(mapKey, count);
+      return { allowed: count <= limit, count };
+    },
+
+    /**
+     * Gives one attempt back — the quota analogue of releasing a wallet hold,
+     * called on the same conditions (crisis, client gone, pre-stream
+     * failure). A rolled day makes this a no-op: yesterday's window is gone
+     * and today's was never charged.
+     */
+    refundDaily(key, now = Date.now()) {
+      const mapKey = `${dayKey(now)}:${key}`;
+      const count = dailyCounters.get(mapKey);
+      if (count === undefined) return;
+      if (count <= 1) dailyCounters.delete(mapKey);
+      else dailyCounters.set(mapKey, count - 1);
+    },
+
+    /** Records a proved subscription tier until the receipt's own expiry. */
+    setTier(userID, tier, expiresAtMs) {
+      if (expiresAtMs <= Date.now()) return { error: 'expired' };
+      tiers.set(userID, { tier, expiresAt: expiresAtMs });
+      return { tier, expiresAt: expiresAtMs };
+    },
+
+    /** The tier this identity proved, or 'free' once the proof has expired. */
+    tierOf(userID, now = Date.now()) {
+      const entry = tiers.get(userID);
+      if (!entry || entry.expiresAt <= now) {
+        tiers.delete(userID);
+        return 'free';
+      }
+      return entry.tier;
+    },
+
+    /** Drops a proved tier — the refund/revocation path (audit M-4). */
+    clearTier(userID) {
+      tiers.delete(userID);
     },
   };
 }

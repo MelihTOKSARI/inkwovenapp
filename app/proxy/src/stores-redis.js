@@ -51,6 +51,23 @@ if n == 1 then redis.call('EXPIRE', KEYS[1], 60) end
 return n
 `;
 
+// Daily quotas (audit M-2): same INCR+EXPIRE atomicity as RATE_ALLOW_LUA.
+// The key already names its UTC day, so the TTL only has to outlive it.
+const DAILY_ALLOW_LUA = `
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], 172800) end
+return n
+`;
+
+// Refund floors at zero IN the script: a bare DECR on a missing or exhausted
+// key goes negative, which is minted capacity.
+const DAILY_REFUND_LUA = `
+local v = redis.call('GET', KEYS[1])
+if not v then return 0 end
+if tonumber(v) <= 0 then return 0 end
+return redis.call('DECR', KEYS[1])
+`;
+
 // Append-only ledger + holds; balance is always derived, never stored.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS credit_entries (
@@ -120,6 +137,8 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
   const redis = new Redis(redisUrl); // rediss:// turns TLS on by itself
   redis.defineCommand('takeTicketAtomic', { numberOfKeys: 1, lua: TAKE_TICKET_LUA });
   redis.defineCommand('rateAllow', { numberOfKeys: 1, lua: RATE_ALLOW_LUA });
+  redis.defineCommand('dailyAllow', { numberOfKeys: 1, lua: DAILY_ALLOW_LUA });
+  redis.defineCommand('dailyRefund', { numberOfKeys: 1, lua: DAILY_REFUND_LUA });
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
   await migrate(pool);
@@ -396,6 +415,41 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
     async allow(key, limitPerMinute) {
       const count = await redis.rateAllow(`rate:${keyPart(key)}`);
       return count <= limitPerMinute;
+    },
+
+    // -- daily quotas + tier (audit M-2) ------------------------------------
+
+    /** Counts one attempt against a per-UTC-day window; allowed while <= limit. */
+    async allowDaily(key, limit, now = Date.now()) {
+      const count = await redis.dailyAllow(`daily:${dayKey(now)}:${keyPart(key)}`);
+      return { allowed: count <= limit, count };
+    },
+
+    /**
+     * Gives one attempt back — the quota analogue of releasing a wallet hold.
+     * Floors at zero in the Lua script; a rolled day is simply a missing key.
+     */
+    async refundDaily(key, now = Date.now()) {
+      await redis.dailyRefund(`daily:${dayKey(now)}:${keyPart(key)}`);
+    },
+
+    /** Records a proved subscription tier until the receipt's own expiry. */
+    async setTier(userID, tier, expiresAtMs) {
+      if (expiresAtMs <= Date.now()) return { error: 'expired' };
+      // PXAT ties the record's life to the receipt's own expiry — a lapsed
+      // subscription demotes itself with no sweeper to run.
+      await redis.set(`tier:${keyPart(userID)}`, tier, 'PXAT', Math.floor(expiresAtMs));
+      return { tier, expiresAt: expiresAtMs };
+    },
+
+    /** The tier this identity proved, or 'free' once the proof has expired. */
+    async tierOf(userID) {
+      return (await redis.get(`tier:${keyPart(userID)}`)) ?? 'free';
+    },
+
+    /** Drops a proved tier — the refund/revocation path (audit M-4). */
+    async clearTier(userID) {
+      await redis.del(`tier:${keyPart(userID)}`);
     },
 
     /**

@@ -58,7 +58,9 @@ test('kill-switch: a disabled book answers 503 book_resting', async () => {
 });
 
 test('per-user rate limit answers 429 with retry-after', async () => {
-  const app = build({ echoDelayMS: 0 });
+  // The subject is the per-MINUTE limit; widen the daily quota (audit M-2)
+  // so it cannot fire first.
+  const app = build({ echoDelayMS: 0, dailyQuota: { free: 1000 } });
   let limited;
   for (let i = 0; i < 35; i += 1) {
     limited = await app.inject({

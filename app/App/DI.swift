@@ -49,10 +49,16 @@ final class AppDI {
         #if DEBUG
         let wallet = DebugVialWallet(live: proxy)
         LiveCommerce.bind(delivery: wallet)
+        // The Debug purse replaces only the vial delivery; subscription
+        // proofs and the remote gate config still go to the real proxy.
+        LiveCommerce.bindRemote(proxy: proxy)
         #else
         let wallet = proxy
         LiveCommerce.bind(proxy: proxy)
         #endif
+        // First read of the server-tunable gate knobs; RootView re-reads on
+        // every foreground. Failure keeps the compiled-in defaults.
+        Task { await LiveCommerce.refreshGateConfig() }
         // TODO(A3): bind the real SDK adapter here for both configurations.
         #if DEBUG
         let analytics = Analytics(sink: ConsoleAnalyticsSink())

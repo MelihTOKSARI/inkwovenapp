@@ -95,7 +95,12 @@ struct RootView: View {
             // Every return to the room re-arms the week of evening reminders
             // (and re-reads authorization — the writer may have visited
             // Settings while away).
-            if phase == .active { model.scheduleRitualRearm() }
+            if phase == .active {
+                model.scheduleRitualRearm()
+                // Cap and cooldown knobs are server-tunable; re-read them so a
+                // change ships without a release. Failure keeps the defaults.
+                Task { await LiveCommerce.refreshGateConfig() }
+            }
         }
         .onChange(of: di.archive.lastWrittenAt) { _, _ in
             // A page written today — any Book, the Keeper included — keeps

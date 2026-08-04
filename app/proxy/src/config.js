@@ -41,6 +41,8 @@ export const CONFIG = {
   // covered by the subscription today, so they cost 0 and the reserve/settle
   // path is a no-op for them; video (vials) is the metered modality. Raising
   // a value here turns metering on for that modality with no code change.
+  // Zero-cost modalities are NOT unmetered: the daily quotas below
+  // (LIMITS.*Daily*, CONFIG.freeMomentsPerDay) bound them server-side.
   exchangeCosts: { ink: 0, image: 0, video: 1 },
   // Moving pictures (tasks J1/J8). Served to the client so the affordance can
   // be honest about what a tap spends, and tunable without a release.
@@ -77,6 +79,28 @@ export const CONFIG = {
 // and 250 concurrent uploads is ~150MB — survivable on a 256MB VM. The old
 // Fastify default of 1MB put the same arithmetic at ~600MB, i.e. an OOM.
 export const LIMITS = {
+  // -- daily exchange quotas (audit M-2) -------------------------------------
+  // /v1/exchange was entirely unmetered server-side: ink and images cost 0
+  // from the wallet, so the reserve/settle block never ran and the free-tier
+  // cap lived only in the iOS client's UserDefaults — a scripted client never
+  // executed it. These ceilings are enforced in the route BEFORE the provider
+  // handshake, per identity per UTC day, and refunded on the same conditions
+  // that release a wallet hold (crisis, client gone, pre-stream failure).
+  //
+  // Free identities get CONFIG.freeMomentsPerDay (the number the client's own
+  // gate shows). Identities that proved a Plus receipt via /v1/entitlement get
+  // this ceiling instead — far above any hand that writes pages one at a
+  // time, far below what a script needs to hurt.
+  plusExchangeDailyCeiling: 300,
+  // Server hard stop on Plus develop passes per day. The client's soft cap is
+  // CONFIG.plusImageDailySoftCap (8) with a cooldown curve past it; walking
+  // the whole curve for 24h tops out near 30, so 40 never contradicts the
+  // client while bounding what a scripted Plus receipt can spend at fal.
+  plusImageDailyCeiling: 40,
+  // Global backstop across ALL identities: even with minted identities (see
+  // attest.js), one UTC day of exchanges cannot exceed this. Fails closed in
+  // fiction (ink_resting) rather than billing a viral week nobody agreed to.
+  globalDailyExchangeCeiling: 20_000,
   maxSnapshotBytes: 262_144, // 256KB of image bytes
   // Base64 of maxSnapshotBytes, rounded up to a 4-char group.
   maxSnapshotBase64Chars: Math.ceil(262_144 / 3) * 4, // 349_528

@@ -32,6 +32,10 @@ import {
 // never an amount (design/app-store-assets/credits.md §3).
 const VIAL_GRANTS = { vials_small: 3, vials_medium: 8, vials_large: 20 };
 
+// The subscriptions /v1/entitlement accepts as proof of Plus. Must match the
+// SKUs in app/Inkwoven.storekit and InkMoney/Products.swift.
+const PLUS_PRODUCTS = new Set(['plus_weekly', 'plus_monthly']);
+
 const ECHO_REPLY =
   'The page drinks your ink and stirs. Ask again when the real models are bound; for now this echo proves the stream.';
 
@@ -123,6 +127,10 @@ const grantSchema = {
     },
   },
 };
+
+// /v1/entitlement carries the same three fields as a grant — a StoreKit JWS
+// plus what the caller believes it presents — so it shares the shape.
+const entitlementSchema = grantSchema;
 
 
 // Loose on purpose: rejects garbage without turning a clock-skewed device's
@@ -271,6 +279,13 @@ function digestMatches(claimed, actual) {
   return timingSafeEqual(Buffer.from(claimed, 'hex'), Buffer.from(actual, 'hex'));
 }
 
+/** Retry-After for a daily quota: the window reopens at UTC midnight. */
+function secondsToUTCMidnight(now = Date.now()) {
+  const next = new Date(now);
+  next.setUTCHours(24, 0, 0, 0);
+  return Math.max(1, Math.ceil((next.getTime() - now) / 1000));
+}
+
 export function build(options = {}) {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -310,6 +325,15 @@ export function build(options = {}) {
   const streamDeadlineMS = options.streamDeadlineMS ?? LIMITS.streamDeadlineMS;
   const heartbeatMS = options.heartbeatMS ?? LIMITS.heartbeatIntervalMS;
   const videoStreamDeadlineMS = options.videoStreamDeadlineMS ?? LIMITS.videoStreamDeadlineMS;
+  // Daily exchange quotas (audit M-2). Overridable for the tests whose
+  // subject is a DIFFERENT limit — production always runs the defaults.
+  const dailyQuota = {
+    free: CONFIG.freeMomentsPerDay,
+    plus: LIMITS.plusExchangeDailyCeiling,
+    image: LIMITS.plusImageDailyCeiling,
+    global: LIMITS.globalDailyExchangeCeiling,
+    ...(options.dailyQuota ?? {}),
+  };
 
   app.decorate('stores', stores);
   app.decorate('attestationMode', attestation.mode);
@@ -470,6 +494,47 @@ export function build(options = {}) {
         return reply;
       }
 
+      // -- daily quotas (audit M-2) ------------------------------------------
+      // Checked BEFORE the ticket is consumed and BEFORE any provider call.
+      // Ink and images cost 0 from the wallet, so without this the route had
+      // no server-side ceiling at all: the free-tier cap lived only in the
+      // iOS client's UserDefaults, which a scripted caller never runs. The
+      // per-identity limit depends on what the identity has PROVED — a Plus
+      // receipt posted to /v1/entitlement widens it; nothing else does.
+      const tier = await stores.tierOf(request.userID);
+      const quota = { moment: false, image: false, global: false };
+      let quotaRefunded = false;
+      /** The quota analogue of resolveHold('release') — same conditions. */
+      const refundQuota = async () => {
+        if (quotaRefunded) return;
+        quotaRefunded = true;
+        try {
+          if (quota.moment) await stores.refundDaily(`exch:${request.userID}`);
+          if (quota.image) await stores.refundDaily(`img:${request.userID}`);
+          if (quota.global) await stores.refundDaily('global:exchange');
+        } catch (error) {
+          request.log?.error?.({ route: 'exchange', stage: 'quota_refund', error: String(error) });
+        }
+      };
+
+      const momentLimit = tier === 'plus' ? dailyQuota.plus : dailyQuota.free;
+      const moment = await stores.allowDaily(`exch:${request.userID}`, momentLimit);
+      if (!moment.allowed) {
+        return reply
+          .code(429)
+          .header('retry-after', String(secondsToUTCMidnight()))
+          .send({ error: 'daily_quota' });
+      }
+      quota.moment = true;
+      const globalDay = await stores.allowDaily('global:exchange', dailyQuota.global);
+      if (!globalDay.allowed) {
+        // The global ceiling bounds OUR daily spend, not this user's — fail
+        // closed in fiction rather than blaming the writer.
+        await refundQuota();
+        return reply.code(503).send({ error: 'ink_resting' });
+      }
+      quota.global = true;
+
       // A committed ticket consumes the speculative upload; only now is the
       // exchange billable. Uncommitted tickets simply expire. The ticket
       // carries the snapshot the client already uploaded — a committed
@@ -496,6 +561,21 @@ export function build(options = {}) {
       // not a code change.
       const imageProvider = book.alwaysDevelop && book.flags.image ? imageProviderFor(book) : null;
       const willDevelop = Boolean(imageProvider && snapshotBase64);
+      // Plus identities get a develop-pass ceiling of their own (audit M-2/M-5)
+      // — the client's soft cap slows images down past 8, this hard stop
+      // bounds what a scripted Plus receipt can spend at fal. Free identities
+      // are already bounded by the moment quota above.
+      if (willDevelop && tier === 'plus') {
+        const image = await stores.allowDaily(`img:${request.userID}`, dailyQuota.image);
+        if (!image.allowed) {
+          await refundQuota();
+          return reply
+            .code(429)
+            .header('retry-after', String(secondsToUTCMidnight()))
+            .send({ error: 'daily_quota' });
+        }
+        quota.image = true;
+      }
       const cost =
         (CONFIG.exchangeCosts.ink ?? 0) + (willDevelop ? CONFIG.exchangeCosts.image ?? 0 : 0);
 
@@ -503,9 +583,13 @@ export function build(options = {}) {
       if (cost > 0) {
         const held = await stores.reserve(request.userID, cost);
         if (held.error === 'insufficient_credits') {
+          await refundQuota();
           return reply.code(402).send(held);
         }
-        if (held.error) return reply.code(409).send(held);
+        if (held.error) {
+          await refundQuota();
+          return reply.code(409).send(held);
+        }
         reservationID = held.reservationID;
       }
       const resolveHold = async (outcome) => {
@@ -619,6 +703,7 @@ export function build(options = {}) {
         } catch (error) {
           cleanup();
           await resolveHold('release'); // nothing was generated; never charge
+          await refundQuota(); // and never count it against the day
           const { status, code } = statusForProviderError(error);
           request.log?.warn?.({
             route: 'exchange',
@@ -748,11 +833,17 @@ export function build(options = {}) {
         }
         // A disconnect is not a delivered moment: refund rather than charge.
         // A crisis is never charged either — the writer got a safety card,
-        // not the moment they paid for.
-        await resolveHold(channel.clientGone || crisisServed ? 'release' : 'settle');
+        // not the moment they paid for. The daily quota follows the hold.
+        if (channel.clientGone || crisisServed) {
+          await resolveHold('release');
+          await refundQuota();
+        } else {
+          await resolveHold('settle');
+        }
       } catch (error) {
         request.log?.error?.({ route: 'exchange', book: book.id, error: String(error) });
         await resolveHold('release');
+        await refundQuota();
       } finally {
         cleanup();
         // Structured cost log per exchange → the 30%-of-sub guardrail job.
@@ -1071,6 +1162,58 @@ export function build(options = {}) {
       freeClipsOpen: freeClips.ceilingOpen,
     };
   });
+
+  // -- POST /v1/entitlement: a verified Plus receipt widens the daily quota --
+  //
+  // The server cannot see StoreKit, so without this every identity meters as
+  // free (audit M-2). The client posts its subscription JWS after purchase,
+  // restore and every entitlement refresh; verification is the same
+  // cryptography as the vial grant, and the record expires with the receipt —
+  // a lapsed subscription demotes itself. Failure here never blocks the app:
+  // the client's own gate still runs, this only widens the server backstop.
+  app.post(
+    '/v1/entitlement',
+    { schema: entitlementSchema, bodyLimit: LIMITS.grantBodyLimit },
+    async (request, reply) => {
+      if (!(await withinLimits(request, reply, CONFIG.rateLimits.creditOpsPerUserPerMinute, CONFIG.rateLimits.exchangesPerIPPerMinute))) {
+        return reply;
+      }
+      if (!verifyReceipt) {
+        request.log?.error?.({ route: 'entitlement', error: 'receipt_verification_unbound' });
+        return reply.code(501).send({ error: 'receipt_verification_unbound' });
+      }
+      const { productID, transactionID, jws } = request.body;
+      if (!PLUS_PRODUCTS.has(productID)) {
+        return reply.code(400).send({ error: 'unknown_product' });
+      }
+
+      let claims;
+      try {
+        claims = verifyReceipt(jws);
+      } catch (error) {
+        const code = error instanceof ReceiptError ? error.code : 'invalid_receipt';
+        request.log?.warn?.({ route: 'entitlement', product: productID, reject: code });
+        return reply.code(400).send({ error: 'invalid_receipt' });
+      }
+      if (claims.productId !== productID || String(claims.transactionId) !== transactionID) {
+        return reply.code(400).send({ error: 'invalid_receipt' });
+      }
+      if (claims.revocationDate || claims.revocationReason !== undefined) {
+        return reply.code(400).send({ error: 'revoked_receipt' });
+      }
+      // A subscription proves Plus only while it runs; a receipt with no
+      // expiry is not a subscription receipt.
+      const expiresAt = Number(claims.expiresDate);
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        return reply.code(400).send({ error: 'expired_receipt' });
+      }
+
+      const result = await stores.setTier(request.userID, 'plus', expiresAt);
+      if (result.error) return reply.code(400).send({ error: 'expired_receipt' });
+      request.log?.info?.({ route: 'entitlement', product: productID });
+      return { tier: 'plus', expiresAt: new Date(expiresAt).toISOString() };
+    },
+  );
 
   // -- POST /v1/credits/grant: a verified vial purchase reaches the ledger ---
   //

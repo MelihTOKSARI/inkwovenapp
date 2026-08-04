@@ -71,11 +71,16 @@ actor StoreKitEntitlementStore: PurchaseServicing {
     /// binds it — and a nil delivery never finishes a consumable transaction,
     /// so the purchase waits for the next launch rather than evaporating.
     private let delivery: (any VialGrantDelivering)?
+    /// Where a verified subscription receipt goes so the server-side daily
+    /// quota meters this identity as Plus (audit M-2). Best-effort: a failure
+    /// changes nothing here — the next refresh re-proves.
+    private let attestor: (any PlusAttesting)?
 
     private static let subscriptions: Set<String> = [ProductID.plusWeekly, ProductID.plusMonthly]
 
-    init(delivery: (any VialGrantDelivering)? = nil) {
+    init(delivery: (any VialGrantDelivering)? = nil, attestor: (any PlusAttesting)? = nil) {
         self.delivery = delivery
+        self.attestor = attestor
     }
 
     deinit { updatesTask?.cancel() }
@@ -125,14 +130,30 @@ actor StoreKitEntitlementStore: PurchaseServicing {
 
     func refresh() async {
         var entitled = false
+        var proof: EntitlementProof?
         for await result in StoreKit.Transaction.currentEntitlements {
             // Fail closed: an unverified entitlement is no entitlement.
             guard case .verified(let transaction) = result else { continue }
             guard transaction.revocationDate == nil else { continue }
             if let expiry = transaction.expirationDate, expiry <= Date() { continue }
-            if Self.subscriptions.contains(transaction.productID) { entitled = true }
+            if Self.subscriptions.contains(transaction.productID) {
+                entitled = true
+                // The same verified receipt, kept to prove Plus to the proxy —
+                // the server re-verifies it, so this asserts nothing by itself.
+                proof = EntitlementProof(
+                    productID: transaction.productID,
+                    transactionID: String(transaction.id),
+                    jws: result.jwsRepresentation
+                )
+            }
         }
         setTier(entitled ? .plus : .free)
+        // Fire-and-forget: the server-side quota widens when this lands and
+        // self-heals on the next refresh when it doesn't. Nothing user-visible
+        // waits on it.
+        if let proof, let attestor {
+            Task { try? await attestor.attest(proof) }
+        }
     }
 
     func restore() async throws {

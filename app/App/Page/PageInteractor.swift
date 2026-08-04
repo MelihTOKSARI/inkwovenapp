@@ -418,10 +418,15 @@ final class PageInteractor {
             // shelf→page round trip — so the free cap reset itself, and
             // navigating to the paywall was the reset.
             let snapshot = await self.entitlements.snapshot()
+            let config = await self.entitlements.gateConfig()
             guard !Task.isCancelled else { return }
             // Gate order (must-test invariant): canSend runs to completion and
-            // returns BEFORE any model call.
-            switch SendGate.canSend(modality: .ink, snapshot: snapshot) {
+            // returns BEFORE any model call. The modality is what this
+            // exchange will actually produce: a Book that develops makes an
+            // image, and gating those as `.ink` made the Plus image soft cap
+            // unreachable while `imagesUsedToday` kept counting (audit M-5).
+            let modality: Modality = Book.by(id: self.book).develops ? .image : .ink
+            switch SendGate.canSend(modality: modality, snapshot: snapshot, config: config) {
             case .paywall(let trigger):
                 self.status = .paywall(trigger)
                 self.machine.reset()
