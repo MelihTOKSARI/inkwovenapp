@@ -191,6 +191,25 @@ struct DrawerView: View {
                             .overlay(alignment: .bottom) { hairline }
                             .accessibilityLabel("The Vials. \(vialsSummary)")
                             .accessibilityHint("Moving-picture credits.")
+                            // Always reachable (audit S-8): the crisis screen
+                            // used to appear only from a live detection, so a
+                            // reader who tapped away had no path back to the
+                            // resources. This row is the permanent way in.
+                            Button { model.go(.crisis) } label: {
+                                HStack {
+                                    Text("Get help now").font(InkFont.body(16)).foregroundStyle(room.text)
+                                    Spacer()
+                                    Text("Crisis lines ›")
+                                        .font(InkFont.body(15))
+                                        .foregroundStyle(room.accent)
+                                }
+                                .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .overlay(alignment: .bottom) { hairline }
+                            .accessibilityLabel("Get help now")
+                            .accessibilityHint("Crisis helplines — real people, free and confidential.")
                             Button { model.showDeleteConfirm = true } label: {
                                 HStack {
                                     Text("Delete all pages")
