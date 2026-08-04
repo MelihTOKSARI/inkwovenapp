@@ -7,6 +7,8 @@ import InkMoney
 struct PaywallView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
+    /// VoiceOver lands on the confirm question when the sheet rises (A-3).
+    @AccessibilityFocusState private var confirmFocused: Bool
 
     var body: some View {
         ZStack {
@@ -157,7 +159,10 @@ struct PaywallView: View {
 
     private func benefit(_ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            // Ornament only — VoiceOver spoke "floral heart" before every
+            // benefit line (audit A-7).
             Text("❦").font(InkFont.body(17)).foregroundStyle(Ink.wax)
+                .accessibilityHidden(true)
             Text(text)
                 .font(InkFont.body(16))
                 .foregroundStyle(Ink.ink)
@@ -206,6 +211,15 @@ struct PaywallView: View {
             }
         }
         .buttonStyle(PressScaleStyle())
+        // Selection was expressed only visually (audit A-2): a VoiceOver
+        // user could not tell which plan the seal was about to charge.
+        // One element, the trait carrying selection, the value carrying
+        // what this plan actually costs.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name)\(tag.map { ". \($0)" } ?? "")")
+        .accessibilityValue("\(price) \(period == "/wk" ? "a week" : "a month")")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint(selected ? "The selected plan." : "Selects this plan.")
     }
 
     private var sealCTA: some View {
@@ -261,6 +275,7 @@ struct PaywallView: View {
                     Text("Confirm the binding")
                         .font(InkFont.display(24))
                         .foregroundStyle(room.heading)
+                        .accessibilityFocused($confirmFocused)
                     Text("\(trialDisclosure) Charged to your Apple account.")
                         .font(InkFont.body(15))
                         .foregroundStyle(Color(hex: 0xB8A684))
@@ -285,6 +300,10 @@ struct PaywallView: View {
             .padding(30)
         }
         .transition(.opacity)
+        // A purchase confirmation may not leave the paywall behind it
+        // swipe-reachable (audit A-3).
+        .accessibilityAddTraits(.isModal)
+        .onAppear { confirmFocused = true }
     }
 
     private func confirmButton(_ label: String, prominent: Bool, action: @escaping () -> Void) -> some View {

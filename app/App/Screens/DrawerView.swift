@@ -23,12 +23,24 @@ struct DrawerView: View {
     /// Marginalia for the rare failures: nothing to export, a wipe that
     /// could not finish. Never a raw error string.
     @State private var drawerNote: String?
+    /// VoiceOver lands on the question when the delete-all confirm rises —
+    /// paired with `.isModal` so the drawer behind the scrim stops existing
+    /// for the rotor (audit A-3).
+    @AccessibilityFocusState private var deleteConfirmFocused: Bool
+    private var pen: PenPresence { .shared }
     /// The "Written in" row folds its nine choices away until asked.
     @State private var showHands = false
     /// The ritual's hour row folds its wheel away the same way.
     @State private var showRitualTime = false
 
-    private let inkChoices: [UInt32] = [0x2E2418, 0x6B4A2B, 0x1F5A63, 0x7A2E2B]
+    /// Hex → the name VoiceOver speaks. Four swatches sharing one "Ink
+    /// colour" label were four indistinguishable buttons (audit A-6).
+    private let inkChoices: [(hex: UInt32, name: String)] = [
+        (0x2E2418, "Iron gall"),
+        (0x6B4A2B, "Sepia"),
+        (0x1F5A63, "Peacock teal"),
+        (0x7A2E2B, "Oxblood"),
+    ]
 
     var body: some View {
         ZStack {
@@ -47,8 +59,18 @@ struct DrawerView: View {
 
                         section("The Hand") {
                             row("Ink colour", divider: true) { inkSwatches }
+                            // The standing way back from pen-first (audit
+                            // A-1): pencil presence is a session hint now,
+                            // and this choice outlasts it — the keys stay
+                            // available whatever the pencil does.
+                            row("Write with the keys", divider: true) {
+                                GoldToggle(isOn: pen.keysPreferred) { pen.keysPreferred.toggle() }
+                                    .accessibilityLabel("Write with the keys")
+                                    .accessibilityHint("Keeps the keyboard available even when a pencil has been used.")
+                            }
                             row("Left-handed mode") {
                                 GoldToggle(isOn: model.leftHanded) { model.leftHanded.toggle() }
+                                    .accessibilityLabel("Left-handed mode")
                             }
                         }
 
@@ -107,6 +129,7 @@ struct DrawerView: View {
                                 GoldToggle(isOn: model.reduceMotionOverride) {
                                     model.reduceMotionOverride.toggle()
                                 }
+                                .accessibilityLabel("Reduce motion")
                             }
                         }
 
@@ -451,12 +474,12 @@ struct DrawerView: View {
     // MARK: - The Hand
 
     private var inkSwatches: some View {
-        HStack(spacing: 11) {
-            ForEach(inkChoices, id: \.self) { hex in
-                let selected = model.inkColorHex == hex
-                Button { model.inkColorHex = hex } label: {
+        HStack(spacing: 6) {
+            ForEach(inkChoices, id: \.hex) { choice in
+                let selected = model.inkColorHex == choice.hex
+                Button { model.inkColorHex = choice.hex } label: {
                     Circle()
-                        .fill(Color(hex: hex))
+                        .fill(Color(hex: choice.hex))
                         .frame(width: 28, height: 28)
                         .overlay(
                             Circle().stroke(
@@ -465,10 +488,13 @@ struct DrawerView: View {
                             )
                             .padding(selected ? -3 : 0)
                         )
-                        .frame(minWidth: 34, minHeight: 44)
+                        // 44pt target (audit A-4) with the shape declared
+                        // AFTER the frame, so the whole target takes the tap.
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Ink colour")
+                .accessibilityLabel("\(choice.name) ink")
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
@@ -594,6 +620,7 @@ struct DrawerView: View {
                 Text("Delete every page?")
                     .font(InkFont.display(24))
                     .foregroundStyle(room.heading)
+                    .accessibilityFocused($deleteConfirmFocused)
                 Text("This tears out every page in every Book. The ink cannot be recovered.")
                     .font(InkFont.body(15))
                     .foregroundStyle(Color(hex: 0xB8A684))
@@ -651,6 +678,11 @@ struct DrawerView: View {
             .padding(30)
         }
         .transition(.opacity)
+        // An irreversible confirmation may not leave the drawer behind it
+        // swipe-reachable (audit A-3): without .isModal a VoiceOver user
+        // could land on — and activate — controls behind the scrim.
+        .accessibilityAddTraits(.isModal)
+        .onAppear { deleteConfirmFocused = true }
     }
 }
 

@@ -103,6 +103,9 @@ struct WaxSeal: View {
             Text("❦")
                 .font(InkFont.display(diameter * 0.54))
                 .foregroundStyle(Ink.sealIvory)
+                // Ornament in the wax — VoiceOver spoke "floral heart"
+                // before every seal CTA's label (audit A-7).
+                .accessibilityHidden(true)
         }
         .frame(width: diameter, height: diameter)
     }
@@ -281,6 +284,7 @@ struct RoomNavBar: View {
                 Button(action: onBack) {
                     HStack(spacing: 6) {
                         Text("‹").font(InkFont.body(15))
+                            .accessibilityHidden(true) // ornament (audit A-7)
                         SmallCapsLabel(text: backLabel, size: 11.5, tracking: 1.4, color: room.accent)
                     }
                     .foregroundStyle(room.accent)

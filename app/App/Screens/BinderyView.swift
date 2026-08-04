@@ -375,7 +375,7 @@ struct BinderyView: View {
 
     private var previewPage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SmallCapsLabel(text: previewTitle, size: 9.5, tracking: 2, color: previewInk.opacity(0.72))
+            SmallCapsLabel(text: previewTitle, size: 11, tracking: 2, color: previewInk.opacity(0.72))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             LinearGradient(colors: [previewInk.opacity(0.25), .clear], startPoint: .leading, endPoint: .trailing)
@@ -434,7 +434,7 @@ struct BinderyView: View {
                             .fill(Color(hex: entry.item.toneHex))
                             .overlay(Circle().stroke(room.accent.opacity(0.35), lineWidth: 1))
                             .frame(width: 11, height: 11)
-                        SmallCapsLabel(text: entry.slot, size: 9.5, tracking: 1.4, color: room.dim)
+                        SmallCapsLabel(text: entry.slot, size: 11, tracking: 1.4, color: room.dim)
                         Text(entry.item.name)
                             .font(InkFont.body(13.5))
                             .foregroundStyle(room.text)

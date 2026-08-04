@@ -3,29 +3,53 @@ import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
 /// Answers one question for the shell: is a pencil in play? Pen-first, keys
-/// as fallback — when no pencil has ever touched the glass (a simulator, an
-/// iPad without one), the keyboard steps in for writing; the moment a pencil
-/// touch lands anywhere, the app goes ink-only and remembers it across
-/// launches. Nothing *gates* on the pencil — finger ink works everywhere —
-/// this only decides which hand is offered first.
+/// as fallback — when no pencil has touched the glass, the keyboard steps in
+/// for writing; a pencil touch flips the session to ink. Nothing *gates* on
+/// the pencil — finger ink works everywhere — this only decides which hand
+/// is offered first.
+///
+/// The observation is PER SESSION, deliberately (audit A-1): it used to be
+/// persisted "for good", so one pencil touch — anyone's, ever, including a
+/// stranger trying a display iPad — permanently disabled the keyboard, and a
+/// VoiceOver user or a writer with a tremor could never type again. Two
+/// overrides beat the observation: the writer's own "write with the keys"
+/// choice in the Drawer (persisted — favoring the keyboard is the safe
+/// direction to remember), and VoiceOver running, because a direct-interaction
+/// canvas over a dead keyboard is an app a VoiceOver user cannot write in.
 @Observable
 @MainActor
 final class PenPresence {
     static let shared = PenPresence()
 
+    /// A pencil has touched the glass this session.
     private(set) var pencilActive: Bool
+
+    /// The writer's explicit preference from the Drawer: keys stay available
+    /// whatever the pencil does.
+    var keysPreferred: Bool {
+        didSet { defaults.set(keysPreferred, forKey: "ink.keysPreferred") }
+    }
 
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // Read but never written in production: the UITest pencil scenarios
+        // inject `ink.pencilSeen` through the argument domain. Production
+        // launches start pencil-quiet and observe the session's touches.
         pencilActive = defaults.bool(forKey: "ink.pencilSeen")
+        keysPreferred = defaults.bool(forKey: "ink.keysPreferred")
+    }
+
+    /// What the writing surfaces honor.
+    var pencilPreferred: Bool {
+        pencilActive && !keysPreferred && !UIAccessibility.isVoiceOverRunning
     }
 
     func note(_ type: UITouch.TouchType) {
         guard type == .pencil, !pencilActive else { return }
+        // Session memory only — never written to disk (audit A-1).
         pencilActive = true
-        defaults.set(true, forKey: "ink.pencilSeen")
     }
 
     /// Attach to any canvas that should report which hand touches it.

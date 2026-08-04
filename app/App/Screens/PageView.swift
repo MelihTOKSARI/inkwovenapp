@@ -31,6 +31,8 @@ struct PageView: View {
     @State private var askingKeeperConsent = false
     /// The shop, over this page rather than instead of it — see `VialsSheet`.
     @State private var showingVials = false
+    /// VoiceOver lands on the hand card's title when it rises (A-3).
+    @AccessibilityFocusState private var handCardFocused: Bool
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -224,6 +226,7 @@ struct PageView: View {
         Button { model.go(.shelf) } label: {
             HStack(spacing: 7) {
                 Text("‹").font(InkFont.body(15)).foregroundStyle(Ink.inkFaded)
+                    .accessibilityHidden(true) // ornament; the label carries it
                 SmallCapsLabel(text: "the shelf", size: 13, tracking: 1.5, color: Ink.inkFaded)
             }
             .padding(.leading, 11)
@@ -253,7 +256,7 @@ struct PageView: View {
                 .frame(width: 34, height: 92)
                 .shadow(color: .black.opacity(0.25), radius: 5, y: 4)
                 .overlay(alignment: .center) {
-                    SmallCapsLabel(text: "remembered", size: 9, tracking: 1.1, color: Ink.parchment)
+                    SmallCapsLabel(text: "remembered", size: 10, tracking: 1.1, color: Ink.parchment)
                         .fixedSize()
                         .rotationEffect(.degrees(90))
                         .offset(y: -7)
@@ -322,6 +325,7 @@ struct PageView: View {
                         Text("The hand it writes in")
                             .font(InkFont.display(21))
                             .foregroundStyle(room.heading)
+                            .accessibilityFocused($handCardFocused)
                         Text("\(book.name) answers in this script.")
                             .font(InkFont.bodyItalic(13))
                             .foregroundStyle(room.dim)
@@ -361,6 +365,10 @@ struct PageView: View {
             .padding(model.leftHanded ? .leading : .trailing, 56)
         }
         .transition(.opacity)
+        // The hand card floats over a live page; without .isModal the canvas
+        // and tray behind the scrim stay swipe-reachable (audit A-3).
+        .accessibilityAddTraits(.isModal)
+        .onAppear { handCardFocused = true }
     }
 
     private var headerTitle: some View {
@@ -385,7 +393,7 @@ struct PageView: View {
             // starts below the opener; the pen may cross it freely.
             InkCanvasView(
                 interactor: interactor,
-                pencilActive: PenPresence.shared.pencilActive,
+                pencilActive: PenPresence.shared.pencilPreferred,
                 inkColor: UIColor(Color(hex: model.inkColorHex)),
                 typedTopInset: openerHeight + 14
             )

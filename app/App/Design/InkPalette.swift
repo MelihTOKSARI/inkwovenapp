@@ -88,11 +88,18 @@ struct RoomTheme {
         oracleBloom: Color(hex: 0xE8B84B, opacity: 0.5)
     )
 
+    // Daylight re-inked for WCAG AA body (audit A-5): the old dim #7A6544 on
+    // bgOuter #BDA478 measured 2.32:1 — below even the 3:1 non-text floor —
+    // exactly where the Drawer renders body copy on a 13" iPad in landscape.
+    // The outer gradient stop is clamped lighter and dim/accent/heading are
+    // darkened; every pair now measures ≥4.5:1 on its worst background
+    // (dim 4.87, accent 5.00, heading 4.99, text 6.78). Candlelight passes
+    // as it always did and is untouched.
     static let daylight = RoomTheme(
         variant: .daylight,
-        bgInner: Color(hex: 0xE9DCBE), bgMid: Color(hex: 0xD8C39C), bgOuter: Color(hex: 0xBDA478),
-        heading: Color(hex: 0x7A4A15), text: Color(hex: 0x3D2F1F),
-        dim: Color(hex: 0x7A6544), accent: Color(hex: 0x8A5A15),
+        bgInner: Color(hex: 0xE9DCBE), bgMid: Color(hex: 0xD8C39C), bgOuter: Color(hex: 0xD0B990),
+        heading: Color(hex: 0x653C10), text: Color(hex: 0x3D2F1F),
+        dim: Color(hex: 0x554526), accent: Color(hex: 0x613E0D),
         cardTop: Color(hex: 0xF7EFD9), cardBottom: Color(hex: 0xE6D7B7),
         ledgeTop: Color(hex: 0xB79F70), ledgeMid: Color(hex: 0x9C8154), ledgeBottom: Color(hex: 0x7D6540),
         bar: Color(hex: 0xE9DDC1, opacity: 0.82),

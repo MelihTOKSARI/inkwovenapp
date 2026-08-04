@@ -52,8 +52,11 @@ struct PageToolTray: View {
                         .fill(active ? Ink.inkFaded : Ink.ink.opacity(0.05))
                         .overlay(Circle().stroke(Ink.ink.opacity(0.2), lineWidth: 1))
                 )
-                .contentShape(Circle())
+                // The shape must come AFTER the sizing frame (audit A-4): a
+                // Circle declared on the 38pt glyph capped every tool's hit
+                // target at 38pt while Components.swift claimed 44.
                 .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
         .accessibilityLabel(label)

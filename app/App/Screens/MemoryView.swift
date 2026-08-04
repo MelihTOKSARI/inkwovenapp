@@ -79,6 +79,7 @@ struct MemoryView: View {
                 Button { model.go(.shelf) } label: {
                     HStack(spacing: 6) {
                         Text("‹").font(InkFont.body(15))
+                            .accessibilityHidden(true) // ornament (audit A-7)
                         SmallCapsLabel(text: "the shelf", size: 11.5, tracking: 1.4, color: Ink.inkFaded)
                     }
                     .foregroundStyle(Ink.inkFaded)

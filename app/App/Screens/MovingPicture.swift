@@ -110,6 +110,8 @@ struct KeeperClipConsent: View {
     let onAgree: () -> Void
 
     @Environment(\.room) private var room
+    /// VoiceOver lands on the consent's title when the card rises (A-3).
+    @AccessibilityFocusState private var titleFocused: Bool
 
     var body: some View {
         ZStack {
@@ -124,6 +126,7 @@ struct KeeperClipConsent: View {
                     Text("Out from behind the seal")
                         .font(InkFont.display(22))
                         .foregroundStyle(room.heading)
+                        .accessibilityFocused($titleFocused)
                 }
                 .padding(.bottom, 10)
 
@@ -169,6 +172,10 @@ struct KeeperClipConsent: View {
             .padding(40)
         }
         .transition(.opacity)
+        // A consent card about a sealed page leaving the device may not
+        // leave the page behind it swipe-reachable (audit A-3).
+        .accessibilityAddTraits(.isModal)
+        .onAppear { titleFocused = true }
     }
 }
 

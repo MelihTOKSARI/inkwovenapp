@@ -173,7 +173,7 @@ struct OnboardingView: View {
 
             ZStack(alignment: .bottomLeading) {
                 if !hasInk && typedName.isEmpty && !sealed {
-                    Text(pen.pencilActive ? "sign your name in ink" : "sign your name — the keys will write for you")
+                    Text(pen.pencilPreferred ? "sign your name in ink" : "sign your name — the keys will write for you")
                         .font(InkFont.hand("Caveat-Regular", 25))
                         .foregroundStyle(Ink.ink.opacity(0.3))
                         .padding(.bottom, 14)
@@ -186,8 +186,8 @@ struct OnboardingView: View {
                 SignatureCanvasView(
                     drawingData: $model.signatureData,
                     typedName: $typedName,
-                    pencilActive: pen.pencilActive,
-                    wantsKeys: streamed && !pen.pencilActive && !sealed,
+                    pencilActive: pen.pencilPreferred,
+                    wantsKeys: streamed && !pen.pencilPreferred && !sealed,
                     onReturn: {
                         settleTask?.cancel()
                         commitTyped()

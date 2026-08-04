@@ -413,9 +413,13 @@ struct RiddleDiaryLine: View {
         Circle()
             .fill(room.accent)
             .frame(width: 5, height: 5)
-            .opacity(nibPulse ? 0.95 : 0.25)
-            .scaleEffect(nibPulse ? 1.1 : 0.85)
+            .opacity(reduceMotion ? 0.7 : (nibPulse ? 0.95 : 0.25))
+            .scaleEffect(reduceMotion ? 1 : (nibPulse ? 1.1 : 0.85))
             .onAppear {
+                // The one ambient repeatForever that skipped the guard its
+                // six siblings carry (audit A-8): under Reduce Motion the
+                // nib rests, steady and visible.
+                guard !reduceMotion else { return }
                 nibPulse = false
                 withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
                     nibPulse = true
