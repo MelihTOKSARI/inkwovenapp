@@ -137,6 +137,64 @@ export const CRISIS_PAYLOAD = Object.freeze({
   resources: [],
 });
 
+// -- independent crisis screen (audit S-2) -----------------------------------
+// The sentinel above asks the REPLY MODEL to self-report — one in-band
+// instruction competing in the same turn with the writer's page. This screen
+// is the independent layer the PRD promised: deterministic string matching,
+// in-process, no model in the loop, run by the exchange route over every
+// text channel the writer supplies AND over the assembled reply. A provider
+// swap or a model regression cannot remove it.
+//
+// Precision is deliberate: every entry is an explicit first-person signal,
+// because a false crisis card is itself a harm — fiction broken, the page
+// interrupted. Recall beyond this list is the sentinel's job (and T8 widens
+// the override's scope); this list is the floor that never moves.
+const CRISIS_PHRASES = [
+  'kill myself',
+  'killing myself',
+  'end my life',
+  'ending my life',
+  'take my own life',
+  'taking my own life',
+  'want to die',
+  'wanted to die',
+  'wish i was dead',
+  'wish i were dead',
+  'better off dead',
+  'no reason to live',
+  'no reason to keep living',
+  "don't want to be alive",
+  'do not want to be alive',
+  "can't go on anymore",
+  'cannot go on anymore',
+  'hurt myself',
+  'hurting myself',
+  'harm myself',
+  'harming myself',
+  'cut myself',
+  'cutting myself',
+  'this is my goodbye',
+  'this is goodbye forever',
+];
+
+const CRISIS_WORD_RE = /\b(suicide|suicidal)\b/;
+
+/**
+ * True when the text carries an explicit first-person crisis signal.
+ * Normalizes curly quotes and whitespace so a model's typography (or a
+ * writer's) cannot slip a phrase past the match.
+ */
+export function textSignalsCrisis(text) {
+  if (typeof text !== 'string' || !text) return false;
+  const flat = text
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/\s+/g, ' ');
+  if (CRISIS_WORD_RE.test(flat)) return true;
+  return CRISIS_PHRASES.some((phrase) => flat.includes(phrase));
+}
+
 const SAFETY_OVERRIDE = `Safety override — the single exception to every rule above:
 If the page suggests the writer may be in danger from themselves — writing about wanting to die or to hurt themselves, about ending their life, that they cannot go on, or a goodbye that reads as real — do not stay in character. Begin your reply with this exact line, with nothing before it:
 ${CRISIS_SENTINEL}

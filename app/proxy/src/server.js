@@ -26,6 +26,7 @@ import {
   ProviderError,
   CRISIS_SENTINEL,
   CRISIS_PAYLOAD,
+  textSignalsCrisis,
 } from './models.js';
 
 // What each consumable credits, decided HERE — the client names a product,
@@ -494,6 +495,31 @@ export function build(options = {}) {
         return reply;
       }
 
+      // -- independent crisis screen, writer's side (audit S-2) --------------
+      // The page itself travels as an image, but every TEXT channel the
+      // writer supplies is screened deterministically before any provider
+      // sees the exchange — no model in the loop, so a provider swap or a
+      // reply-model regression cannot remove this layer. Nothing is counted
+      // or charged: the quota block below never runs on this path.
+      const writerText = [
+        request.body?.context?.priorInkText,
+        request.body?.context?.sessionSummary,
+        ...(Array.isArray(request.body?.context?.memorySummaries)
+          ? request.body.context.memorySummaries
+          : []),
+      ]
+        .filter((part) => typeof part === 'string')
+        .join('\n');
+      if (textSignalsCrisis(writerText)) {
+        const channel = createStreamChannel(reply, { deadlineMS: streamDeadlineMS, heartbeatMS });
+        channel.open();
+        await channel.send('crisis', CRISIS_PAYLOAD);
+        channel.cleanup();
+        request.log?.info?.({ route: 'exchange', book: book.id, crisis: true, screen: 'writer' });
+        channel.end();
+        return;
+      }
+
       // -- daily quotas (audit M-2) ------------------------------------------
       // Checked BEFORE the ticket is consumed and BEFORE any provider call.
       // Ink and images cost 0 from the wallet, so without this the route had
@@ -617,60 +643,66 @@ export function build(options = {}) {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       // -- crisis gate -------------------------------------------------------
-      // The safety override (models.js) makes the model OPEN with
+      // The safety override (models.js) makes the model open with
       // CRISIS_SENTINEL when the writer's page reads as genuine self-harm
-      // risk. The sentinel can arrive split across deltas, so ink is held
-      // back until the head of the reply either provably is not the sentinel
-      // (flush, stream normally) or completes it — then ONE `crisis` event
-      // goes out and the rest of the generation is discarded. Only the very
-      // start of the reply is checked; echo mode never passes through here.
+      // risk. The old gate matched the sentinel only as an exact prefix of
+      // the reply head and then LATCHED open (audit S-3): a model that led
+      // with a quote mark streamed the literal "[[CRISIS]]" as ink, and one
+      // that recognised danger three sentences in could never escape. This
+      // scanner watches the WHOLE stream: the sentinel fires at any offset,
+      // is stripped from anything that ships, and the scan never stops. A
+      // suffix that could still become the sentinel is held back until the
+      // next delta decides it — the client buffers the full reply and only
+      // reveals it at `.answered`, so a mid-reply crisis still preempts
+      // everything. Echo mode never passes through here.
       let crisisServed = false;
-      let gateOpen = false; // once true, deltas stream straight through
-      let gateHeld = '';
+      let heldTail = ''; // suffix that is still a live prefix of the sentinel
       // The full reply as served — the convertibility verdict (task J2) judges
       // it after the stream completes, never on the ttfs-critical path.
       let replyText = '';
 
-      /** Routes one ink delta through the gate. Returns false once the exchange must stop. */
+      /** Routes one ink delta through the scanner. Returns false once the exchange must stop. */
       const sendInk = async (text) => {
-        if (gateOpen) {
-          replyText += text;
-          await send('ink_delta', { text });
-          return true;
-        }
-        gateHeld += text;
-        const head = gateHeld.trimStart(); // models often lead with whitespace
-        if (head.startsWith(CRISIS_SENTINEL)) {
+        const combined = heldTail + text;
+        if (combined.includes(CRISIS_SENTINEL)) {
           crisisServed = true;
           await send('crisis', CRISIS_PAYLOAD);
           return false;
         }
-        if (CRISIS_SENTINEL.startsWith(head)) return true; // still ambiguous — keep holding
-        gateOpen = true;
-        const held = gateHeld;
-        gateHeld = '';
-        replyText += held;
-        await send('ink_delta', { text: held });
+        // Longest suffix that is a proper prefix of the sentinel stays held —
+        // the next delta may complete it. Everything before it ships.
+        let hold = 0;
+        for (let k = Math.min(CRISIS_SENTINEL.length - 1, combined.length); k > 0; k -= 1) {
+          if (combined.endsWith(CRISIS_SENTINEL.slice(0, k))) {
+            hold = k;
+            break;
+          }
+        }
+        heldTail = hold ? combined.slice(combined.length - hold) : '';
+        const ship = hold ? combined.slice(0, combined.length - hold) : combined;
+        if (ship) {
+          replyText += ship;
+          await send('ink_delta', { text: ship });
+        }
         return true;
       };
 
       /**
-       * The stream ended while the gate was still holding. A held head is by
-       * construction a strict prefix of the sentinel; if it got as far as the
-       * opening brackets, the model was mid-sentinel when the stream died, and
-       * safety fails CLOSED — the card, not a garbled "[[CRIS" fragment.
-       * Anything shorter is flushed as ordinary ink.
+       * The stream ended while the scanner was still holding a tail. The tail
+       * is by construction a strict prefix of the sentinel; if it got as far
+       * as the opening brackets, the model was mid-sentinel when the stream
+       * died, and safety fails CLOSED — the card, not a garbled "[[CRIS"
+       * fragment. Anything shorter is flushed as ordinary ink.
        */
       const flushInk = async () => {
-        if (gateOpen || crisisServed || !gateHeld) return;
-        if (gateHeld.trimStart().startsWith('[[')) {
+        if (crisisServed || !heldTail) return;
+        if (heldTail.startsWith('[[')) {
           crisisServed = true;
           await send('crisis', CRISIS_PAYLOAD);
           return;
         }
-        gateOpen = true;
-        const held = gateHeld;
-        gateHeld = '';
+        const held = heldTail;
+        heldTail = '';
         replyText += held;
         await send('ink_delta', { text: held });
       };
@@ -753,6 +785,19 @@ export function build(options = {}) {
             await send('ink_delta', { text: `${word} ` });
             if (echoDelayMS > 0) await sleep(echoDelayMS);
           }
+        }
+
+        // -- independent crisis screen, reply side (audit S-2) ---------------
+        // Runs over the assembled reply on every exchange, whatever the model
+        // did with the sentinel. A reply that mirrors the writer's crisis in
+        // plain words trips this even from a model that never self-reports;
+        // the client buffers the reply and reveals nothing before `.answered`,
+        // so the card still preempts everything. The sentinel stays the fast
+        // path — this is the layer a regression cannot remove.
+        if (!crisisServed && !channel.clientGone && textSignalsCrisis(replyText)) {
+          crisisServed = true;
+          await send('crisis', CRISIS_PAYLOAD);
+          request.log?.info?.({ route: 'exchange', book: book.id, crisis: true, screen: 'reply' });
         }
 
         // Develop pass (Artist): the sketch itself is the image input; the
