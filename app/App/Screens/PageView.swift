@@ -143,6 +143,11 @@ struct PageView: View {
             react(to: status)
         }
         .onAppear { consumeRevisit() }
+        // Leaving the page tears the view — and this interactor — down. An
+        // exchange left running would stream to completion against a dead
+        // canvas: moment spent, reply filed nowhere (audit D-4). Cancelling
+        // here propagates the disconnect, and the server releases the hold.
+        .onDisappear { interactor.pageWillDisappear() }
     }
 
     /// The exchange currently standing on the reply pane, when — and only

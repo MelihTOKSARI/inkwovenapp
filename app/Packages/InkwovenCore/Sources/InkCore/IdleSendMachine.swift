@@ -121,8 +121,14 @@ public struct IdleSendMachine: Equatable, Sendable {
             speculativeUploadOutstanding = false
             return hadUpload ? [.abortUpload] : []
 
+        // `.committed` included (audit D-9): with no transition here, hold
+        // pressed while an exchange streamed fell through to `default`, and
+        // the shell's release branch then RE-ARMED the cadence — the exact
+        // opposite of what the button says. The in-flight exchange itself is
+        // the shell's to manage; holding only pauses further sending.
         case (.idle, .holdToggled), (.inking, .holdToggled),
-             (.resting, .holdToggled), (.cancelled, .holdToggled):
+             (.resting, .holdToggled), (.cancelled, .holdToggled),
+             (.committed, .holdToggled):
             state = .held
             return []
 
@@ -136,6 +142,13 @@ public struct IdleSendMachine: Equatable, Sendable {
             return [.abortUpload]
 
         case (.resting, .cancelRequested):
+            state = .cancelled
+            return []
+
+        // The shell abandons an in-flight exchange (page torn down, draft
+        // erased mid-stream): the machine must not stay `.committed`, or the
+        // next stroke resumes a cycle that belongs to a dead exchange.
+        case (.committed, .cancelRequested):
             state = .cancelled
             return []
 

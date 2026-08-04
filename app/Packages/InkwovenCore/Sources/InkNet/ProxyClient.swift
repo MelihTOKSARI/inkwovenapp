@@ -256,6 +256,12 @@ public final class ProxyClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue(try await auth.token(), forHTTPHeaderField: "x-ink-user")
+        // Client-side deadline (audit D-8): the server's 120s stream deadline
+        // is real, but trusting it ENTIRELY left a page stuck at "sending"
+        // forever when the connection died silently. The server heartbeats
+        // every 15s, so this idle timeout only fires when nothing — not even
+        // a heartbeat — has arrived for longer than the whole server window.
+        request.timeoutInterval = 150
         let body = ExchangeRequestBody(
             bookID: book.rawValue,
             context: context,
