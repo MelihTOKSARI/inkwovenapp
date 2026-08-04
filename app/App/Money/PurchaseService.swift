@@ -37,6 +37,11 @@ protocol PurchaseServicing: EntitlementProviding {
     /// Localized storefront price. Hardcoded USD literals are a misleading-price
     /// rejection in every non-USD storefront.
     func displayPrice(for productID: String) async -> String?
+    /// Whether the introductory offer (the weekly trial) is open to THIS
+    /// Apple ID. Nil while unknown. The paywall shows trial claims only on
+    /// `true` — a returning subscriber shown "free for 3 days" is charged
+    /// immediately, which is a 3.1.2 rejection and a broken promise (C-2).
+    func isEligibleForIntroOffer(_ productID: String) async -> Bool?
     /// Fires after a verified vial purchase has been credited server-side, so
     /// the shop can re-read the wallet. Carries no amount: the balance comes
     /// from the proxy, never from adding up what the client thinks it bought.
@@ -199,6 +204,12 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         (try? await product(for: productID))??.displayPrice
     }
 
+    func isEligibleForIntroOffer(_ productID: String) async -> Bool? {
+        guard let product = try? await product(for: productID),
+              let subscription = product.subscription else { return nil }
+        return await subscription.isEligibleForIntroOffer
+    }
+
     // MARK: - Internals
 
     private func apply(_ result: VerificationResult<StoreKit.Transaction>) async {
@@ -294,6 +305,8 @@ struct UnboundPurchaseService: PurchaseServicing {
         throw CommerceError.productUnavailable(productID)
     }
     func displayPrice(for productID: String) async -> String? { nil }
+    /// Unknown — the paywall shows no trial claim it cannot back.
+    func isEligibleForIntroOffer(_ productID: String) async -> Bool? { nil }
     func creditGrants() -> AsyncStream<Void> {
         AsyncStream { $0.finish() }
     }

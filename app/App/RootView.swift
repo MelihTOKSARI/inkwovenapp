@@ -100,6 +100,10 @@ struct RootView: View {
                 // Cap and cooldown knobs are server-tunable; re-read them so a
                 // change ships without a release. Failure keeps the defaults.
                 Task { await LiveCommerce.refreshGateConfig() }
+                // Prices and trial eligibility too (audit C-3): the launch
+                // fetch may have run offline, and stale eligibility shows a
+                // trial promise a returning subscriber will not receive.
+                Task { await model.refreshStore() }
             }
         }
         .onChange(of: di.archive.lastWrittenAt) { _, _ in

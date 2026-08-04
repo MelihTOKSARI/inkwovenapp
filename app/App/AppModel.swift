@@ -84,6 +84,10 @@ final class AppModel {
     /// answers. Hardcoded USD literals are charged at a different amount in
     /// every other storefront.
     private(set) var storePrices: [String: String] = [:]
+    /// Whether the weekly trial is open to THIS Apple ID (audit C-2). Nil
+    /// until StoreKit answers; the paywall shows trial copy only on `true` —
+    /// a returning subscriber promised "free for 3 days" is charged at once.
+    private(set) var weeklyTrialEligible: Bool?
     /// Monthly pre-selected: it is the value plan (54% less than weekly
     /// annualised), and pre-selecting the cheap-looking weekly is the framing
     /// App Review reads as a dark pattern (3.1.2).
@@ -186,10 +190,6 @@ final class AppModel {
         case weekly, monthly
 
         var productID: String { self == .weekly ? ProductID.plusWeekly : ProductID.plusMonthly }
-        /// Fallback only — `AppModel.displayPrice(for:fallback:)` prefers the
-        /// storefront's own string. The period always rides with the price;
-        /// a bare number on a renewing plan is a 3.1.2 rejection.
-        var price: String { self == .weekly ? "$4.99 / week" : "$9.99 / month" }
         var label: String { self == .weekly ? "seven nights" : "one moon" }
     }
 
@@ -315,7 +315,7 @@ final class AppModel {
         }
         Task { [purchases] in
             await purchases.start()
-            await self.loadStorePrices()
+            await self.refreshStore()
             await self.refreshWallet()
         }
     }
@@ -327,19 +327,20 @@ final class AppModel {
         if let view = try? await walletReader.wallet() { wallet = view }
     }
 
-    private func loadStorePrices() async {
+    /// Re-reads prices and trial eligibility from StoreKit (audit C-2/C-3).
+    /// This used to run once inside a fire-and-forget launch task: an offline
+    /// launch left `storePrices` empty for the whole session, every surface
+    /// fell back to a hardcoded USD literal, and pressing the seal met
+    /// `productUnavailable`. Now the paywall re-asks on appear and RootView
+    /// re-asks on every foreground; failures keep the last known values.
+    func refreshStore() async {
         let ids = [ProductID.plusWeekly, ProductID.plusMonthly] + ProductID.consumables.sorted()
-        var prices: [String: String] = [:]
         for id in ids {
-            if let price = await purchases.displayPrice(for: id) { prices[id] = price }
+            if let price = await purchases.displayPrice(for: id) { storePrices[id] = price }
         }
-        storePrices = prices
-    }
-
-    /// The storefront's own price string, falling back to the design literal
-    /// only until StoreKit answers.
-    func displayPrice(for productID: String, fallback: String) -> String {
-        storePrices[productID] ?? fallback
+        if let eligible = await purchases.isEligibleForIntroOffer(ProductID.plusWeekly) {
+            weeklyTrialEligible = eligible
+        }
     }
 
     func clearPurchaseNote() {

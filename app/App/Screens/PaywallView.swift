@@ -69,15 +69,20 @@ struct PaywallView: View {
             // monthly saving stated outright: $4.99 looks smaller than $9.99
             // while costing 2.2× as much, and a reviewer who has to do that
             // arithmetic reads the layout as a dark pattern (3.1.2).
+            //
+            // Prices are the storefront's own or a placeholder — never a USD
+            // literal (audit C-3), and the trial tag appears only when THIS
+            // Apple ID is actually eligible for the introductory offer (C-2).
             HStack(spacing: 12) {
                 planCard(
                     .weekly, name: "Seven nights",
-                    price: model.displayPrice(for: ProductID.plusWeekly, fallback: "$4.99"),
-                    period: "/wk", tag: "3-day free trial"
+                    price: weeklyPrice ?? "—",
+                    period: "/wk",
+                    tag: model.weeklyTrialEligible == true ? "3-day free trial" : nil
                 )
                 planCard(
                     .monthly, name: "One moon",
-                    price: model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99"),
+                    price: monthlyPrice ?? "—",
                     period: "/mo", tag: "save 54% · best"
                 )
             }
@@ -101,6 +106,9 @@ struct PaywallView: View {
             .padding(.top, 12)
         }
         .padding(EdgeInsets(top: 44, leading: 46, bottom: 36, trailing: 46))
+        // The launch fetch can have failed (offline launch, IAP records still
+        // propagating) — re-ask the storefront every time the paywall opens.
+        .task { await model.refreshStore() }
         .background(
             RadialGradient(
                 stops: [
@@ -121,12 +129,29 @@ struct PaywallView: View {
         )
     }
 
+    private var weeklyPrice: String? { model.storePrices[ProductID.plusWeekly] }
+    private var monthlyPrice: String? { model.storePrices[ProductID.plusMonthly] }
+    /// The seal may not be pressed until the storefront has answered with
+    /// real prices — a purchase sheet reached from a placeholder is exactly
+    /// the productUnavailable dead end the audit describes (C-3).
+    private var pricesReady: Bool { weeklyPrice != nil && monthlyPrice != nil }
+
     private var trialDisclosure: String {
         switch model.selectedPlan {
         case .weekly:
-            "Free for 3 days, then \(model.displayPrice(for: ProductID.plusWeekly, fallback: "$4.99")) a week. Renews until cancelled in Settings."
+            guard let price = weeklyPrice else {
+                return "Fetching your storefront's price — a moment."
+            }
+            // The trial clause appears only for an Apple ID that will
+            // actually receive it (audit C-2).
+            return model.weeklyTrialEligible == true
+                ? "Free for 3 days, then \(price) a week. Renews until cancelled in Settings."
+                : "\(price) a week. Renews until cancelled in Settings."
         case .monthly:
-            "\(model.displayPrice(for: ProductID.plusMonthly, fallback: "$9.99")) a month. Renews until cancelled in Settings."
+            guard let price = monthlyPrice else {
+                return "Fetching your storefront's price — a moment."
+            }
+            return "\(price) a month. Renews until cancelled in Settings."
         }
     }
 
@@ -187,7 +212,7 @@ struct PaywallView: View {
         Button { model.showBindConfirm = true } label: {
             HStack(spacing: 14) {
                 WaxSeal(diameter: 44)
-                Text("Press the seal to bind")
+                Text(pricesReady ? "Press the seal to bind" : "The storefront is waking…")
                     .font(InkFont.display(21))
                     .foregroundStyle(Ink.parchment)
             }
@@ -197,13 +222,20 @@ struct PaywallView: View {
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(LinearGradient(colors: [Ink.wax, Ink.waxDeep], startPoint: .top, endPoint: .bottom))
-                    .shadow(color: Ink.wax.opacity(0.6), radius: 13, y: 8)
+                    .shadow(color: pricesReady ? Ink.wax.opacity(0.6) : .clear, radius: 13, y: 8)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.14), lineWidth: 1)
             )
+            .opacity(pricesReady ? 1 : 0.55)
         }
         .buttonStyle(PressScaleStyle(scale: 0.985))
+        // No purchase path until real storefront prices exist (audit C-3) —
+        // the sheet would only answer productUnavailable.
+        .disabled(!pricesReady)
+        .accessibilityHint(pricesReady
+            ? "Opens the purchase confirmation."
+            : "Waiting for the App Store to report prices.")
     }
 
     private func linkText(_ text: String, action: @escaping () -> Void) -> some View {

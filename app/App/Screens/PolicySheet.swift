@@ -33,7 +33,12 @@ struct PolicySheet: View {
                         )
                         section(
                             "The binding",
-                            "The binding is an auto-renewing subscription, charged to your Apple account at the price shown on the paywall in your local currency — by the moon, or by the year with the first seven days free. It renews until cancelled, at least a day before renewal, in your device Settings under your Apple ID subscriptions. \"Restore a binding\" on the paywall recovers a purchase on a new or reinstalled device."
+                            // Matches the real SKUs (audit C-1): weekly with a
+                            // possible 3-day introductory trial, monthly with
+                            // none. There is no annual plan; describing one
+                            // here put two contradictory trial disclosures in
+                            // one binary.
+                            "The binding is an auto-renewing subscription, charged to your Apple account at the price shown on the paywall in your local currency — by the week, or by the moon. A weekly binding may begin with three days free when Apple's introductory offer applies to your account; the paywall says so only when it truly does. It renews until cancelled, at least a day before renewal, in your device Settings under your Apple ID subscriptions. \"Restore a binding\" on the paywall recovers a purchase on a new or reinstalled device."
                         )
                         Link(destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!) {
                             Text("Apple's standard licence agreement (EULA)")

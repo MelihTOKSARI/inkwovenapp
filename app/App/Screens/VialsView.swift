@@ -50,14 +50,10 @@ struct VialsShop: View {
     var errandNote: String?
     @Environment(\.room) private var room
 
-    /// Fallbacks are shown only until StoreKit answers with the storefront's
-    /// own strings — a hardcoded USD price is charged differently everywhere
-    /// else, which is a misleading-price rejection.
-    private let packs: [(productID: String, fallback: String)] = [
-        (ProductID.vialsSmall, "$4.99"),
-        (ProductID.vialsMedium, "$10.99"),
-        (ProductID.vialsLarge, "$24.99"),
-    ]
+    /// No fallback literals (audit C-3): a hardcoded USD price is charged at
+    /// a different amount in every other storefront, which is a misleading-
+    /// price rejection. Until StoreKit answers, the buy button waits.
+    private let packs: [String] = [ProductID.vialsSmall, ProductID.vialsMedium, ProductID.vialsLarge]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -76,10 +72,14 @@ struct VialsShop: View {
 
             HStack(alignment: .bottom, spacing: 16) {
                 ForEach(Array(packs.enumerated()), id: \.offset) { index, pack in
-                    packCard(pack: pack, big: index == 2, index: index)
+                    packCard(productID: pack, big: index == 2, index: index)
                 }
             }
-            .task { await model.refreshWallet() }
+            .task {
+                await model.refreshWallet()
+                // The launch price fetch can have failed; the shop re-asks.
+                await model.refreshStore()
+            }
 
             refundNote
                 .padding(.top, 24)
@@ -116,10 +116,12 @@ struct VialsShop: View {
         return "moments remain"
     }
 
-    private func packCard(
-        pack: (productID: String, fallback: String), big: Bool, index: Int
-    ) -> some View {
-        let count = ProductID.creditAmount(for: pack.productID) ?? 0
+    private func packCard(productID: String, big: Bool, index: Int) -> some View {
+        let count = ProductID.creditAmount(for: productID) ?? 0
+        // The storefront's own string, or a waiting state — never a USD
+        // literal (audit C-3). A buy button with no real price is disabled:
+        // it could only answer productUnavailable.
+        let price = model.storePrices[productID]
         return VStack(spacing: 0) {
             VialView(
                 width: 22 + CGFloat(index) * 9,
@@ -137,21 +139,24 @@ struct VialsShop: View {
                 .padding(.bottom, 18)
 
             Button {
-                withAnimation { model.buyVials(pack.productID) }
+                withAnimation { model.buyVials(productID) }
             } label: {
-                Text("Buy · \(model.displayPrice(for: pack.productID, fallback: pack.fallback))")
+                Text(price.map { "Buy · \($0)" } ?? "Buy · —")
                     .font(InkFont.bodySemiBold(15))
                     .foregroundStyle(Color(hex: 0x2A1C0A))
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
                             .fill(LinearGradient(colors: [Ink.candleBright, Ink.candle], startPoint: .top, endPoint: .bottom))
-                            .shadow(color: Ink.candle.opacity(0.55), radius: 6, y: 4)
+                            .shadow(color: Ink.candle.opacity(price == nil ? 0 : 0.55), radius: 6, y: 4)
                     )
+                    .opacity(price == nil ? 0.55 : 1)
             }
             .buttonStyle(PressScaleStyle())
+            .disabled(price == nil)
             .accessibilityLabel(
-                "Buy \(count) vials for \(model.displayPrice(for: pack.productID, fallback: pack.fallback))"
+                price.map { "Buy \(count) vials for \($0)" }
+                    ?? "Buy \(count) vials. Waiting for the App Store to report the price."
             )
         }
         .padding(EdgeInsets(top: 26, leading: 16, bottom: 18, trailing: 16))
