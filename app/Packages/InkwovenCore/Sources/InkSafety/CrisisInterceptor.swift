@@ -1,8 +1,11 @@
 import Foundation
 import InkCore
 
-/// Crisis handling (task F1). The proxy runs the classifier in parallel with
-/// the reply model; a `.crisis` chunk preempts the exchange: cancel renderers,
+/// Crisis handling (task F1). The proxy decides — a deterministic in-process
+/// screen over the writer's context and the assembled reply, plus the reply
+/// model's own `[[CRISIS]]` sentinel as the fast path (proxy/src/models.js,
+/// server.js). This type is the CLIENT half and contains no text matching of
+/// its own: a `.crisis` chunk preempts the exchange — cancel renderers,
 /// discard partial fiction, surface the payload plainly. The exchange is not
 /// billed as a moment.
 public enum CrisisVerdict: Equatable, Sendable {

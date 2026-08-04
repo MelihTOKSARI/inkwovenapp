@@ -53,16 +53,20 @@ Both files go in `app/proxy/`.
 
 ### 3.1 `Dockerfile`
 
-```dockerfile
-FROM node:20-slim
-WORKDIR /app
-ENV NODE_ENV=production
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-COPY src ./src
-EXPOSE 8787
-CMD ["node", "src/index.js"]
-```
+The real file is `app/proxy/Dockerfile` — read it there rather than from a
+copy that can drift (this section once showed a single-stage image running as
+root, which the actual Dockerfile has never been). What it does, and why CI
+asserts each of these independently (`.github/workflows/ci.yml`, `proxy-image`):
+
+- **base image pinned by digest**, not just the `-slim` tag, so two deploys
+  from one git SHA produce byte-identical images;
+- **multi-stage**: build tooling (`build-essential`, `node-gyp`) stays in a
+  throw-away stage and never reaches the runtime image;
+- **`npm ci --omit=dev`**, so `@flydotio/dockerfile` — scaffolding, and the
+  source of the only advisories left in the tree — cannot ship;
+- **runs as uid 1000**, never root;
+- `ENV NODE_ENV=production`, which is what makes `INK_ATTESTATION_MODE`
+  default to fail-closed (§6.5).
 
 ### 3.2 `fly.toml`
 
@@ -271,20 +275,28 @@ Defer this until wiring the server-side entitlement gate; echo mode and text rou
 
 ### 6.5 `INK_ATTESTATION_MODE` — identity mode (set it, or production 401s everything)
 
-Not an API key, but it lives with the secrets because it gates all of them. The auth seam (`app/proxy/src/attest.js`) resolves every request's `x-ink-user` header through a pluggable verifier and **fails closed**: with `NODE_ENV=production` (the Dockerfile sets it) and `INK_ATTESTATION_MODE` unset, the mode defaults to `required` — and since no App Attest verifier is bound yet, that rejects **every request with a 401**. The iOS app has no App Attest client either, so a production deploy without this variable is a proxy nobody can talk to (only the unauthenticated health routes answer).
+Not an API key, but it lives with the secrets because it gates all of them. The auth seam (`app/proxy/src/attest.js`) resolves every request's `x-ink-user` header through a pluggable verifier and **fails closed**: with `NODE_ENV=production` (the Dockerfile sets it) and `INK_ATTESTATION_MODE` unset, the mode defaults to `required`, which rejects every request with a 401.
 
-The two modes:
+The three modes:
 
-- **`anonymous`** — pass-through: the `x-ink-user` token is taken at face value as the identity. Always the default outside production, and correct for local dev. In production it means identity is client-claimed, so abuse control rests on the rate limits (per-user and per-IP) and on the budget caps at each model provider.
-- **`required`** — fail closed: reject everything until a real App Attest verifier is bound in code (the `REQUIRES A HUMAN` list at the top of `attest.js`). This is the production default *on purpose* — a missing secret can never silently downgrade identity to whatever string the client typed.
+- **`anonymous`** — pass-through: the `x-ink-user` token is taken at face value as the identity. The default outside production, correct for local dev, and **refused in production**: `index.js` exits at boot rather than run with identity anyone can mint, because a free identity voids every per-user control (wallets, free-clip caps, daily quotas, grant idempotency).
+- **`appattest`** — the real path (`app/proxy/src/appattest.js`): the device proves a Secure Enclave key against a server-issued challenge, the server mints an opaque identity, and requests carry a short-lived signed session token renewed by assertion. This is what v1 ships.
+- **`required`** — fail closed, rejecting everything. The production default until `appattest` is set.
 
 **v1 launch ships with:**
 
 ```sh
-fly secrets set INK_ATTESTATION_MODE=anonymous
+fly secrets set INK_ATTESTATION_MODE=appattest
+fly secrets set INK_APPATTEST_ROOT_CA="$(cat AppleAppAttestationRootCA.pem)"
+fly secrets set INK_TEAM_ID=77G7KM4549
+fly secrets set INK_SESSION_SECRET="$(openssl rand -base64 48)"
 ```
 
-plus **hard budget caps at each model provider** (§6.1–6.3, §8) as the backstop until App Attest lands. Once the verifier is bound and the app sends attestations, remove the secret (`fly secrets unset INK_ATTESTATION_MODE`) and production snaps back to fail-closed.
+`INK_BUNDLE_ID` is already required by receipt verification (§6.8) and is
+shared. The App Attest root CA is published at
+<https://www.apple.com/certificateauthority/> — download it; a certificate
+pasted from memory is not a trust anchor. Provider budget caps (§6.1–6.3, §8)
+remain the backstop behind identity, not a substitute for it.
 
 ### 6.6 `INK_MODEL_PRICING` — the rate card that makes cost logs real
 
@@ -432,8 +444,10 @@ Scaling later is one command each: `fly scale memory 512`, `fly scale count 2`, 
 - [ ] Client `ProxyClient` staging base URL pointed at the Fly URL; end-to-end echo exchange on device
 - [ ] Upstash + Neon provisioned (us-east), secrets set
 - [ ] `createRedisStores` swap implemented (rate limits, tickets, idempotency, wallet → durable)
-- [ ] Server-side entitlement gate (daily moment/image counters in Redis) — closes the client-only enforcement gap
-- [ ] `INK_ATTESTATION_MODE=anonymous` set (§6.5) — without it, production 401s every request
+- [ ] Server-side entitlement gate — daily moment/image quotas now enforced in `/v1/exchange` before the provider handshake (`LIMITS.plusExchangeDailyCeiling` &c.); prove it with a raw `curl` loop that gets 429 `daily_quota` with no app involved
+- [ ] `INK_ATTESTATION_MODE=appattest` + `INK_APPATTEST_ROOT_CA` + `INK_TEAM_ID` + `INK_SESSION_SECRET` set (§6.5) — without them production 401s every request, and `anonymous` will not boot at all. Prove attestation on a REAL device (the simulator cannot attest) and confirm a fabricated `x-ink-user` is refused
+- [ ] `INK_REPORT_WEBHOOK_URL` + `INK_ADMIN_TOKEN` set — guideline 1.2 obliges acting on reports within 24 hours; file one test report and confirm the alert lands and `GET /v1/admin/reports` serves it
+- [ ] App Store Server Notifications V2 URL pointed at `POST /v1/notifications` in App Store Connect; run a sandbox refund and confirm the wallet is debited and the tier dropped
 - [ ] Model provider keys set; real routing on for one Book; cost logs visible in `fly logs`
 - [ ] `fly secrets list` shows GEMINI_API_KEY, OPENAI_API_KEY, and FAL_API_KEY actually present — a missing key silently drops that Book to echo mode
 - [ ] `INK_APPLE_ROOT_CA` + `INK_BUNDLE_ID` set (§6.8) — without them every vial purchase 501s after the user has paid; buy one sandbox pack end to end to prove it

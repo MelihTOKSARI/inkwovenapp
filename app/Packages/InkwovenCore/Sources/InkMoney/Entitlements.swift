@@ -6,10 +6,13 @@ public enum Tier: String, Codable, Sendable {
     case plus
 }
 
-/// Snapshot of the user's entitlements. RevenueCat is the source of truth for
-/// `tier`; usage counters are server-authoritative (the proxy tracks them) —
-/// this snapshot is the client's cache for offline UX and is reconciled on
-/// every exchange. Client-side clocks never grant capacity.
+/// Snapshot of the user's entitlements. A verified StoreKit receipt is the
+/// source of truth for `tier`. The counters here are the CLIENT's own, and
+/// they drive the in-fiction gate — the paywall, the cooldown — so the room
+/// can answer instantly and offline. They are not the ceiling: the proxy
+/// enforces its own per-identity daily quotas (proxy/src/config.js LIMITS,
+/// checked before the provider handshake), which is what a scripted client
+/// meets. Client-side clocks never grant capacity.
 public struct EntitlementSnapshot: Equatable, Sendable {
     public var tier: Tier
     public var momentsUsedToday: Int

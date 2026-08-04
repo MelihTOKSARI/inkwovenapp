@@ -20,7 +20,7 @@ Other hard requirements — all already in your architecture:
 | RevenueCat SDK powering ≥1 IAP | ✅ Core plan (task A4: sub + credit packs + Bindery) |
 | Free trial or promo code for judges | ✅ 7-day trial on annual; also generate App Store promo codes + RC promotional entitlements |
 | Demo video ≤2 min | To make (see §5) |
-| Store URL, 1024² icon, 1179×2556 screenshots (no device frame) | Listing copy done (app-store-listing.md); screenshots pending (H6) |
+| Store URL, 1024² icon, 1179×2556 screenshots (no device frame) | Listing copy done (design/app-store-assets/listing.md); screenshots pending (H6) |
 
 Check the excluded-countries list in the official rules once to confirm Türkiye eligibility (standard Devpost exclusions are sanctions countries + Quebec/Brazil-type cases).
 
@@ -56,7 +56,7 @@ Perks unlock by milestone and arrive by email automatically. Sequence matters: *
 | **OpenRouter** $10 | Register | Model-routing experiments / eval harness (C1, C7) |
 | **Mobbin** 3 mo free | RC project created | Design reference library for Claude Design screens |
 | **AppScreens** 50% off | First test purchase | Store screenshots (H6) |
-| **AppTweak / AppFollow** 50% off | First store API call | Track the keyword sets already written in app-store-listing.md (incl. en-GB/CA/AU variants) |
+| **AppTweak / AppFollow** 50% off | First store API call | Track the keyword sets already written in design/app-store-assets/listing.md (incl. en-GB/CA/AU variants) |
 | **Noise** $1,000 UGC matching credits | Register | **Biggest marketing perk for you** — UGC creators filming the ink moment (§4) |
 | **Asapty** 30-day trial + ASA specialist | First test purchase | Apple Search Ads *keyword research only* — PRD rule stands: no paid spend until organic CAC/LTV exists |
 

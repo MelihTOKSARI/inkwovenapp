@@ -25,7 +25,7 @@ Inkwoven/
 └── InkwovenTests/           # + each package has its own test target
 ```
 
-Rules: `InkCore` imports Foundation only. No package imports `App`. All cross-package boundaries are protocols; live implementations injected in `App/DI.swift`. CI: `xcodebuild test` (app) + `swift test` (packages) on every commit.
+Rules: `InkCore` imports Foundation only. No package imports `App`. All cross-package boundaries are protocols; live implementations injected in `App/DI.swift`. CI runs `swift test` (packages) and `xcodebuild test -only-testing:InkwovenTests` (app target) on every commit; the UI tests stay local — one needs a hand-started proxy, the other drives the simulator keyboard.
 
 ## 2. Data model (InkData, SwiftData — task A2)
 
