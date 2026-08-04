@@ -66,6 +66,10 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   // subscription receipt. Expiry is the receipt's own; past it the identity
   // reads as free again until the client re-proves.
   const tiers = new Map();
+  // originalTransactionId → userID: how a REFUND/REVOKE notification finds
+  // the tier to drop — Apple's notification names the transaction, never
+  // our identity (audit M-4).
+  const tiersByTransaction = new Map();
   // `${dayKey}:${key}` → count. The per-identity and global daily exchange
   // quotas (audit M-2). Fixed-window by UTC day, refundable on the same
   // conditions that release a wallet hold.
@@ -179,6 +183,24 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       }
       if (owner === userID) return { claimed: true };
       return { error: 'receipt_already_redeemed' };
+    },
+
+    /** Who redeemed this transaction — the refund path's routing (audit M-4). */
+    transactionOwner(transactionID) {
+      return redeemedTransactions.get(transactionID) ?? null;
+    },
+
+    /**
+     * Debits a refunded purchase (audit M-4). The delta is negative and the
+     * balance MAY go negative: the credits were spent on real provider
+     * compute before Apple gave the money back, and a negative balance is
+     * what stops the same wallet spending them twice.
+     */
+    revoke(userID, amount, reason = 'refund') {
+      if (!validAmount(amount)) return { error: 'invalid_amount' };
+      const w = wallet(userID);
+      w.entries.push({ delta: -amount, reason, at: Date.now() });
+      return { revoked: amount, balance: balance(w) };
     },
 
     /**
@@ -512,9 +534,10 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     },
 
     /** Records a proved subscription tier until the receipt's own expiry. */
-    setTier(userID, tier, expiresAtMs) {
+    setTier(userID, tier, expiresAtMs, originalTransactionID = null) {
       if (expiresAtMs <= Date.now()) return { error: 'expired' };
       tiers.set(userID, { tier, expiresAt: expiresAtMs });
+      if (originalTransactionID) tiersByTransaction.set(String(originalTransactionID), userID);
       return { tier, expiresAt: expiresAtMs };
     },
 
@@ -531,6 +554,18 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     /** Drops a proved tier — the refund/revocation path (audit M-4). */
     clearTier(userID) {
       tiers.delete(userID);
+    },
+
+    /**
+     * Drops the tier bound to a subscription transaction (audit M-4): a
+     * REFUND/REVOKE notification names the transaction, and this resolves it
+     * to the identity whose quota must narrow. Returns that identity, or
+     * null when the transaction never proved a tier here.
+     */
+    clearTierByTransaction(originalTransactionID) {
+      const userID = tiersByTransaction.get(String(originalTransactionID)) ?? null;
+      if (userID) tiers.delete(userID);
+      return userID;
     },
   };
 }

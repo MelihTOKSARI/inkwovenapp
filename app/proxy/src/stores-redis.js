@@ -291,6 +291,33 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
       return { error: 'receipt_already_redeemed' };
     },
 
+    /** Who redeemed this transaction — the refund path's routing (audit M-4). */
+    async transactionOwner(transactionID) {
+      const { rows } = await pool.query(
+        'SELECT user_id FROM redeemed_transactions WHERE transaction_id = $1',
+        [transactionID],
+      );
+      return rows[0]?.user_id ?? null;
+    },
+
+    /**
+     * Debits a refunded purchase (audit M-4). The delta is negative and the
+     * balance MAY go negative: the credits were spent on real provider
+     * compute before Apple gave the money back, and a negative balance is
+     * what stops the same wallet spending them twice.
+     */
+    async revoke(userID, amount, reason = 'refund') {
+      if (!validAmount(amount)) return { error: 'invalid_amount' };
+      return withWallet(userID, async (client) => {
+        await client.query(
+          'INSERT INTO credit_entries (id, user_id, delta, reason) VALUES ($1, $2, $3, $4)',
+          [randomUUID(), userID, -amount, reason],
+        );
+        const { balance } = await view(client, userID);
+        return { revoked: amount, balance };
+      });
+    },
+
     /** Credits a verified vial purchase; amount comes from the server-side product map. */
     async grant(userID, amount, reason = 'purchase') {
       if (!validAmount(amount)) return { error: 'invalid_amount' };
@@ -434,11 +461,21 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
     },
 
     /** Records a proved subscription tier until the receipt's own expiry. */
-    async setTier(userID, tier, expiresAtMs) {
+    async setTier(userID, tier, expiresAtMs, originalTransactionID = null) {
       if (expiresAtMs <= Date.now()) return { error: 'expired' };
       // PXAT ties the record's life to the receipt's own expiry — a lapsed
       // subscription demotes itself with no sweeper to run.
       await redis.set(`tier:${keyPart(userID)}`, tier, 'PXAT', Math.floor(expiresAtMs));
+      if (originalTransactionID) {
+        // How a REFUND/REVOKE notification finds the tier to drop — Apple
+        // names the transaction, never our identity (audit M-4).
+        await redis.set(
+          `tiertxn:${keyPart(String(originalTransactionID))}`,
+          userID,
+          'PXAT',
+          Math.floor(expiresAtMs),
+        );
+      }
       return { tier, expiresAt: expiresAtMs };
     },
 
@@ -450,6 +487,16 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
     /** Drops a proved tier — the refund/revocation path (audit M-4). */
     async clearTier(userID) {
       await redis.del(`tier:${keyPart(userID)}`);
+    },
+
+    /**
+     * Drops the tier bound to a subscription transaction (audit M-4).
+     * Returns the identity it belonged to, or null when unknown here.
+     */
+    async clearTierByTransaction(originalTransactionID) {
+      const userID = await redis.get(`tiertxn:${keyPart(String(originalTransactionID))}`);
+      if (userID) await redis.del(`tier:${keyPart(userID)}`);
+      return userID ?? null;
     },
 
     /**

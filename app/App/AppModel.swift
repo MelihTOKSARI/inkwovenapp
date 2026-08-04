@@ -298,6 +298,8 @@ final class AppModel {
     private static let restoreFailure = "No binding was found for this hand."
     private static let deliveryPending =
         "The vials are paid for but still in the post. They will arrive when the road clears — open the app again in a moment."
+    private static let deliveryRejected =
+        "The purchase went through, but the vials could not be delivered to this notebook. Write to the binder from the Drawer — nothing is lost."
 
     private func observeCommerce() {
         entitlementTask = Task { [purchases] in
@@ -566,6 +568,11 @@ final class AppModel {
                 // transaction stays open, so StoreKit redelivers it — say so
                 // honestly rather than claiming a failure that lost the money.
                 self.purchaseState = .failed(Self.deliveryPending)
+            } catch CommerceError.deliveryRejected {
+                // The server refused the receipt terminally (audit M-4): the
+                // transaction is finished so it can never loop, and the way
+                // forward is a human, not a retry.
+                self.purchaseState = .failed(Self.deliveryRejected)
             } catch {
                 self.purchaseState = .failed(Self.purchaseFailure)
             }

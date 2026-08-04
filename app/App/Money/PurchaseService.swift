@@ -1,6 +1,7 @@
 import Foundation
 import StoreKit
 import InkMoney
+import InkNet
 
 /// What a purchase attempt did. `pending` is its own case on purpose: an
 /// Ask-to-Buy or SCA transaction exists but nothing is entitled yet, and
@@ -22,6 +23,10 @@ enum CommerceError: Error, Equatable {
     /// it yet. The transaction stays UNFINISHED, so StoreKit redelivers it on
     /// the next launch and the vials arrive then — nobody pays for nothing.
     case deliveryPending
+    /// The server refused the receipt TERMINALLY (revoked, already redeemed
+    /// by another identity, invalid). The transaction is finished so it can
+    /// never loop (audit M-4); the wallet was not credited.
+    case deliveryRejected
 }
 
 /// The App layer's purchase seam. It extends `EntitlementProviding` rather
@@ -181,14 +186,22 @@ actor StoreKitEntitlementStore: PurchaseServicing {
                 throw CommerceError.unverified
             }
             // The wallet is server-side, so the purchase is not done until the
-            // proxy has credited it. A failed delivery leaves the transaction
-            // unfinished for redelivery — never finished-and-lost.
-            guard await deliver(verification, transaction: transaction) else {
+            // proxy has credited it. A transient failure leaves the
+            // transaction unfinished for redelivery; a TERMINAL refusal
+            // finishes it so it can never loop (audit M-4) and reports
+            // honestly rather than pretending vials arrived.
+            switch await deliver(verification, transaction: transaction) {
+            case .credited:
+                await transaction.finish()
+                await refresh()
+                return .success
+            case .terminal:
+                await transaction.finish()
+                await refresh()
+                throw CommerceError.deliveryRejected
+            case .retry:
                 throw CommerceError.deliveryPending
             }
-            await transaction.finish()
-            await refresh()
-            return .success
         case .pending:
             // Ask to Buy / SCA. Entitlement arrives (if ever) through
             // `Transaction.updates`, never from here.
@@ -212,23 +225,44 @@ actor StoreKitEntitlementStore: PurchaseServicing {
 
     // MARK: - Internals
 
+    /// What one delivery attempt concluded (audit M-4).
+    private enum DeliveryOutcome {
+        /// The server credited the wallet — finish and celebrate.
+        case credited
+        /// The server refused TERMINALLY (revoked receipt, redeemed by
+        /// another identity, invalid) — finish WITHOUT crediting, or
+        /// StoreKit re-presents the same doomed transaction on every
+        /// launch, forever.
+        case terminal
+        /// Transient (offline, 5xx, rate limit) — stay unfinished so
+        /// StoreKit redelivers and the vials arrive when the road clears.
+        case retry
+    }
+
     private func apply(_ result: VerificationResult<StoreKit.Transaction>) async {
         guard case .verified(let transaction) = result else { return }
+        // A refunded or revoked transaction buys nothing and must be
+        // FINISHED (audit M-4): re-submitting it earns 400 revoked_receipt
+        // every launch forever, and the queue never drains.
+        if transaction.revocationDate != nil {
+            await transaction.finish()
+            await refresh()
+            return
+        }
         // A consumable that nobody took delivery of must stay unfinished:
         // StoreKit redelivers an unfinished transaction on the next launch,
         // but a finished one is gone for good. This is the path that redeems a
         // purchase whose delivery failed the first time.
-        guard await deliver(result, transaction: transaction) else {
-            await refresh()
-            return
+        switch await deliver(result, transaction: transaction) {
+        case .credited, .terminal:
+            await transaction.finish()
+        case .retry:
+            break
         }
-        await transaction.finish()
         await refresh()
     }
 
-    /// Sends a verified consumable to the server-side wallet. Returns false
-    /// when the transaction must stay open for redelivery — no delivery bound,
-    /// or the server did not accept it.
+    /// Sends a verified consumable to the server-side wallet.
     ///
     /// Idempotency is the server's: the transaction id is the key, so a
     /// redelivered purchase credits exactly once no matter how many times this
@@ -236,9 +270,9 @@ actor StoreKitEntitlementStore: PurchaseServicing {
     private func deliver(
         _ result: VerificationResult<StoreKit.Transaction>,
         transaction: StoreKit.Transaction
-    ) async -> Bool {
-        guard ProductID.consumables.contains(transaction.productID) else { return true }
-        guard let delivery else { return false }
+    ) async -> DeliveryOutcome {
+        guard ProductID.consumables.contains(transaction.productID) else { return .credited }
+        guard let delivery else { return .retry }
         do {
             try await delivery.deliver(VialGrant(
                 productID: transaction.productID,
@@ -246,9 +280,28 @@ actor StoreKitEntitlementStore: PurchaseServicing {
                 jws: result.jwsRepresentation
             ))
             for continuation in grantObservers.values { continuation.yield(()) }
-            return true
+            return .credited
+        } catch let error as ProxyError {
+            return Self.outcome(for: error)
         } catch {
-            return false
+            return .retry
+        }
+    }
+
+    /// 4xx application answers are TERMINAL — retrying an invalid, revoked,
+    /// or already-redeemed receipt can never succeed (audit M-4/T1). A rate
+    /// limit is 4xx on the wire and transient in nature, so it retries; so
+    /// does everything 5xx, offline, or transport-shaped.
+    private static func outcome(for error: ProxyError) -> DeliveryOutcome {
+        switch error {
+        case .server(let status) where (400..<500).contains(status):
+            return .terminal
+        case .moderated, .paymentRequired:
+            // 422/402 are 4xx too — the grant route never answers them
+            // semantically, but if one arrives it is equally unretryable.
+            return .terminal
+        case .rateLimited, .offline, .transport, .server, .badResponse, .cancelled:
+            return .retry
         }
     }
 

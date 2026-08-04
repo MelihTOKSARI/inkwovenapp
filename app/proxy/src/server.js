@@ -11,7 +11,7 @@ import { BOOKS, findBook, publicBook } from './books.js';
 import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
-import { createReceiptVerifier, ReceiptError } from './receipts.js';
+import { createNotificationVerifier, createReceiptVerifier, ReceiptError } from './receipts.js';
 import { keyPart } from './keys.js';
 import {
   createTextProviderFactory,
@@ -350,6 +350,10 @@ export function build(options = {}) {
   // Human alerting for filed reports (audit S-7); null means unconfigured,
   // and the report route still files — alerting is additive, never a gate.
   const notifyReport = 'notifyReport' in options ? options.notifyReport : createReportNotifier(env);
+  // App Store Server Notifications V2 (audit M-4): same trust anchor as the
+  // receipt verifier; null answers 501 rather than trusting anything.
+  const verifyNotification =
+    'verifyNotification' in options ? options.verifyNotification : createNotificationVerifier(env);
   // Operator token for the triage route. No default: unset means the route
   // answers 501 rather than trusting anything.
   const adminToken = env.INK_ADMIN_TOKEN ?? null;
@@ -399,7 +403,9 @@ export function build(options = {}) {
   // The triage route authenticates with the OPERATOR token, not a user
   // identity — in `required` attestation mode no operator could otherwise
   // reach it. The route itself fails closed without INK_ADMIN_TOKEN.
-  const ADMIN_ROUTES = new Set(['/v1/admin/reports']);
+  // /v1/notifications is Apple's servers calling in: its authentication is
+  // the signed payload itself, verified against the same root as receipts.
+  const ADMIN_ROUTES = new Set(['/v1/admin/reports', '/v1/notifications']);
 
   // -- auth hook -------------------------------------------------------------
   app.addHook('onRequest', async (request, reply) => {
@@ -1291,12 +1297,94 @@ export function build(options = {}) {
         return reply.code(400).send({ error: 'expired_receipt' });
       }
 
-      const result = await stores.setTier(request.userID, 'plus', expiresAt);
+      // The original transaction id is what a REFUND/REVOKE notification
+      // will name (audit M-4) — bind it so the tier can be found and dropped.
+      const result = await stores.setTier(
+        request.userID,
+        'plus',
+        expiresAt,
+        claims.originalTransactionId ?? claims.transactionId,
+      );
       if (result.error) return reply.code(400).send({ error: 'expired_receipt' });
       request.log?.info?.({ route: 'entitlement', product: productID });
       return { tier: 'plus', expiresAt: new Date(expiresAt).toISOString() };
     },
   );
+
+  // -- POST /v1/notifications: App Store Server Notifications V2 (audit M-4) -
+  //
+  // Before this route existed the proxy was never told about a refund: a
+  // user could buy 20 vials, spend them on real provider compute, refund
+  // through Apple, and the wallet was untouched — repeatable. Apple signs
+  // the envelope; verification against the pinned root IS the
+  // authentication, so the route skips the user-token hook. Answer 2xx
+  // fast on everything understood — Apple retries non-2xx with backoff.
+  app.post('/v1/notifications', { bodyLimit: LIMITS.grantBodyLimit }, async (request, reply) => {
+    if (!verifyNotification || !verifyReceipt) {
+      request.log?.error?.({ route: 'notifications', error: 'verification_unbound' });
+      return reply.code(501).send({ error: 'verification_unbound' });
+    }
+    const signedPayload = request.body?.signedPayload;
+    if (typeof signedPayload !== 'string' || !signedPayload) {
+      return reply.code(400).send({ error: 'missing_payload' });
+    }
+
+    let envelope;
+    try {
+      envelope = verifyNotification(signedPayload);
+    } catch (error) {
+      const code = error instanceof ReceiptError ? error.code : 'invalid_notification';
+      request.log?.warn?.({ route: 'notifications', reject: code });
+      return reply.code(401).send({ error: 'invalid_notification' });
+    }
+
+    const type = envelope.notificationType;
+    if (type !== 'REFUND' && type !== 'REVOKE') {
+      // Renewals and expiry need nothing here: the tier record carries the
+      // receipt's own expiry, and the client re-proves on refresh.
+      request.log?.info?.({ route: 'notifications', type, acted: false });
+      return { received: true };
+    }
+
+    let txn;
+    try {
+      txn = verifyReceipt(envelope.data?.signedTransactionInfo);
+    } catch (error) {
+      const code = error instanceof ReceiptError ? error.code : 'invalid_transaction';
+      request.log?.warn?.({ route: 'notifications', type, reject: code });
+      return reply.code(401).send({ error: 'invalid_notification' });
+    }
+
+    const productID = txn.productId;
+    const transactionID = String(txn.transactionId);
+    if (VIAL_GRANTS[productID]) {
+      // A refunded consumable claws its credits back from whoever redeemed
+      // it. Idempotent by key so Apple's retries debit exactly once.
+      const owner = await stores.transactionOwner(transactionID);
+      if (owner) {
+        const result = await stores.idempotent(owner, `refund:${transactionID}`, () =>
+          stores.revoke(owner, VIAL_GRANTS[productID], 'refund'),
+        );
+        request.log?.info?.({
+          route: 'notifications', type, product: productID,
+          debited: result?.revoked ?? 0,
+        });
+      } else {
+        // Never redeemed here — nothing was granted, nothing to claw back.
+        request.log?.info?.({ route: 'notifications', type, product: productID, debited: 0 });
+      }
+    } else if (PLUS_PRODUCTS.has(productID)) {
+      const cleared = await stores.clearTierByTransaction(
+        txn.originalTransactionId ?? txn.transactionId,
+      );
+      request.log?.info?.({
+        route: 'notifications', type, product: productID, tierCleared: Boolean(cleared),
+      });
+    } else {
+      request.log?.warn?.({ route: 'notifications', type, product: productID, acted: false });
+    }
+    return { received: true };
+  });
 
   // -- POST /v1/credits/grant: a verified vial purchase reaches the ledger ---
   //
