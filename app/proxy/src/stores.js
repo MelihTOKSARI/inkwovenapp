@@ -288,6 +288,19 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
       return count;
     },
 
+    /**
+     * Un-expired reports for triage (audit S-7), newest first. This is what
+     * the operator route reads — before it existed the table had no reader
+     * at all, and rows were swept unread at ninety days.
+     */
+    listReports(limit = 200) {
+      sweepReports(Date.now());
+      return [...reports.values()]
+        .sort((a, b) => b.expiresAt - a.expiresAt)
+        .slice(0, limit)
+        .map((entry) => ({ userID: entry.userID, ...entry.report }));
+    },
+
     /** The retention sweep, callable with a clock so tests can exercise it. */
     sweepExpiredReports(now = Date.now()) {
       return sweepReports(now);

@@ -492,6 +492,30 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
       return Number(rows[0].n);
     },
 
+    /**
+     * Un-expired reports for triage (audit S-7), newest first. This is what
+     * the operator route reads — before it existed the table had no reader
+     * at all, and rows were swept unread at ninety days.
+     */
+    async listReports(limit = 200) {
+      const { rows } = await pool.query(
+        `SELECT id, user_id, book_id, reason, payload, filed_at,
+                encode(snapshot, 'base64') AS snapshot_base64
+         FROM reports WHERE expires_at > now()
+         ORDER BY filed_at DESC LIMIT $1`,
+        [limit],
+      );
+      return rows.map((row) => ({
+        userID: row.user_id,
+        reportID: row.id,
+        bookID: row.book_id,
+        reason: row.reason,
+        filedAt: row.filed_at,
+        snapshotBase64: row.snapshot_base64,
+        ...row.payload,
+      }));
+    },
+
     /** The retention sweep, callable with a clock so tests can exercise it. */
     async sweepExpiredReports(now = Date.now()) {
       return sweepReports(now);

@@ -287,6 +287,32 @@ function secondsToUTCMidnight(now = Date.now()) {
   return Math.max(1, Math.ceil((next.getTime() - now) / 1000));
 }
 
+/**
+ * Notifies a human that a report was filed (audit S-7). Reports used to
+ * INSERT into a table nobody read, swept unread at ninety days, while the
+ * sheet promised "this page goes to a human hand for review" — and guideline
+ * 1.2 obliges acting within 24 hours. The webhook (INK_REPORT_WEBHOOK_URL,
+ * Slack-compatible {text}) carries counts and categories ONLY, never report
+ * content: the page snapshot and reply stay in the store for the
+ * authenticated triage route. Fire-and-forget with a short timeout — a slow
+ * webhook must never slow the reporter's 200.
+ */
+function createReportNotifier(env = process.env) {
+  const url = env.INK_REPORT_WEBHOOK_URL;
+  if (!url) return null;
+  return async function notify({ reason, bookID, openReports }) {
+    const text =
+      `Inkwoven report filed — reason: ${reason}, book: ${bookID}. ` +
+      `${openReports} open report${openReports === 1 ? '' : 's'} awaiting triage (GET /v1/admin/reports).`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(3_000),
+    });
+  };
+}
+
 export function build(options = {}) {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -321,6 +347,12 @@ export function build(options = {}) {
   // rather than crediting a wallet from claims anyone can write.
   const verifyReceipt =
     'verifyReceipt' in options ? options.verifyReceipt : createReceiptVerifier(env);
+  // Human alerting for filed reports (audit S-7); null means unconfigured,
+  // and the report route still files — alerting is additive, never a gate.
+  const notifyReport = 'notifyReport' in options ? options.notifyReport : createReportNotifier(env);
+  // Operator token for the triage route. No default: unset means the route
+  // answers 501 rather than trusting anything.
+  const adminToken = env.INK_ADMIN_TOKEN ?? null;
   // Overridable so the tests can exercise the deadline and the heartbeat
   // without waiting out the production intervals.
   const streamDeadlineMS = options.streamDeadlineMS ?? LIMITS.streamDeadlineMS;
@@ -364,9 +396,15 @@ export function build(options = {}) {
     }
   });
 
+  // The triage route authenticates with the OPERATOR token, not a user
+  // identity — in `required` attestation mode no operator could otherwise
+  // reach it. The route itself fails closed without INK_ADMIN_TOKEN.
+  const ADMIN_ROUTES = new Set(['/v1/admin/reports']);
+
   // -- auth hook -------------------------------------------------------------
   app.addHook('onRequest', async (request, reply) => {
-    if (HEALTH_ROUTES.has(request.url.split('?')[0])) return;
+    const path = request.url.split('?')[0];
+    if (HEALTH_ROUTES.has(path) || ADMIN_ROUTES.has(path)) return;
     const token = request.headers['x-ink-user'];
     if (!token || typeof token !== 'string' || token.length > 256) {
       return reply.code(401).send({ error: 'missing_user_token' });
@@ -1374,9 +1412,46 @@ export function build(options = {}) {
       if (result.error) return reply.code(400).send(result);
       // A counter only: the report's content goes to the store, never the log.
       request.log?.info?.({ route: 'report', book: body.bookID, reason: body.reason });
+      // A human hears about it (audit S-7). Fire-and-forget: the reporter's
+      // ack never waits on the webhook, and a webhook failure is logged, not
+      // surfaced — the report itself is already safely filed.
+      if (notifyReport) {
+        Promise.resolve()
+          .then(async () =>
+            notifyReport({
+              reason: body.reason,
+              bookID: body.bookID,
+              openReports: await stores.reportCount(),
+            }),
+          )
+          .catch((error) => {
+            request.log?.warn?.({ route: 'report', stage: 'notify', error: String(error) });
+          });
+      }
       return result;
     },
   );
+
+  // -- GET /v1/admin/reports: the triage reader (audit S-7) ------------------
+  // Authenticated by the OPERATOR token, never a user identity, so it works
+  // under `required` attestation. Fails closed when unconfigured. This is
+  // where "this page goes to a human hand for review" becomes true: the
+  // webhook says a report exists, this route shows it.
+  app.get('/v1/admin/reports', async (request, reply) => {
+    if (!adminToken) {
+      return reply.code(501).send({ error: 'admin_unconfigured' });
+    }
+    const presented = request.headers['x-ink-admin'];
+    if (
+      typeof presented !== 'string' ||
+      presented.length !== adminToken.length ||
+      !timingSafeEqual(Buffer.from(presented), Buffer.from(adminToken))
+    ) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    const reports = await stores.listReports();
+    return { count: reports.length, reports };
+  });
 
   return app;
 }
