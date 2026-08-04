@@ -94,6 +94,10 @@ final class PageInteractor {
     private let analytics: Analytics
     private let book: BookID
     private let archive: (any PageArchiving)?
+    /// Where unsent work survives the view (audit D-1): every rest, keystroke
+    /// pause, and scene-phase change writes here; `attach(canvas:)` reads it
+    /// back. Nil in harnesses that must not touch the user's drafts.
+    private let drafts: (any PageDraftStoring)?
     /// Tier + durable daily counters. Both halves come from one accounting, so
     /// the gate can never read a count the completed exchange never records.
     private let entitlements: PageEntitlements
@@ -105,6 +109,7 @@ final class PageInteractor {
     private var machine = IdleSendMachine(speculateAfter: 2.5, commitAfter: 4.0)
     private weak var canvas: PKCanvasView?
     private var tickTask: Task<Void, Never>?
+    private var draftSaveTask: Task<Void, Never>?
     private var exchangeTask: Task<Void, Never>?
     /// The in-flight generation (task J4). Held so leaving the page cancels
     /// it — and cancelling is what makes the server release the hold.
@@ -159,6 +164,7 @@ final class PageInteractor {
         analytics: Analytics,
         book: BookID = .oracle,
         archive: (any PageArchiving)? = nil,
+        drafts: (any PageDraftStoring)? = nil,
         entitlements: PageEntitlements = LiveCommerce.page,
         memory: any MemoryProviding = EmptyMemoryProvider()
     ) {
@@ -166,6 +172,7 @@ final class PageInteractor {
         self.analytics = analytics
         self.book = book
         self.archive = archive
+        self.drafts = drafts
         self.entitlements = entitlements
         self.memory = memory
     }
@@ -175,7 +182,22 @@ final class PageInteractor {
         if let drawing = pendingRestore {
             pendingRestore = nil
             restore(drawing)
+            return
         }
+        // Rehydrate the unsent page (audit D-1): the view — and this
+        // interactor — die on every navigation, so whatever the writer left
+        // unsent comes back from the draft store, accounted strokes and all.
+        guard let draft = drafts?.load(book: book) else { return }
+        if let drawing = try? PKDrawing(data: draft.strokeData), !drawing.strokes.isEmpty {
+            canvas.drawing = drawing
+            // The delegate saw the restore as grown stroke count and may have
+            // armed the rest cadence; restored ink is not freshly rested ink.
+            tickTask?.cancel()
+            machine.reset()
+        }
+        typedDraft = draft.typedText
+        sentStrokeCount = min(draft.accountedStrokeCount, canvas.drawing.strokes.count)
+        canvas.undoManager?.removeAllActions()
     }
 
     // MARK: - Revisiting a remembered page
@@ -233,6 +255,9 @@ final class PageInteractor {
         previousDigest = nil
         canvas.undoManager?.removeAllActions()
         status = .answered
+        // The revisited page becomes the standing draft, fully accounted —
+        // a relaunch shows it exactly as it stands, and re-sends nothing.
+        saveDraftNow()
     }
 
     // MARK: - Stroke events from the canvas
@@ -244,11 +269,48 @@ final class PageInteractor {
     }
 
     func strokeEnded() {
+        scheduleDraftSave()
         perform(machine.handle(.strokeEnded(at: Date())))
         // A held page absorbs stroke events without arming the send timer.
         guard machine.state != .held else { return }
         status = .resting
         startTicking()
+    }
+
+    /// Any canvas mutation — a new stroke, an erase, an undo — refreshes the
+    /// draft on disk, so what survives a relaunch is what the page shows.
+    func canvasContentChanged() {
+        scheduleDraftSave()
+    }
+
+    /// Coalesced draft write (audit D-1): strokes and keystrokes arrive in
+    /// bursts, and every save re-encodes the whole drawing.
+    private func scheduleDraftSave() {
+        guard drafts != nil else { return }
+        draftSaveTask?.cancel()
+        draftSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            self.saveDraftNow()
+        }
+    }
+
+    /// Immediate draft write — scene-phase changes and teardown cannot wait
+    /// out the coalescing window. An empty page clears the file instead.
+    func saveDraftNow() {
+        guard let drafts else { return }
+        draftSaveTask?.cancel()
+        let drawing = canvas?.drawing ?? PKDrawing()
+        if drawing.strokes.isEmpty,
+           typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            drafts.clear(book: book)
+            return
+        }
+        drafts.save(PageDraft(
+            strokeData: drawing.dataRepresentation(),
+            typedText: typedDraft,
+            accountedStrokeCount: min(sentStrokeCount, drawing.strokes.count)
+        ), book: book)
     }
 
     private func startTicking() {
@@ -306,9 +368,13 @@ final class PageInteractor {
     var typedDraft = ""
 
     func typedDraftChanged() {
-        guard machine.state != .held else { return }
+        guard machine.state != .held else {
+            scheduleDraftSave()
+            return
+        }
         if typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // The draft was erased entirely; nothing waits to send.
+            scheduleDraftSave()
             tickTask?.cancel()
             gateTask?.cancel()
             if canCancelSend {
@@ -627,7 +693,15 @@ final class PageInteractor {
             if completed {
                 completeExchange()
                 status = .answered
-            } else if !preempted {
+            } else if preempted {
+                // "Keeps the user's ink" in fact, not just in comment (audit
+                // D-5): the send accounting rolls back so the standing
+                // strokes read as unsent, and the draft is flushed to disk
+                // before the navigation to the crisis screen tears the view
+                // down. Returning to the Book finds the page as written.
+                rollbackSend()
+                saveDraftNow()
+            } else {
                 rollbackSend()
                 status = Self.declineStatus(for: .badResponse)
             }
@@ -662,6 +736,7 @@ final class PageInteractor {
         sentStrokeCount = sentBase
         sentDrawing = nil
         sentTypedText = nil
+        scheduleDraftSave()
     }
 
     /// The page is being torn down (audit D-4): the stream must die with it,
@@ -669,6 +744,9 @@ final class PageInteractor {
     /// nowhere — the weak canvas is already gone by completion. Cancelling
     /// propagates the disconnect, and the proxy releases instead of settling.
     func pageWillDisappear() {
+        // The draft outlives the view (audit D-1) — flush before the canvas
+        // reference dies with it.
+        saveDraftNow()
         tickTask?.cancel()
         gateTask?.cancel()
         exchangeTask?.cancel()
@@ -936,5 +1014,8 @@ final class PageInteractor {
         canvas.undoManager?.registerUndo(withTarget: canvas) { target in
             MainActor.assumeIsolated { target.drawing = current }
         }
+        // The absorbed page left the canvas; the draft follows — an empty
+        // page clears the file, a kept tail persists as the new draft.
+        saveDraftNow()
     }
 }

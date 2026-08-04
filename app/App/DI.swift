@@ -14,6 +14,9 @@ final class AppDI {
     let analytics: Analytics
     let keeperAuth: any KeeperAuthenticating
     let archive = PageArchive()
+    /// Unsent ink between launches (audit D-1). Sibling of the archive: same
+    /// directory discipline, same protection class, Keeper backup-excluded.
+    let drafts = PageDraftStore()
     let ritual = RitualScheduler()
     /// Retained for the app's lifetime — the notification centre holds its
     /// delegate weakly, and a deallocated delegate silently drops the tap

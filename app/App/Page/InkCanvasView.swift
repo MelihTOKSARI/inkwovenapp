@@ -120,7 +120,10 @@ struct InkCanvasView: UIViewRepresentable {
         nonisolated func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             MainActor.assumeIsolated {
                 // Fires on every mutation; only a grown stroke count is a
-                // finished stroke (undo/erase/clear also land here).
+                // finished stroke (undo/erase/clear also land here). Every
+                // mutation refreshes the draft though — an erase or an undo
+                // must not resurrect on the next launch (audit D-1).
+                interactor.canvasContentChanged()
                 let count = canvasView.drawing.strokes.count
                 defer { strokeCount = count }
                 guard count > strokeCount else { return }

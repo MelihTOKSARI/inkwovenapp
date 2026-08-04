@@ -101,12 +101,14 @@ final class KeyboardAuditUITests: XCTestCase {
         ]
         app.launch()
 
-        // One surface, two hands: with no pencil, the ink canvas itself
-        // takes keyboard focus on its own, and typed words feed the same
-        // rest cadence as ink (status → resting).
+        // One surface, two hands: with no pencil, a deliberate tap on the
+        // page focuses its text layer — pen-first means the page never
+        // summons the keys itself — and typed words feed the same rest
+        // cadence as ink (status → resting).
         let canvas = app.otherElements["ink-canvas"].firstMatch
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "the page should be open")
-        Thread.sleep(forTimeInterval: 2)
+        canvas.tap()
+        Thread.sleep(forTimeInterval: 1)
         app.typeText("hello, page")
         // The canvas's value is PageView.spokenStatus — in-fiction copy, not
         // the enum case name. "still settling" appears only in the resting

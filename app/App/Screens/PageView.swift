@@ -33,6 +33,7 @@ struct PageView: View {
     @State private var showingVials = false
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Read through the model, not captured at init: choosing a hand on the
     /// hand card must re-ink the opener and the replies while the page is
@@ -49,7 +50,8 @@ struct PageView: View {
         self.analytics = di.analytics
         self.di = di
         _interactor = State(initialValue: PageInteractor(
-            proxy: di.proxy, analytics: di.analytics, book: model.activeBookID, archive: di.archive
+            proxy: di.proxy, analytics: di.analytics, book: model.activeBookID,
+            archive: di.archive, drafts: di.drafts
         ))
     }
 
@@ -148,6 +150,11 @@ struct PageView: View {
         // canvas: moment spent, reply filed nowhere (audit D-4). Cancelling
         // here propagates the disconnect, and the server releases the hold.
         .onDisappear { interactor.pageWillDisappear() }
+        // Jetsam gives no warning; leaving the foreground is the last
+        // reliable moment to put the unsent page on disk (audit D-1).
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { interactor.saveDraftNow() }
+        }
     }
 
     /// The exchange currently standing on the reply pane, when — and only

@@ -8,6 +8,9 @@ struct DrawerView: View {
     @Bindable var model: AppModel
     let archive: PageArchive
     let analytics: Analytics
+    /// "Delete all pages" must cover the unsent ones too (audit D-1): a
+    /// draft is the user's ink as much as an archived page is.
+    var drafts: (any PageDraftStoring)?
     @Environment(\.room) private var room
 
     /// A generated export, ready for the share sheet.
@@ -596,6 +599,10 @@ struct DrawerView: View {
                     .buttonStyle(PressScaleStyle())
                     Button {
                         let clean = archive.deleteAll()
+                        // The unsent pages go with the archived ones — a
+                        // draft left behind would resurrect on the next
+                        // page visit after "delete all" promised otherwise.
+                        drafts?.deleteAll()
                         model.revisit = nil
                         model.showDeleteConfirm = false
                         drawerNote = clean
