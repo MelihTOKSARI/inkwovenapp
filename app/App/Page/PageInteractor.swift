@@ -703,7 +703,7 @@ final class PageInteractor {
     /// In-fiction copy for a clip that did not develop. The refund promise is
     /// stated plainly — it is the one thing the reader must be able to trust.
     private static func videoDeclineCopy(for error: ProxyError) -> String {
-        switch DeclineMapper.map(error) {
+        switch DeclineMapper.map(error, surface: .video) {
         case .pageDeclines:
             "The page will not picture this one. Your vial is untouched."
         case .inkMustRest:
@@ -714,6 +714,10 @@ final class PageInteractor {
             "The vials are empty, and your gifted moments are spent. Nothing was charged."
         case .inkRanDry:
             "The picture would not settle. Your vial has been returned."
+        case .crisisSuspect:
+            // Unreachable on the video surface — the mapper reserves this for
+            // ink — but the copy stays honest if that ever changes.
+            "The page will not picture this one. Your vial is untouched."
         }
     }
 
@@ -742,7 +746,7 @@ final class PageInteractor {
     /// Stringifying the mapped state threw the seconds away and offered a "try
     /// again" button that re-429s immediately.
     private static func declineStatus(for error: ProxyError) -> PageStatus {
-        switch DeclineMapper.map(error) {
+        switch DeclineMapper.map(error, surface: .ink) {
         case .inkMustRest(let seconds): .cooldown(seconds ?? 60)
         case .pageDeclines: .declined("pageDeclines")
         case .pageIsQuiet: .declined("pageIsQuiet")
@@ -751,8 +755,19 @@ final class PageInteractor {
         // disagreement rather than an empty purse — decline in fiction and let
         // the reader try again, never send them to a shop they don't need.
         case .vialsEmpty: .declined("inkRanDry")
+        // Provider moderation of the writer's own page (audit S-1): the most
+        // explicit disclosures are exactly the ones the provider blocks before
+        // the Book can answer, so this routes to the crisis card — real
+        // resources, no retry button — never to "the spirit is distant".
+        case .crisisSuspect: .crisis(Self.moderatedCrisisMessage)
         }
     }
+
+    /// Shown when a provider block routes to the crisis card. CrisisView
+    /// carries its own full copy; this string is the status's payload, kept
+    /// for parity with a server-sent crisis.
+    private static let moderatedCrisisMessage =
+        "Let’s set the story down for a moment. Please reach out to a real person who can be with you in this."
 
     /// `.exchangeComplete`: archive the strokes to the page record, then
     /// REMOVE them from the live canvas — absorption ends in removal, never

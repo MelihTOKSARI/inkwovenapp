@@ -69,20 +69,25 @@ struct CrisisTests {
 
 @Suite("In-fiction decline mapping (tasks C6/F2)")
 struct DeclineMapperTests {
-    @Test("moderation → soft decline, never auto-retried, no category detail")
+    @Test("moderated ink is crisis-suspect; a moderated picture just declines (audit S-1)")
     func moderationSoftDeclines() {
-        #expect(DeclineMapper.map(.moderated) == .pageDeclines)
+        // The most explicit self-harm disclosures are exactly the ones the
+        // provider blocks before the Book can answer — on the ink path that
+        // must surface the crisis card, never a shrug with a retry button.
+        #expect(DeclineMapper.map(.moderated, surface: .ink) == .crisisSuspect)
+        #expect(DeclineMapper.map(.moderated, surface: .image) == .pageDeclines)
+        #expect(DeclineMapper.map(.moderated, surface: .video) == .pageDeclines)
         #expect(!DeclineMapper.mayAutoRetry(.moderated))
     }
 
     @Test("rate limit → the ink must rest")
     func rateLimitRests() {
-        #expect(DeclineMapper.map(.rateLimited(retryAfterSeconds: 30)) == .inkMustRest(seconds: 30))
+        #expect(DeclineMapper.map(.rateLimited(retryAfterSeconds: 30), surface: .ink) == .inkMustRest(seconds: 30))
     }
 
     @Test("offline → the page is quiet; transport may retry")
     func offlineQuiet() {
-        #expect(DeclineMapper.map(.offline) == .pageIsQuiet)
+        #expect(DeclineMapper.map(.offline, surface: .ink) == .pageIsQuiet)
         #expect(DeclineMapper.mayAutoRetry(.offline))
         #expect(DeclineMapper.mayAutoRetry(.transport("reset")))
     }
