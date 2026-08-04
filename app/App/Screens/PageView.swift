@@ -518,7 +518,10 @@ struct PageView: View {
             // the whole rest window and a send attempt to be told the spirit
             // was distant, with a retry that could never succeed.
             if net.isOffline {
-                QuietBanner(text: "the road is dark — write on; the page carries when the way opens")
+                // Says what is true (audit D-10): the ink is kept — drafts
+                // persist now — but nothing queues itself, so the page waits
+                // for a hand to send it rather than promising to travel alone.
+                QuietBanner(text: "the road is dark — write on; your ink is kept, and sends when the way opens")
                     .transition(.opacity)
             } else {
                 EmptyView()
@@ -578,7 +581,7 @@ struct PageView: View {
     /// about a problem that was simply airplane mode.
     private var declineCopy: String {
         net.isOffline
-            ? "The road is dark tonight — no page can travel it. Your ink is safe here, and will go when the way opens."
+            ? "The road is dark tonight — no page can travel it. Your ink is safe here; ask again when the way opens."
             : "The spirit is distant tonight. Your page is safe — I will answer when the candle steadies."
     }
 

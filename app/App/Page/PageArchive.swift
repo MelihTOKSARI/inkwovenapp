@@ -220,14 +220,41 @@ final class PageArchive: PageArchiving {
         do {
             return .loaded(try JSONDecoder().decode([Entry].self, from: data))
         } catch {
-            // Readable but not decodable: move it aside before anything writes
-            // over it, so a corrupt store is recoverable instead of silently
-            // replaced by the next page. Only the error's type is logged —
-            // never the bytes, which are the user's pages.
+            // The whole journal is one JSON array, so a single bad byte used
+            // to take every page with it (audit D-7). Try to salvage the
+            // entries that still decode before giving up: decode the array
+            // leniently, keeping what survives.
+            if let salvaged = salvage(data), !salvaged.isEmpty {
+                log.error("archive partly corrupt; salvaged \(salvaged.count, privacy: .public) pages")
+                quarantine(url) // the original stays recoverable
+                return .loaded(salvaged)
+            }
+            // Nothing decodable: move it aside before anything writes over it,
+            // so a corrupt store is recoverable instead of silently replaced
+            // by the next page. Only the error's type is logged — never the
+            // bytes, which are the user's pages.
             log.error("archive corrupt, quarantining: \(String(describing: type(of: error)), privacy: .public)")
             quarantine(url)
             return .absent
         }
+    }
+
+    /// Decodes an array element-wise, dropping only what cannot be read. One
+    /// truncated entry costs the user that entry, not their whole journal.
+    private static func salvage(_ data: Data) -> [Entry]? {
+        // `[FailableEntry]` decodes the outer array even when members fail;
+        // a malformed OUTER array still throws, which is the real total loss
+        // and falls through to quarantine.
+        struct FailableEntry: Decodable {
+            let entry: Entry?
+            init(from decoder: Decoder) throws {
+                entry = try? Entry(from: decoder)
+            }
+        }
+        guard let wrapped = try? JSONDecoder().decode([FailableEntry].self, from: data) else {
+            return nil
+        }
+        return wrapped.compactMap(\.entry)
     }
 
     private static func quarantine(_ url: URL) {
@@ -288,6 +315,13 @@ final class PageArchive: PageArchiving {
     /// seal stays shut through migration.
     private func migrateKeeperPagesIfNeeded() {
         guard !FileManager.default.fileExists(atPath: keeperFileURL.path(percentEncoded: false)) else {
+            // Even with the sealed store present, a PARTIAL earlier migration
+            // can have left Keeper pages in the open array (audit C-7): the
+            // sealed write succeeded, the open rewrite did not. The Drawer's
+            // export reads `entries` directly, so a stray sealed page would
+            // walk straight out through a share sheet. Drop them from memory
+            // unconditionally — they are already in the sealed store.
+            dropStrayKeeperPages()
             return
         }
         let strays = entries.filter { $0.bookID == BookID.keeper.rawValue }
@@ -299,7 +333,24 @@ final class PageArchive: PageArchiving {
             return
         }
         let remaining = entries.filter { $0.bookID != BookID.keeper.rawValue }
-        guard persist(remaining, to: openFileURL, blocked: openWritesBlocked) else { return }
         entries = remaining
+        // The in-memory array is corrected FIRST and unconditionally: a failed
+        // rewrite of the open file must not leave sealed pages readable
+        // through `entries` for the whole session. The next successful write
+        // fixes the file; until then the pages simply live in the sealed
+        // store, where they belong.
+        if !persist(remaining, to: openFileURL, blocked: openWritesBlocked) {
+            Self.log.error("keeper migration: sealed store written, open store rewrite deferred")
+        }
+    }
+
+    /// Removes any Keeper page still standing in the open array. The sealed
+    /// store is the authority for those; `entries` must never carry one.
+    private func dropStrayKeeperPages() {
+        let remaining = entries.filter { $0.bookID != BookID.keeper.rawValue }
+        guard remaining.count != entries.count else { return }
+        Self.log.error("open store carried sealed pages; dropping them from memory")
+        entries = remaining
+        _ = persist(remaining, to: openFileURL, blocked: openWritesBlocked)
     }
 }

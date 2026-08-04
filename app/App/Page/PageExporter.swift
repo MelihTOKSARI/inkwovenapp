@@ -12,6 +12,40 @@ enum PageExporter {
         case nothingToExport
     }
 
+    /// Exports live in their own directory under `tmp/` so they can be swept
+    /// as a set (audit C-6): a plaintext copy of the whole journal used to be
+    /// written to `tmp/` at the OS default protection class, left there
+    /// indefinitely, and missed entirely by "delete all pages".
+    private static var exportDirectory: URL {
+        FileManager.default.temporaryDirectory.appending(path: "ink-exports", directoryHint: .isDirectory)
+    }
+
+    /// Prepares the export directory, clearing anything a previous share left
+    /// behind, and returns the URL to write to. Protection matches the
+    /// archive's own: `.completeUnlessOpen`, not the tmp default.
+    private static func prepare(_ filename: String) throws -> URL {
+        let directory = exportDirectory
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUnlessOpen]
+        )
+        // One export at a time: the previous file is the user's journal in
+        // plaintext and has no reason to outlive the share sheet.
+        purge()
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUnlessOpen]
+        )
+        return directory.appending(path: filename)
+    }
+
+    /// Deletes every exported file. Called before each export, after a share
+    /// sheet closes, and by "delete all pages" — which promised the ink was
+    /// gone while a full plaintext copy sat in `tmp/` (audit C-6).
+    static func purge() {
+        try? FileManager.default.removeItem(at: exportDirectory)
+    }
+
     /// Plain-text journal, oldest page first. Handwriting cannot become text
     /// on this path (no recognition ships in v1), so an inked page is noted
     /// as such rather than silently dropped.
@@ -32,9 +66,12 @@ enum PageExporter {
             }
             lines.append("The page answered: \(entry.replyText)")
         }
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "Inkwoven Pages.txt")
-        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        let url = try prepare("Inkwoven Pages.txt")
+        try lines.joined(separator: "\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path
+        )
         return url
     }
 
@@ -47,8 +84,7 @@ enum PageExporter {
         let contentWidth = pageRect.width - margin * 2
 
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "Inkwoven Pages.pdf")
+        let url = try prepare("Inkwoven Pages.pdf")
         try renderer.writePDF(to: url) { ctx in
             for entry in entries.sorted(by: { $0.createdAt < $1.createdAt }) {
                 ctx.beginPage()
@@ -86,6 +122,9 @@ enum PageExporter {
                 )
             }
         }
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path
+        )
         return url
     }
 

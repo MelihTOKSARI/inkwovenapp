@@ -42,8 +42,11 @@
 			     is collection even though nothing is retained for advertising. -->
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<!-- Linked (audit C-5): a reported page is stored under the
+			     device identity for guideline 1.2 triage, and every exchange
+			     is logged against it. -->
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<false/>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
 			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
@@ -52,15 +55,40 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- The pseudonymous token minted in App/DI.swift, held in the
-			     Keychain (with a legacy UserDefaults migration path) and sent
-			     as the x-ink-user header. Linked = false because it is
-			     device-local and tied to no account. If Sign in with Apple
-			     (task F4) ever ships, this becomes Linked = true. -->
+			<!-- The device identity: a server-minted opaque id proved by App
+			     Attest (App/Security/AppAttestIdentity.swift), carried as a
+			     session token in the x-ink-user header, with the legacy
+			     Keychain token as the fallback for hardware that cannot
+			     attest.
+
+			     Linked = TRUE (audit C-5). It is tied to no NAME, but the
+			     proxy stores the wallet, the credit ledger, the daily
+			     quotas, the proved subscription tier and any filed report
+			     under exactly this id — so the other collected data IS
+			     associated with it, which is what Apple's "linked" question
+			     asks. Declaring it unlinked understated the collection. -->
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeUserID</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
 			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- Purchase history (audit C-5). App/Money/PurchaseService.swift
+			     forwards the StoreKit JWS of every vial purchase and every
+			     subscription to the proxy (/v1/credits/grant,
+			     /v1/entitlement), which records product, transaction id and
+			     tier against the device identity. Linked for the same reason
+			     as the id above. -->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePurchaseHistory</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
 			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>

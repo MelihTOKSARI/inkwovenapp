@@ -293,7 +293,11 @@ struct DrawerView: View {
         // a purse that is already full.
         .task { await model.refreshWallet() }
         .manageSubscriptionsSheet(isPresented: $model.showManageSubs)
-        .sheet(item: $exportItem) { item in
+        .sheet(item: $exportItem, onDismiss: {
+            // The exported file is the whole journal in plaintext; it has no
+            // reason to outlive the share sheet (audit C-6).
+            PageExporter.purge()
+        }) { item in
             ShareSheet(items: [item.url])
         }
     }
@@ -649,6 +653,10 @@ struct DrawerView: View {
                         // draft left behind would resurrect on the next
                         // page visit after "delete all" promised otherwise.
                         drafts?.deleteAll()
+                        // And any export still sitting in tmp/, which is a
+                        // full plaintext copy of what was just torn out
+                        // (audit C-6).
+                        PageExporter.purge()
                         model.revisit = nil
                         model.showDeleteConfirm = false
                         drawerNote = clean
