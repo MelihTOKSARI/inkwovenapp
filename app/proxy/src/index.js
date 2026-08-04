@@ -16,6 +16,14 @@ if (production) {
     console.error(`fatal: production boot requires ${missing.join(', ')}`);
     process.exit(1);
   }
+  // Anonymous identity means the x-ink-user header IS the account — free to
+  // mint, which voids every per-user control (audit T3/M-3). It exists for
+  // local development only; production refuses to boot in it rather than
+  // running with decorative limits.
+  if (process.env.INK_ATTESTATION_MODE === 'anonymous') {
+    console.error('fatal: INK_ATTESTATION_MODE=anonymous may not run in production — bind appattest (see appattest.js)');
+    process.exit(1);
+  }
 }
 
 // Durable stores when the fly secrets are present; in-memory for local dev.

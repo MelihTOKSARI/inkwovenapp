@@ -16,6 +16,11 @@ public struct ProxyEndpoints: Sendable {
     public var credits: URL { baseURL.appending(path: "v1/credits") }
     public var creditsGrant: URL { credits.appending(path: "grant") }
     public var entitlement: URL { baseURL.appending(path: "v1/entitlement") }
+    // App Attest (audit T3): the routes that MAKE an identity, so they run
+    // before one exists and carry no x-ink-user of their own.
+    public var attestChallenge: URL { baseURL.appending(path: "v1/attest/challenge") }
+    public var attest: URL { baseURL.appending(path: "v1/attest") }
+    public var attestRefresh: URL { baseURL.appending(path: "v1/attest/refresh") }
 }
 
 /// App-attest + anonymous user token; Sign in with Apple upgrades the token.

@@ -36,6 +36,10 @@ export const CONFIG = {
     // through while making a request loop useless as a cost weapon.
     videosPerUserPerMinute: 2,
     videosPerIPPerMinute: 6,
+    // The attest routes (audit T3) run before identity exists, so only the
+    // address bounds them. A device attests once and refreshes hourly; ten a
+    // minute is generous for a household and useless for a mint farm.
+    attestsPerIPPerMinute: 10,
   },
   // What each modality costs from the credit wallet. Ink and images are
   // covered by the subscription today, so they cost 0 and the reserve/settle

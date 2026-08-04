@@ -1,7 +1,7 @@
 // In-memory stores for local dev and tests. Production swaps these for Redis
 // (rate-limit counters, tickets, idempotency) and Postgres (credit ledger) —
 // the route handlers only touch this interface.
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { CONFIG, LIMITS } from './config.js';
 
 const TICKET_TTL_MS = 60_000;
@@ -74,6 +74,9 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
   // quotas (audit M-2). Fixed-window by UTC day, refundable on the same
   // conditions that release a wallet hold.
   const dailyCounters = new Map();
+  // App Attest (audit T3): one-time challenges and the attested-key table.
+  const challenges = new Map(); // base64 → expiresAt
+  const attestKeys = new Map(); // keyID(b64) → { userID, publicKeyPEM, counter }
 
   /** Deletes reports past retention; returns how many went. */
   function sweepReports(now) {
@@ -554,6 +557,52 @@ export function createStores({ ticketTTLms = TICKET_TTL_MS } = {}) {
     /** Drops a proved tier — the refund/revocation path (audit M-4). */
     clearTier(userID) {
       tiers.delete(userID);
+    },
+
+    // -- App Attest (audit T3) ----------------------------------------------
+    // Challenges are one-time and short-lived so an attestation can never be
+    // replayed; keys map to a SERVER-minted identity — the client's own
+    // string is never an account.
+
+    issueChallenge(now = Date.now()) {
+      // Sweep opportunistically; expired challenges are the normal case.
+      for (const [value, expiresAt] of challenges) {
+        if (expiresAt <= now) challenges.delete(value);
+      }
+      const value = randomBytes(32).toString('base64');
+      challenges.set(value, now + 5 * 60_000);
+      return value;
+    },
+
+    /** Consumes a challenge; false when unknown, expired, or already used. */
+    takeChallenge(value, now = Date.now()) {
+      const expiresAt = challenges.get(value);
+      challenges.delete(value);
+      return expiresAt !== undefined && expiresAt > now;
+    },
+
+    /**
+     * Binds an attested key to an identity the SERVER mints. Re-attesting a
+     * known key returns its existing identity — the key is the account, and
+     * a reinstall must find its wallet again.
+     */
+    registerAttestKey(keyID, publicKeyPEM) {
+      const existing = attestKeys.get(keyID);
+      if (existing) return { userID: existing.userID };
+      const userID = randomUUID();
+      attestKeys.set(keyID, { userID, publicKeyPEM, counter: 0 });
+      return { userID };
+    },
+
+    attestKeyRecord(keyID) {
+      const record = attestKeys.get(keyID);
+      return record ? { ...record } : null;
+    },
+
+    /** Advances the assertion counter; only ever forward. */
+    bumpAttestCounter(keyID, counter) {
+      const record = attestKeys.get(keyID);
+      if (record && counter > record.counter) record.counter = counter;
     },
 
     /**

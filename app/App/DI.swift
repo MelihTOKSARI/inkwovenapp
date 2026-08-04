@@ -46,7 +46,13 @@ final class AppDI {
 
     static func live() -> AppDI {
         let endpoints = ProxyEndpoints(baseURL: proxyBaseURL())
-        let proxy = ProxyClient(endpoints: endpoints, auth: AnonymousTokenProvider())
+        // Identity is PROVED, not asserted (audit T3): App Attest trades a
+        // Secure Enclave key for a server-minted, short-lived session token.
+        // The anonymous provider stays as the fallback for hardware that
+        // cannot attest — the proxy decides whether that is acceptable, and
+        // in appattest mode it is not.
+        let auth = AppAttestIdentity(endpoints: endpoints, fallback: AnonymousTokenProvider())
+        let proxy = ProxyClient(endpoints: endpoints, auth: auth)
         // The vials are bought through StoreKit but spent from the server-side
         // wallet, so the purchase store needs a way to reach the proxy.
         #if DEBUG
@@ -92,11 +98,11 @@ final class AppDI {
     }
 }
 
-/// Anonymous install token; App Attest assertion + Sign in with Apple upgrade
-/// happen behind this same protocol (task F4). Held in the Keychain, not
-/// UserDefaults: this value is the whole of the app's server-side identity,
-/// and the proxy trusts it verbatim, so a plist readable from an unencrypted
-/// backup is an account-takeover primitive.
+/// Legacy anonymous install token — now only the FALLBACK behind
+/// `AppAttestIdentity` (audit T3), for hardware that cannot attest. Held in
+/// the Keychain, not UserDefaults: on a proxy running in anonymous mode this
+/// value is the whole of the app's server-side identity, so a plist readable
+/// from an unencrypted backup would be an account-takeover primitive.
 struct AnonymousTokenProvider: AuthTokenProviding {
     private static let account = "ink.anonymous.user"
 

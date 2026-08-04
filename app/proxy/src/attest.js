@@ -1,28 +1,18 @@
-// Identity verification seam (launch blocker F-auth).
+// Identity verification seam (launch blocker F-auth / audit T3).
 //
-// WHAT THIS IS: the single choke point every request passes through, and a
-// pluggable verifier behind it. WHAT THIS IS NOT: an App Attest
-// implementation. No Apple key handling is invented here — binding a real
-// verifier needs a human to supply the pieces listed under REQUIRES A HUMAN.
+// The single choke point every request passes through. The App Attest
+// implementation the earlier REQUIRES-A-HUMAN note demanded now exists in
+// appattest.js: server-issued challenges, CBOR attestation verification
+// against Apple's App Attest root, a durable keyId → server-minted identity
+// table, and short-lived HS256 session tokens that replace the raw
+// x-ink-user string. This file decides which verifier the hook consults.
 //
 // The seam FAILS CLOSED. With no verifier bound, production rejects every
 // request; the pass-through 'anonymous' mode must be opted into explicitly by
-// INK_ATTESTATION_MODE, so a missing secret can never silently downgrade
-// identity to "whatever string the client typed".
-//
-// REQUIRES A HUMAN (do not stub these):
-//   1. A server-issued challenge endpoint, so the nonce is never client-chosen.
-//   2. POST /v1/attest taking {keyId, attestationObject, challenge}, verifying
-//      the CBOR attestation chain against Apple's App Attest root CA, checking
-//      nonce == SHA256(authenticatorData || SHA256(challenge)),
-//      rpIdHash == SHA256("<teamID>.<bundleID>"), signCount == 0, and
-//      credentialId == SHA256(publicKey). Needs the real team + bundle IDs.
-//   3. An identity table mapping keyId → a server-MINTED opaque userID. The
-//      server mints it; the client's own string is never trusted as identity.
-//   4. Either per-request assertions (client signs SHA256(body||challenge),
-//      server verifies signature + strictly-increasing counter) or — cheaper
-//      for SSE — trade the attestation once for a short-lived signed bearer
-//      JWT whose key lives in Fly secrets, replacing x-ink-user outright.
+// INK_ATTESTATION_MODE — and index.js refuses to BOOT production in it — so a
+// missing secret can never silently downgrade identity to "whatever string
+// the client typed".
+import { createSessionTokens } from './appattest.js';
 
 /** Thrown by a verifier to reject a caller; carries the wire status. */
 export class AttestationError extends Error {
@@ -38,10 +28,15 @@ export class AttestationError extends Error {
  * Builds the verifier the auth hook consults.
  *
  * Modes:
- *   'anonymous' — pass-through: the x-ink-user token IS the identity. Correct
- *                 for local dev and tests; must be set explicitly anywhere else.
- *   'required'  — fail closed. The default in production. Rejects everything
- *                 until a real verifier is bound via `options.verify`.
+ *   'anonymous' — pass-through: the x-ink-user token IS the identity. Local
+ *                 dev and tests ONLY; production refuses to boot in it.
+ *   'appattest' — x-ink-user carries a server-minted HS256 session token,
+ *                 traded for a verified App Attest attestation (appattest.js)
+ *                 and renewed by assertion. A fabricated value verifies
+ *                 nothing. Requires INK_SESSION_SECRET; missing or short
+ *                 secrets degrade to 'required', never to trust.
+ *   'required'  — fail closed. The default in production until the operator
+ *                 binds 'appattest'.
  */
 export function createAttestationVerifier(env = process.env, options = {}) {
   const mode = env.INK_ATTESTATION_MODE ?? (env.NODE_ENV === 'production' ? 'required' : 'anonymous');
@@ -59,6 +54,27 @@ export function createAttestationVerifier(env = process.env, options = {}) {
         return { userID: token };
       },
     };
+  }
+
+  if (mode === 'appattest') {
+    const sessions = createSessionTokens(env);
+    if (sessions) {
+      return {
+        mode: 'appattest',
+        async verify({ token }) {
+          try {
+            return sessions.verify(token);
+          } catch (error) {
+            throw new AttestationError(
+              error?.code === 'expired_token' ? 'expired_token' : 'invalid_token',
+              401,
+            );
+          }
+        },
+      };
+    }
+    // Asked for appattest without a usable secret: fail closed, loudly —
+    // never fall through to trusting the header.
   }
 
   return {

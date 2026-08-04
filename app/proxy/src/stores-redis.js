@@ -1,7 +1,7 @@
 // Production stores (deployment.md §5.3): Redis/Upstash for tickets, rate
 // limits, and idempotency; Postgres/Neon for the credit ledger. Same interface
 // as stores.js — route handlers await either implementation and can't tell.
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import pg from 'pg';
 import { CONFIG, LIMITS } from './config.js';
@@ -115,6 +115,13 @@ CREATE INDEX IF NOT EXISTS free_clips_ip_day_idx ON free_clips (ip_key, day);
 CREATE TABLE IF NOT EXISTS redeemed_transactions (
   transaction_id text PRIMARY KEY,
   user_id text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS attest_keys (
+  key_id text PRIMARY KEY,
+  user_id text NOT NULL,
+  public_key text NOT NULL,
+  counter bigint NOT NULL DEFAULT 0,
   at timestamptz NOT NULL DEFAULT now()
 );
 `;
@@ -487,6 +494,66 @@ export async function createRedisStores({ redisUrl, databaseUrl, ticketTTLms = T
     /** Drops a proved tier — the refund/revocation path (audit M-4). */
     async clearTier(userID) {
       await redis.del(`tier:${keyPart(userID)}`);
+    },
+
+    // -- App Attest (audit T3) ----------------------------------------------
+    // Challenges live in Redis (one-time, TTL does the sweeping); the
+    // attested-key table is identity — it lives in Postgres, durably.
+
+    async issueChallenge() {
+      const value = randomBytes(32).toString('base64');
+      await redis.set(`challenge:${keyPart(value)}`, '1', 'EX', 300);
+      return value;
+    },
+
+    /** Consumes a challenge; false when unknown, expired, or already used. */
+    async takeChallenge(value) {
+      if (typeof value !== 'string' || !value) return false;
+      const taken = await redis.getdel(`challenge:${keyPart(value)}`);
+      return taken !== null;
+    },
+
+    /**
+     * Binds an attested key to an identity the SERVER mints. Re-attesting a
+     * known key returns its existing identity — the key is the account, and
+     * a reinstall must find its wallet again.
+     */
+    async registerAttestKey(keyID, publicKeyPEM) {
+      const userID = randomUUID();
+      const { rows } = await pool.query(
+        `INSERT INTO attest_keys (key_id, user_id, public_key)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (key_id) DO NOTHING
+         RETURNING user_id`,
+        [keyID, userID, publicKeyPEM],
+      );
+      if (rows.length > 0) return { userID: rows[0].user_id };
+      const { rows: existing } = await pool.query(
+        'SELECT user_id FROM attest_keys WHERE key_id = $1',
+        [keyID],
+      );
+      return { userID: existing[0].user_id };
+    },
+
+    async attestKeyRecord(keyID) {
+      const { rows } = await pool.query(
+        'SELECT user_id, public_key, counter FROM attest_keys WHERE key_id = $1',
+        [keyID],
+      );
+      if (!rows[0]) return null;
+      return {
+        userID: rows[0].user_id,
+        publicKeyPEM: rows[0].public_key,
+        counter: Number(rows[0].counter),
+      };
+    },
+
+    /** Advances the assertion counter; only ever forward. */
+    async bumpAttestCounter(keyID, counter) {
+      await pool.query(
+        'UPDATE attest_keys SET counter = $2 WHERE key_id = $1 AND counter < $2',
+        [keyID, counter],
+      );
     },
 
     /**

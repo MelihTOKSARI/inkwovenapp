@@ -11,6 +11,7 @@ import { BOOKS, findBook, publicBook } from './books.js';
 import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
+import { AppAttestError, createAppAttestVerifier, createSessionTokens } from './appattest.js';
 import { createNotificationVerifier, createReceiptVerifier, ReceiptError } from './receipts.js';
 import { keyPart } from './keys.js';
 import {
@@ -132,6 +133,35 @@ const grantSchema = {
 // /v1/entitlement carries the same three fields as a grant — a StoreKit JWS
 // plus what the caller believes it presents — so it shares the shape.
 const entitlementSchema = grantSchema;
+
+// App Attest bodies (audit T3). Sizes: a keyID is 32 bytes (44 b64 chars), a
+// challenge 32 bytes, an attestation object runs a few KB of CBOR, an
+// assertion a few hundred bytes.
+const attestSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['keyID', 'attestation', 'challenge'],
+    properties: {
+      keyID: { type: 'string', minLength: 40, maxLength: 60 },
+      attestation: { type: 'string', minLength: 1, maxLength: 16_384 },
+      challenge: { type: 'string', minLength: 40, maxLength: 60 },
+    },
+  },
+};
+
+const assertSchema = {
+  body: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['keyID', 'assertion', 'challenge'],
+    properties: {
+      keyID: { type: 'string', minLength: 40, maxLength: 60 },
+      assertion: { type: 'string', minLength: 1, maxLength: 4_096 },
+      challenge: { type: 'string', minLength: 40, maxLength: 60 },
+    },
+  },
+};
 
 
 // Loose on purpose: rejects garbage without turning a clock-skewed device's
@@ -354,6 +384,11 @@ export function build(options = {}) {
   // receipt verifier; null answers 501 rather than trusting anything.
   const verifyNotification =
     'verifyNotification' in options ? options.verifyNotification : createNotificationVerifier(env);
+  // App Attest (audit T3): the attestation verifier and the session-token
+  // mint. Null answers 501 on the attest routes — never a fallback identity.
+  const appAttest = 'appAttest' in options ? options.appAttest : createAppAttestVerifier(env);
+  const sessionTokens =
+    'sessionTokens' in options ? options.sessionTokens : createSessionTokens(env);
   // Operator token for the triage route. No default: unset means the route
   // answers 501 rather than trusting anything.
   const adminToken = env.INK_ADMIN_TOKEN ?? null;
@@ -406,11 +441,14 @@ export function build(options = {}) {
   // /v1/notifications is Apple's servers calling in: its authentication is
   // the signed payload itself, verified against the same root as receipts.
   const ADMIN_ROUTES = new Set(['/v1/admin/reports', '/v1/notifications']);
+  // The attest routes run BEFORE identity exists — they are how identity is
+  // made (audit T3). Each is 501 when unbound and per-IP rate limited.
+  const ATTEST_ROUTES = new Set(['/v1/attest/challenge', '/v1/attest', '/v1/attest/refresh']);
 
   // -- auth hook -------------------------------------------------------------
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?')[0];
-    if (HEALTH_ROUTES.has(path) || ADMIN_ROUTES.has(path)) return;
+    if (HEALTH_ROUTES.has(path) || ADMIN_ROUTES.has(path) || ATTEST_ROUTES.has(path)) return;
     const token = request.headers['x-ink-user'];
     if (!token || typeof token !== 'string' || token.length > 256) {
       return reply.code(401).send({ error: 'missing_user_token' });
@@ -1250,6 +1288,95 @@ export function build(options = {}) {
       freeClipsRemaining: freeClips.remaining,
       freeClipsOpen: freeClips.ceilingOpen,
     };
+  });
+
+  // -- App Attest (audit T3/M-3) ---------------------------------------------
+  // Identity stops being "whatever string the client typed": a device proves
+  // itself once (challenge → attestation → server-minted identity → session
+  // token) and renews by assertion. All three routes fail closed to 501
+  // until the operator supplies the App Attest root, team/bundle ids and the
+  // session secret (appattest.js).
+
+  /** Per-IP ceiling for the pre-identity routes. */
+  async function withinAttestLimits(request, reply) {
+    const allowed = await stores.allow(
+      `ip:${keyPart(request.ip)}`,
+      CONFIG.rateLimits.attestsPerIPPerMinute,
+    );
+    if (!allowed) {
+      await reply.code(429).header('retry-after', '60').send({ error: 'rate_limited' });
+      return false;
+    }
+    return true;
+  }
+
+  app.post('/v1/attest/challenge', async (request, reply) => {
+    if (!appAttest || !sessionTokens) {
+      return reply.code(501).send({ error: 'attestation_unbound' });
+    }
+    if (!(await withinAttestLimits(request, reply))) return reply;
+    // One-time, five minutes, server-chosen: the nonce the attestation must
+    // answer can never be client-picked or replayed.
+    const challenge = await stores.issueChallenge();
+    return { challenge };
+  });
+
+  app.post('/v1/attest', { schema: attestSchema }, async (request, reply) => {
+    if (!appAttest || !sessionTokens) {
+      return reply.code(501).send({ error: 'attestation_unbound' });
+    }
+    if (!(await withinAttestLimits(request, reply))) return reply;
+    const { keyID, attestation, challenge } = request.body;
+    if (!(await stores.takeChallenge(challenge))) {
+      return reply.code(401).send({ error: 'bad_challenge' });
+    }
+    let verified;
+    try {
+      verified = appAttest.verifyAttestation({
+        attestationBase64: attestation,
+        keyIDBase64: keyID,
+        challenge: Buffer.from(challenge, 'base64'),
+      });
+    } catch (error) {
+      const code = error instanceof AppAttestError ? error.code : 'attestation_rejected';
+      request.log?.warn?.({ route: 'attest', reject: code });
+      return reply.code(401).send({ error: 'attestation_rejected' });
+    }
+    // The identity is MINTED here; re-attesting a known key finds the same
+    // one, so a reinstall keeps its wallet.
+    const { userID } = await stores.registerAttestKey(keyID, verified.publicKeyPEM);
+    const minted = sessionTokens.mint(userID);
+    request.log?.info?.({ route: 'attest', registered: true });
+    return { token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
+  });
+
+  app.post('/v1/attest/refresh', { schema: assertSchema }, async (request, reply) => {
+    if (!appAttest || !sessionTokens) {
+      return reply.code(501).send({ error: 'attestation_unbound' });
+    }
+    if (!(await withinAttestLimits(request, reply))) return reply;
+    const { keyID, assertion, challenge } = request.body;
+    const record = await stores.attestKeyRecord(keyID);
+    if (!record) return reply.code(401).send({ error: 'unknown_key' });
+    if (!(await stores.takeChallenge(challenge))) {
+      return reply.code(401).send({ error: 'bad_challenge' });
+    }
+    let verified;
+    try {
+      verified = appAttest.verifyAssertion({
+        assertionBase64: assertion,
+        publicKeyPEM: record.publicKeyPEM,
+        previousCounter: record.counter,
+        challenge: Buffer.from(challenge, 'base64'),
+      });
+    } catch (error) {
+      const code = error instanceof AppAttestError ? error.code : 'assertion_rejected';
+      request.log?.warn?.({ route: 'attest_refresh', reject: code });
+      return reply.code(401).send({ error: 'assertion_rejected' });
+    }
+    await stores.bumpAttestCounter(keyID, verified.counter);
+    const minted = sessionTokens.mint(record.userID);
+    return { token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
   });
 
   // -- POST /v1/entitlement: a verified Plus receipt widens the daily quota --
