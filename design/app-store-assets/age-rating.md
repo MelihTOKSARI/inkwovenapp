@@ -43,15 +43,30 @@ for worst-case generated output.
 - **In-app parental controls:** **No** — the app ships none (the Keeper's Face ID
   lock is a privacy lock for the owner, not a parental control).
 - **Age assurance:** none beyond Apple's own account-level mechanisms; the app has
-  no accounts and collects no birth date.
+  no accounts, collects no birth date, and shows no age gate. This is a deliberate
+  posture, not an oversight: an unverified self-declared birthday collects a date
+  of birth from a minor to protect them from a rating we already declare, and
+  Apple's account-level age signals are the mechanism the store provides. If
+  review asks, say exactly this.
+- **Why a report mechanism with no shared content** (the question a reviewer is
+  most likely to raise): the app ships a guideline 1.2 report flow — long-press any
+  reply, and it reaches a human (`POST /v1/report`, alerted by webhook, triaged
+  through `/v1/admin/reports`) — even though pages are never shared *between*
+  users. The content being reported is what the AI wrote back to this user. That
+  is not a contradiction with "user-created content visible to others: **No**";
+  answer both honestly and, if asked, explain that the reportable content is
+  machine-generated and private to the one reader.
 
 ## Safety posture (context for whoever answers, and for any reviewer question)
 
-- **Crisis flow:** a classifier watches every Book; if the user's writing indicates
-  personal crisis, the app deliberately breaks the fiction and shows a plain care
-  screen with real resources instead of a stylized reply. This is a safety feature,
-  not a content feature — it does not lower the rating and should not be used to
-  argue for one.
+- **Crisis flow:** every Book is watched two ways — a deterministic server-side
+  screen over the writer's own words and over the assembled reply, plus the reply
+  model's own crisis sentinel — and a provider block on an ink page is itself
+  treated as crisis-suspect. When any of them fires, the app deliberately breaks
+  the fiction and shows a plain care screen with real, region-resolved resources
+  instead of a stylized reply, reachable afterwards from the Drawer. This is a
+  safety feature, not a content feature — it does not lower the rating and should
+  not be used to argue for one.
 - **Moderation:** text and image generation run through the providers' safety
   filters (Google, OpenAI, fal.ai), prompts enforce a house style that avoids
   photorealistic people, and every Book and output type has a server-side kill
