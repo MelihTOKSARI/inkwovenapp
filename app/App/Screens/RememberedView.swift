@@ -30,20 +30,26 @@ struct RememberedView: View {
     var body: some View {
         VStack(spacing: 0) {
             RoomNavBar(title: "Remembered", backLabel: "the page") { model.go(.page) }
+
+            // The head of the room stands still; only the pages scroll.
+            VStack(spacing: 0) {
+                Text(model.activeBook.name)
+                    .font(InkFont.display(32))
+                    .foregroundStyle(room.heading)
+                Text("Every page you have filled here.")
+                    .font(InkFont.bodyItalic(15))
+                    .foregroundStyle(room.dim)
+                    .padding(.top, 4)
+
+                searchPill
+                    .padding(.top, 26)
+            }
+            .frame(maxWidth: 760)
+            .padding(EdgeInsets(top: 36, leading: 56, bottom: 0, trailing: 56))
+            .frame(maxWidth: .infinity)
+
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Text(model.activeBook.name)
-                        .font(InkFont.display(32))
-                        .foregroundStyle(room.heading)
-                    Text("Every page you have filled here.")
-                        .font(InkFont.bodyItalic(15))
-                        .foregroundStyle(room.dim)
-                        .padding(.top, 4)
-
-                    searchPill
-                        .padding(.top, 26)
-                        .padding(.bottom, 26)
-
+                Group {
                     if archived.isEmpty {
                         emptyState
                     } else {
@@ -58,7 +64,7 @@ struct RememberedView: View {
                     }
                 }
                 .frame(maxWidth: 760)
-                .padding(EdgeInsets(top: 36, leading: 56, bottom: 60, trailing: 56))
+                .padding(EdgeInsets(top: 26, leading: 56, bottom: 60, trailing: 56))
                 .frame(maxWidth: .infinity)
             }
         }
