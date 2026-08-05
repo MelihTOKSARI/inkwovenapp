@@ -9,8 +9,6 @@ struct RememberedView: View {
     @Environment(\.room) private var room
     @State private var query = ""
 
-    /// Free-tier fade line: pages older than this are ghosted until bound.
-    private static let fadeAfter: TimeInterval = 30 * 24 * 60 * 60
 
     private var archived: [PageArchive.Entry] {
         let all = archive.entries(for: model.activeBookID)
@@ -24,7 +22,7 @@ struct RememberedView: View {
     }
 
     private func isGhosted(_ entry: PageArchive.Entry) -> Bool {
-        !model.bound && Date.now.timeIntervalSince(entry.createdAt) > Self.fadeAfter
+        !model.bound && Date.now.timeIntervalSince(entry.createdAt) > PageArchive.freeFadeAfter
     }
 
     var body: some View {

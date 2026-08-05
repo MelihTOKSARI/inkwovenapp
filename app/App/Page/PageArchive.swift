@@ -30,6 +30,11 @@ final class PageArchive: PageArchiving {
         let replyText: String
     }
 
+    /// Free-tier fade line (product policy): pages older than this are
+    /// ghosted in Remembered and withheld from the page's history thread
+    /// until the notebook is bound. One constant, read by both surfaces.
+    static let freeFadeAfter: TimeInterval = 30 * 24 * 60 * 60
+
     /// Every Book but the Keeper.
     private(set) var entries: [Entry] = []
     /// When any page last archived — a date and nothing else. The Keeper's

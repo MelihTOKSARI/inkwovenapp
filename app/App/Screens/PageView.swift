@@ -34,6 +34,9 @@ struct PageView: View {
     @State private var askingKeeperConsent = false
     /// The shop, over this page rather than instead of it — see `VialsSheet`.
     @State private var showingVials = false
+    /// Pages from earlier visits fold into the thread only while this holds
+    /// them open — the history pill's state.
+    @State private var showEarlier = false
     /// VoiceOver lands on the hand card's title when it rises (A-3).
     @AccessibilityFocusState private var handCardFocused: Bool
     @Environment(\.room) private var room
@@ -290,14 +293,57 @@ struct PageView: View {
         HStack(spacing: 16) {
             if model.leftHanded {
                 PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
+                if hasEarlierPages { historyPill }
                 headerTitle
             } else {
                 headerTitle
+                if hasEarlierPages { historyPill }
                 PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
             }
         }
         .padding(.bottom, 26)
         .padding(model.leftHanded ? .leading : .trailing, 52)
+    }
+
+    /// HISTORY — the one door to pages from earlier visits. The page opens
+    /// on this visit's session alone; this pill folds the past in and out of
+    /// the thread. Dims with the tray while the pen moves.
+    private var historyPill: some View {
+        Button {
+            withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.3)) {
+                showEarlier.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: showEarlier ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(showEarlier ? Ink.parchment : Ink.inkFaded)
+                SmallCapsLabel(
+                    text: "history", size: 11, tracking: 1.8,
+                    color: showEarlier ? Ink.parchment : Ink.inkFaded
+                )
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 32)
+            .background(
+                Capsule()
+                    .fill(showEarlier ? Ink.inkFaded : Ink.ink.opacity(0.05))
+                    .overlay(Capsule().stroke(Ink.ink.opacity(0.2), lineWidth: 1))
+            )
+            .fixedSize()
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleStyle())
+        .opacity(interactor.status == .inking ? 0.14 : 0.8)
+        .inkAnimation(
+            .easeOut(duration: 0.4), value: interactor.status == .inking, reduce: reduceMotion
+        )
+        .accessibilityLabel("History")
+        .accessibilityValue(showEarlier ? "Showing pages from earlier visits" : "Hidden")
+        .accessibilityHint(showEarlier
+            ? "Hides the pages from earlier visits."
+            : "Shows the pages you filled on earlier visits, above this visit's thread.")
     }
 
     private func openHandCard() {
@@ -461,7 +507,10 @@ struct PageView: View {
     /// Whether the reply side has anything to show (and therefore may take
     /// touches when it overlays the single-page canvas).
     private var replySideActive: Bool {
-        if !displayedReply.isEmpty || interactor.developing || !history.isEmpty { return true }
+        if !displayedReply.isEmpty || interactor.developing || !sessionThread.isEmpty {
+            return true
+        }
+        if showEarlier && hasEarlierPages { return true }
         switch interactor.status {
         case .cooldown, .declined: return true
         default: return false
@@ -628,24 +677,47 @@ struct PageView: View {
 
     // MARK: - Right page (the Book's reply)
 
-    /// Every past exchange in this Book, oldest first — the running thread
-    /// above the live reply. The exchange currently standing on the reply
-    /// pane is skipped so it never renders twice.
-    private var history: [PageArchive.Entry] {
+    /// This visit's earlier exchanges, oldest first — the running thread
+    /// above the live reply. Only the session: a fresh visit starts clear.
+    /// The exchange currently standing on the reply pane is skipped so it
+    /// never renders twice.
+    private var sessionThread: [PageArchive.Entry] {
         archive.entries(for: book.id)
-            .filter { $0.id != interactor.displayedEntryID }
+            .filter {
+                interactor.sessionEntryIDs.contains($0.id)
+                    && $0.id != interactor.displayedEntryID
+            }
             .reversed()
     }
 
+    /// Pages from earlier visits, oldest first — on the page only while the
+    /// history pill holds them open. Free tier: pages past the fade line stay
+    /// in Remembered (ghosted, bind to keep) and never render here, or the
+    /// thread would hand out what the fade has already claimed.
+    private var earlierPages: [PageArchive.Entry] {
+        archive.entries(for: book.id)
+            .filter { entry in
+                !interactor.sessionEntryIDs.contains(entry.id)
+                    && entry.id != interactor.displayedEntryID
+                    && (model.bound
+                        || Date.now.timeIntervalSince(entry.createdAt) <= PageArchive.freeFadeAfter)
+            }
+            .reversed()
+    }
+
+    private var hasEarlierPages: Bool { !earlierPages.isEmpty }
+
     private var rightPage: some View {
-        // Hoisted: `history` is three O(n) array allocations per access, and
-        // the body read it three times (twice here, once from
-        // `replySideActive`) on every render pass.
-        let thread = history
+        // Hoisted: each of these is an O(n) filter pass per access, and the
+        // body would otherwise re-run them on every render.
+        let thread = sessionThread
+        let earlier = showEarlier ? earlierPages : []
         return ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                if !thread.isEmpty {
-                    PageHistoryThread(entries: thread, book: book) { entry in
+                if !earlier.isEmpty || !thread.isEmpty {
+                    // Earlier visits stand above the session; both are
+                    // chronological, so one thread reads straight through.
+                    PageHistoryThread(entries: earlier + thread, book: book) { entry in
                         model.reportTarget = entry
                     }
                     .padding(.top, 30)

@@ -51,6 +51,11 @@ final class PageInteractor {
     /// that just completed, or a revisited one) — the history thread skips it
     /// so the same reply never renders twice.
     private(set) var displayedEntryID: UUID?
+    /// The session: entries archived during THIS visit to the page, plus a
+    /// revisited one. The page's thread shows only these — every earlier
+    /// visit's pages wait behind the history control. A fresh visit starts
+    /// with an empty set, so the page opens clear.
+    private(set) var sessionEntryIDs: Set<UUID> = []
     private(set) var ttfsMS: Int?
     /// Develop pass (Artist): the server opened an image slot this exchange.
     private(set) var developing = false
@@ -230,6 +235,10 @@ final class PageInteractor {
         typedDraft = ""
         streamedText = replyText
         displayedEntryID = entryID
+        // The revisited exchange IS the session now — one session at a time;
+        // whatever this visit had written before stays in the archive, behind
+        // the history control.
+        sessionEntryIDs = entryID.map { [$0] } ?? []
         // Reopening a remembered exchange gives the Book continuity with it.
         lastTurn = PageContextBuilder.Turn(written: nil, reply: replyText)
         ttfsMS = nil
@@ -978,12 +987,15 @@ final class PageInteractor {
         // the typed hand absolute precedence, the ink entry claimed the Book
         // had answered strokes it never saw.
         if typed != nil || hasFreshInk {
-            displayedEntryID = archive?.archive(
+            let entryID = archive?.archive(
                 book: book,
                 drawing: hasFreshInk ? drawing : PKDrawing(),
                 typedText: typed,
                 replyText: streamedText
             )
+            displayedEntryID = entryID
+            // A page filed this visit joins the session thread.
+            if let entryID { sessionEntryIDs.insert(entryID) }
             lastTurn = PageContextBuilder.Turn(written: typed, reply: streamedText)
         }
         let sentCount = sent?.strokes.count
