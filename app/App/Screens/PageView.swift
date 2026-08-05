@@ -268,27 +268,34 @@ struct PageView: View {
 
     private var rememberedRibbon: some View {
         Button { model.go(.remembered) } label: {
-            RibbonShape()
-                .fill(
-                    LinearGradient(
-                        colors: [book.accent, .mix(book.accentHex, 0.65, 0x000000)],
-                        startPoint: .top, endPoint: .bottom
+            // The bookmark alone said only "remembered", rotated and easy to
+            // miss; the plain sublabel under its tail says what it opens.
+            VStack(spacing: 6) {
+                RibbonShape()
+                    .fill(
+                        LinearGradient(
+                            colors: [book.accent, .mix(book.accentHex, 0.65, 0x000000)],
+                            startPoint: .top, endPoint: .bottom
+                        )
                     )
-                )
-                .frame(width: 34, height: 92)
-                .shadow(color: .black.opacity(0.25), radius: 5, y: 4)
-                .overlay(alignment: .center) {
-                    SmallCapsLabel(text: "remembered", size: 10, tracking: 1.1, color: Ink.parchment)
-                        .fixedSize()
-                        .rotationEffect(.degrees(90))
-                        .offset(y: -7)
-                        // Rotated inside a fixed 34×92 ribbon: this label is
-                        // the one piece of type that physically cannot grow
-                        // with the rest. Capped rather than allowed to run
-                        // off the page — the button keeps its 44pt target and
-                        // VoiceOver reads the full word regardless.
-                        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                }
+                    .frame(width: 34, height: 92)
+                    .shadow(color: .black.opacity(0.25), radius: 5, y: 4)
+                    .overlay(alignment: .center) {
+                        SmallCapsLabel(text: "remembered", size: 10, tracking: 1.1, color: Ink.parchment)
+                            .fixedSize()
+                            .rotationEffect(.degrees(90))
+                            .offset(y: -7)
+                            // Rotated inside a fixed 34×92 ribbon: this label is
+                            // the one piece of type that physically cannot grow
+                            // with the rest. Capped rather than allowed to run
+                            // off the page — the button keeps its 44pt target and
+                            // VoiceOver reads the full word regardless.
+                            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    }
+                SmallCapsLabel(text: "past pages", size: 10, tracking: 1.3, color: Ink.inkFaded)
+                    .fixedSize()
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
         .frame(maxWidth: .infinity, alignment: model.leftHanded ? .leading : .trailing)
