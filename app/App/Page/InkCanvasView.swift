@@ -108,13 +108,39 @@ struct InkCanvasView: UIViewRepresentable {
         var eraserOn = false
         var typedTopInset: CGFloat = 0
         private var strokeCount = 0
+        /// Tool uses currently down on the canvas — the abort check below
+        /// stands aside while any touch is still writing.
+        private var activeToolUses = 0
 
         init(interactor: PageInteractor) {
             self.interactor = interactor
         }
 
         nonisolated func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
-            MainActor.assumeIsolated { interactor.strokeBegan() }
+            MainActor.assumeIsolated {
+                activeToolUses += 1
+                interactor.strokeBegan()
+            }
+        }
+
+        nonisolated func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+            MainActor.assumeIsolated {
+                activeToolUses = max(0, activeToolUses - 1)
+                // A committed stroke reports drawingDidChange just AFTER this
+                // callback, so check on the next beat: a tool use that grew
+                // nothing — an eraser touch on empty paper, a cancelled
+                // stroke, an erase that only removed ink — must not leave
+                // the page stranded at the `.inking` that pen-down promoted.
+                // A newer touch still down owns the page; the check yields.
+                let before = canvasView.drawing.strokes.count
+                Task { @MainActor [weak canvasView] in
+                    try? await Task.sleep(for: .milliseconds(80))
+                    guard let canvasView,
+                          self.activeToolUses == 0,
+                          canvasView.drawing.strokes.count <= before else { return }
+                    self.interactor.strokeAborted()
+                }
+            }
         }
 
         nonisolated func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {

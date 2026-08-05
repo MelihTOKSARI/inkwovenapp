@@ -274,7 +274,12 @@ final class PageInteractor {
     func strokeBegan() {
         tickTask?.cancel()
         perform(machine.handle(.strokeBegan))
-        if status == .idle || status == .resting { status = .inking }
+        // `.answered` too: taking the page back is what absorbs the standing
+        // reply, and that begins at pen-down — the diary drinks the moment
+        // the nib lands, not at the first stroke's end.
+        if status == .idle || status == .resting || status == .answered {
+            status = .inking
+        }
     }
 
     func strokeEnded() {
@@ -284,6 +289,28 @@ final class PageInteractor {
         guard machine.state != .held else { return }
         status = .resting
         startTicking()
+    }
+
+    /// A tool use ended without laying a stroke — an eraser touch on empty
+    /// paper, a cancelled/palm-rejected stroke, or an erase that only
+    /// removed ink. `strokeBegan` promoted the status to `.inking` at
+    /// pen-down (that is what absorbs a standing reply), and with no
+    /// `strokeEnded` ever coming the page would stay stranded there:
+    /// reply absorbed, tray dimmed, cadence never armed. Stand back down
+    /// to what the page actually holds.
+    func strokeAborted() {
+        guard status == .inking else { return }
+        if hasUnsentInk {
+            // An erase still leaves unsent work standing — re-arm the rest
+            // cadence so it sends as usual (erases never called strokeEnded,
+            // so an edited page used to sit silent until the next stroke).
+            perform(machine.handle(.strokeEnded(at: Date())))
+            status = .resting
+            startTicking()
+        } else {
+            machine.reset()
+            status = streamedText.isEmpty ? .idle : .answered
+        }
     }
 
     /// Any canvas mutation — a new stroke, an erase, an undo — refreshes the
@@ -745,6 +772,11 @@ final class PageInteractor {
         sentStrokeCount = sentBase
         sentDrawing = nil
         sentTypedText = nil
+        // A partial stream must not stand as the reply: `beginExchange`
+        // already cleared the previous exchange, so whatever accumulated
+        // here is half an answer — the reply surfaces whole or not at all.
+        // The decline card stands alone; the writer's ink is what retries.
+        streamedText = ""
         scheduleDraftSave()
     }
 

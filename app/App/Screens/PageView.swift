@@ -34,12 +34,16 @@ struct PageView: View {
     @State private var askingKeeperConsent = false
     /// The shop, over this page rather than instead of it — see `VialsSheet`.
     @State private var showingVials = false
-    /// Pages from earlier visits fold into the thread only while this holds
-    /// them open — the history pill's state.
+    /// The past folds into the pane only while this holds it open — the
+    /// history pill's state.
     @State private var showEarlier = false
-    /// Natural height of the reply pane's content — the centered overlay on
-    /// the single-page layout sizes itself to this, capped to the page.
-    @State private var replyPaneHeight: CGFloat = 0
+    /// Natural height of the STANDING exchange alone — the centered island
+    /// on the single-page layout sizes itself to this, never to the
+    /// scrollback above it.
+    @State private var exchangeHeight: CGFloat = 0
+    /// The reply pane's own viewport height. The standing exchange fills it,
+    /// so the past always starts above the fold.
+    @State private var paneViewport: CGFloat = 0
     /// VoiceOver lands on the hand card's title when it rises (A-3).
     @AccessibilityFocusState private var handCardFocused: Bool
     @Environment(\.room) private var room
@@ -86,26 +90,32 @@ struct PageView: View {
                         }
                         .frame(maxHeight: .infinity)
                     } else {
-                        // One page, all of it writable: the reply floats at
-                        // the CENTER of the page, sized to what it carries —
-                        // a short answer is a small island, a long one grows
-                        // to a cap and scrolls within itself. It takes
-                        // touches only when it has something to show, and
-                        // fades out of the way the moment the writer takes
-                        // the page back.
+                        // One page, all of it writable: the island at the
+                        // CENTER holds only the standing exchange, sized to
+                        // it — the diary shows one exchange at a time; the
+                        // past waits above the fold, one scroll up. The pill
+                        // open turns the island into a full reading panel.
+                        // While the writer's hand moves, the island absorbs
+                        // out of the way and takes no touches.
                         writingPage
                             .overlay(alignment: .center) {
+                                let cap = geo.size.height * 0.62
                                 rightPage
                                     .frame(maxWidth: 620)
-                                    .frame(height: min(replyPaneHeight, geo.size.height * 0.62))
+                                    .frame(height: showEarlier ? cap : min(exchangeHeight, cap))
                                     .opacity(writerHasThePage ? 0 : 1)
+                                    // Invisible must mean gone: opacity keeps
+                                    // the scrollback in the accessibility
+                                    // tree, and VoiceOver would read past
+                                    // replies over a blank page.
+                                    .accessibilityHidden(writerHasThePage)
                                     .inkAnimation(
-                                        .easeOut(duration: 0.35),
+                                        .easeIn(duration: 0.7),
                                         value: writerHasThePage, reduce: reduceMotion
                                     )
                                     .inkAnimation(
                                         .easeOut(duration: 0.3),
-                                        value: replyPaneHeight, reduce: reduceMotion
+                                        value: exchangeHeight, reduce: reduceMotion
                                     )
                                     .allowsHitTesting(replySideActive && !writerHasThePage)
                             }
@@ -167,6 +177,11 @@ struct PageView: View {
         }
         .onChange(of: interactor.status) { _, status in
             react(to: status)
+        }
+        // The pill unmounts when the past empties; a panel pinned open with
+        // no pill left to close it must fold itself.
+        .onChange(of: hasPastPages) { _, has in
+            if !has { showEarlier = false }
         }
         .onAppear { consumeRevisit() }
         // Leaving the page tears the view — and this interactor — down. An
@@ -316,11 +331,11 @@ struct PageView: View {
         HStack(spacing: 16) {
             if model.leftHanded {
                 PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
-                if hasEarlierPages { historyPill }
+                if hasPastPages { historyPill }
                 headerTitle
             } else {
                 headerTitle
-                if hasEarlierPages { historyPill }
+                if hasPastPages { historyPill }
                 PageToolTray(interactor: interactor, showCancelSend: showCancelSend, onHand: openHandCard)
             }
         }
@@ -328,9 +343,9 @@ struct PageView: View {
         .padding(model.leftHanded ? .leading : .trailing, 52)
     }
 
-    /// HISTORY — the one door to pages from earlier visits. The page opens
-    /// on this visit's session alone; this pill folds the past in and out of
-    /// the thread. Dims with the tray while the pen moves.
+    /// HISTORY — the one door to the pages before the standing exchange:
+    /// this visit's scrollback, and earlier visits' pages folded in. Dims
+    /// with the tray while the pen moves.
     private var historyPill: some View {
         Button {
             withAnimation(.easeOut(duration: reduceMotion ? 0.15 : 0.3)) {
@@ -363,10 +378,10 @@ struct PageView: View {
             .easeOut(duration: 0.4), value: interactor.status == .inking, reduce: reduceMotion
         )
         .accessibilityLabel("History")
-        .accessibilityValue(showEarlier ? "Showing pages from earlier visits" : "Hidden")
+        .accessibilityValue(showEarlier ? "Showing the pages before this one" : "Hidden")
         .accessibilityHint(showEarlier
-            ? "Hides the pages from earlier visits."
-            : "Shows the pages you filled on earlier visits, above this visit's thread.")
+            ? "Hides the earlier pages."
+            : "Shows the pages before this one, above the standing reply.")
     }
 
     private func openHandCard() {
@@ -539,7 +554,7 @@ struct PageView: View {
         if !displayedReply.isEmpty || interactor.developing || !sessionThread.isEmpty {
             return true
         }
-        if showEarlier && hasEarlierPages { return true }
+        if showEarlier && hasPastPages { return true }
         switch interactor.status {
         case .cooldown, .declined: return true
         default: return false
@@ -743,63 +758,127 @@ struct PageView: View {
 
     private var hasEarlierPages: Bool { !earlierPages.isEmpty }
 
+    /// Anything before the standing exchange — this visit's earlier pages or
+    /// older visits'. The history pill is the one door to all of it.
+    private var hasPastPages: Bool { hasEarlierPages || !sessionThread.isEmpty }
+
     private var rightPage: some View {
         // Hoisted: each of these is an O(n) filter pass per access, and the
         // body would otherwise re-run them on every render.
         let thread = sessionThread
         let earlier = showEarlier ? earlierPages : []
-        return ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                if !earlier.isEmpty || !thread.isEmpty {
-                    // Earlier visits stand above the session; both are
-                    // chronological, so one thread reads straight through.
-                    PageHistoryThread(entries: earlier + thread, book: book) { entry in
-                        model.reportTarget = entry
-                    }
-                    .padding(.top, 30)
-                }
-                errorNote
-                    .frame(maxWidth: 440, alignment: .leading)
-                    .padding(.top, 30)
-                if !displayedReply.isEmpty {
-                    reply
-                        .padding(.top, 30)
-                        .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
-                        // Long-press to report — only once the exchange has
-                        // completed and archived; nothing mid-stream.
-                        .modifier(ReportableReply(entry: reportableEntry) { entry in
+        return ScrollViewReader { pane in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !earlier.isEmpty || !thread.isEmpty {
+                        // Earlier visits stand above the session; both are
+                        // chronological, so one thread reads straight through.
+                        PageHistoryThread(entries: earlier + thread, book: book) { entry in
                             model.reportTarget = entry
-                        })
-                }
-                // The server decides modality: the frame appears when an
-                // image slot opens (darkroom running), stays for the finished
-                // picture, and quietly withdraws if the develop failed.
-                if interactor.developing
-                    && (interactor.imageURL != nil || interactor.status == .answering) {
-                    developSection
+                        }
                         .padding(.top, 30)
+                        .padding(.bottom, 34)
+                    }
+                    currentExchange
+                        // Pill closed: the standing exchange fills the whole
+                        // viewport, so the past always begins above the fold
+                        // — the page shows one exchange; the scroll keeps
+                        // the rest. Pill open: the fill stands down so the
+                        // past lays out naturally against the exchange and
+                        // the panel opens ONTO history, never onto blank.
+                        .frame(
+                            minHeight: paneViewport > 0 && !showEarlier ? paneViewport : nil,
+                            alignment: .topLeading
+                        )
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.paneFoot)
                 }
-
-                movingPictureSection
-                    .padding(.top, 22)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            // What the pane would naturally take — the single-page layout
-            // sizes its centered island to this.
+            // The pane opens on the standing exchange — the past is all
+            // there, one scroll up, but the page always faces its present.
+            .defaultScrollAnchor(.bottom)
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
-            } action: { replyPaneHeight = $0 }
-            // Mirror of the absorb veil (0.9s easeIn out of sight): the
-            // reply surfaces over the same beat, blurred-and-faint to sharp.
-            .animation(
-                .easeOut(duration: reduceMotion ? 0.3 : 0.9),
-                value: displayedReply.isEmpty
-            )
+            } action: { height in
+                if abs(paneViewport - height) > 0.5 { paneViewport = height }
+            }
+            // A fresh exchange brings the pane home to the foot, wherever
+            // the reader had wandered in the past.
+            .onChange(of: interactor.status) { _, status in
+                guard status == .sending || status == .answered else { return }
+                pane.scrollTo(Self.paneFoot, anchor: .bottom)
+            }
         }
-        // The thread reads like a chat: the newest words wait at the foot of
-        // the page, the past scrolls up behind them.
-        .defaultScrollAnchor(.bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Scroll target at the very foot of the reply pane.
+    private static let paneFoot = "pane-foot"
+
+    /// The exchange standing on the page — the ONLY thing the pane shows
+    /// until the reader scrolls up. When the writer takes the page back it
+    /// absorbs the way the canvas ink does: fades, softens, settles into
+    /// the paper. Visual only — the exchange stays archived, and returns
+    /// as scrollback the moment the next send commits.
+    private var currentExchange: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !displayedReply.isEmpty {
+                reply
+                    .padding(.top, 30)
+                    .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
+                    // Long-press to report — only once the exchange has
+                    // completed and archived; nothing mid-stream.
+                    .modifier(ReportableReply(entry: reportableEntry) { entry in
+                        model.reportTarget = entry
+                    })
+            }
+            // The server decides modality: the frame appears when an
+            // image slot opens (darkroom running), stays for the finished
+            // picture, and quietly withdraws if the develop failed.
+            if interactor.developing
+                && (interactor.imageURL != nil || interactor.status == .answering) {
+                developSection
+                    .padding(.top, 30)
+            }
+
+            movingPictureSection
+                .padding(.top, 22)
+
+            // At the FOOT, after the reply: the pane anchors to its bottom,
+            // and a card above a tall stale reply would scroll out of sight
+            // — the one thing the writer must see would be the one thing
+            // hidden. Cooldown and decline land where the eye already is.
+            errorNote
+                .frame(maxWidth: 440, alignment: .leading)
+                .padding(.top, 30)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        // What the standing exchange naturally takes — the centered island
+        // sizes itself to this alone, never to the scrollback above it.
+        // Written only on real change: an animated frame reports every
+        // beat, and each state write re-evaluates the whole page body.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            if abs(exchangeHeight - height) > 0.5 { exchangeHeight = height }
+        }
+        // The absorb, reply-side: the writer took the page back at pen-down,
+        // so the standing answer sinks into the paper — fade, soften, settle
+        // downward, the same direction the canvas drinks ink. Reduce Motion
+        // keeps only the fade.
+        .opacity(writerHasThePage ? 0 : 1)
+        .blur(radius: writerHasThePage && !reduceMotion ? 4 : 0)
+        .offset(y: writerHasThePage && !reduceMotion ? 8 : 0)
+        .inkAnimation(.easeIn(duration: 0.7), value: writerHasThePage, reduce: reduceMotion)
+        .accessibilityHidden(writerHasThePage)
+        // Mirror of the absorb veil (0.9s easeIn out of sight): the reply
+        // surfaces over the same beat, blurred-and-faint to sharp.
+        .animation(
+            .easeOut(duration: reduceMotion ? 0.3 : 0.9),
+            value: displayedReply.isEmpty
+        )
     }
 
     private var reply: some View {
