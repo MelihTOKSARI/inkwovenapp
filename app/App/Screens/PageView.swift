@@ -37,6 +37,9 @@ struct PageView: View {
     /// Pages from earlier visits fold into the thread only while this holds
     /// them open — the history pill's state.
     @State private var showEarlier = false
+    /// Natural height of the reply pane's content — the centered overlay on
+    /// the single-page layout sizes itself to this, capped to the page.
+    @State private var replyPaneHeight: CGFloat = 0
     /// VoiceOver lands on the hand card's title when it rises (A-3).
     @AccessibilityFocusState private var handCardFocused: Bool
     @Environment(\.room) private var room
@@ -83,15 +86,28 @@ struct PageView: View {
                         }
                         .frame(maxHeight: .infinity)
                     } else {
-                        // One page, all of it writable: the reply floats over
-                        // the foot of the canvas instead of carving off half
-                        // the surface, and only takes touches when it has
-                        // something to show.
+                        // One page, all of it writable: the reply floats at
+                        // the CENTER of the page, sized to what it carries —
+                        // a short answer is a small island, a long one grows
+                        // to a cap and scrolls within itself. It takes
+                        // touches only when it has something to show, and
+                        // fades out of the way the moment the writer takes
+                        // the page back.
                         writingPage
-                            .overlay(alignment: .bottomLeading) {
+                            .overlay(alignment: .center) {
                                 rightPage
-                                    .frame(maxHeight: geo.size.height * 0.44)
-                                    .allowsHitTesting(replySideActive)
+                                    .frame(maxWidth: 620)
+                                    .frame(height: min(replyPaneHeight, geo.size.height * 0.62))
+                                    .opacity(writerHasThePage ? 0 : 1)
+                                    .inkAnimation(
+                                        .easeOut(duration: 0.35),
+                                        value: writerHasThePage, reduce: reduceMotion
+                                    )
+                                    .inkAnimation(
+                                        .easeOut(duration: 0.3),
+                                        value: replyPaneHeight, reduce: reduceMotion
+                                    )
+                                    .allowsHitTesting(replySideActive && !writerHasThePage)
                             }
                     }
                 }
@@ -525,6 +541,13 @@ struct PageView: View {
         interactor.status == .answering ? "" : interactor.streamedText
     }
 
+    /// While the pen or the keys are moving, the single page belongs to the
+    /// writer: the centered reply fades out of the way and stays away
+    /// through the rest — it returns only when something new stands.
+    private var writerHasThePage: Bool {
+        interactor.status == .inking || interactor.status == .resting
+    }
+
     /// A fresh blank page shows the book's greeting and the starter; the
     /// first stroke or keystroke fades them, and they stay away while a
     /// reply stands.
@@ -594,7 +617,7 @@ struct PageView: View {
     }
 
     /// Cooldown and decline cards render where the answer would have:
-    /// the right page in a spread, the unused lower half on a single
+    /// the right page in a spread, the centered island on a single
     /// screen — never over the ink the writer just laid down.
     @ViewBuilder
     private var errorNote: some View {
@@ -748,6 +771,11 @@ struct PageView: View {
                     .padding(.top, 22)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
+            // What the pane would naturally take — the single-page layout
+            // sizes its centered island to this.
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { replyPaneHeight = $0 }
             // Mirror of the absorb veil (0.9s easeIn out of sight): the
             // reply surfaces over the same beat, blurred-and-faint to sharp.
             .animation(
