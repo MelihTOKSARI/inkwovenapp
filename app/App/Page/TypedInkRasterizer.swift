@@ -40,7 +40,8 @@ enum TypedInkRasterizer {
             imageData: data,
             digest: SnapshotProcessor.digest(of: data),
             cropRect: CGRect(origin: .zero, size: size),
-            pixelSize: size
+            pixelSize: size,
+            typed: true
         )
     }
 }

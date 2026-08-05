@@ -394,15 +394,20 @@ export function createImageProviderFactory(env = process.env) {
       // rather than relying on the endpoint's default: a develop is shown
       // full-screen to the writer, so a flagged output must never ship.
       const body = { prompt, enable_safety_checker: true };
-      if (route.img2img) {
-        if (!imageBase64) return null;
+      // An img2img develop with no page image falls back to plain
+      // text-to-image: a typed page is words, not a sketch, and the caller
+      // withholds the image on purpose so the picture comes from the prompt.
+      const useSketch = route.img2img && Boolean(imageBase64);
+      const endpoint =
+        route.img2img && !useSketch ? FAL_MODELS['z-image-turbo'].endpoint : route.endpoint;
+      if (useSketch) {
         body.image_urls = [`data:${imageMime ?? 'image/jpeg'};base64,${imageBase64}`];
       }
       // The caller's abort (client disconnect, stream deadline) composes with
       // fal's own ceiling: whichever fires first cancels the job.
       const timeout = AbortSignal.timeout(90_000);
       const composed = signal ? AbortSignal.any([signal, timeout]) : timeout;
-      const res = await fetch(`https://fal.run/${route.endpoint}`, {
+      const res = await fetch(`https://fal.run/${endpoint}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Key ${env.FAL_API_KEY}` },
         body: JSON.stringify(body),

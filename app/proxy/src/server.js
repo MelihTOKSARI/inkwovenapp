@@ -7,7 +7,7 @@
 // still supply before App Attest is real.
 import Fastify from 'fastify';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { BOOKS, findBook, publicBook } from './books.js';
+import { BOOKS, developPrompt, findBook, publicBook } from './books.js';
 import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
@@ -58,6 +58,9 @@ const exchangeSchema = {
       ticketID: { type: ['string', 'null'], pattern: UUID_PATTERN },
       digest: { type: ['string', 'null'], maxLength: 128 },
       snapshotBase64: { type: ['string', 'null'], maxLength: LIMITS.maxSnapshotBase64Chars },
+      // The typed hand wrote this page: the snapshot is rendered words, not
+      // a sketch. Steers the develop pass only — never billing or gating.
+      typed: { type: 'boolean' },
       context: {
         type: 'object',
         additionalProperties: false,
@@ -893,10 +896,16 @@ export function build(options = {}) {
           const imageID = randomUUID();
           await send('image_intent', { id: imageID, expectsPreview: false });
           try {
+            // The prompt is grounded in what the Book just said it saw, so
+            // each develop paints THIS page — one static style line painted
+            // the same picture over and over. A typed page is words, not a
+            // sketch: img2img on a picture of words repaints the words, so
+            // those develop from the description alone (no image input).
+            const typedPage = request.body?.typed === true;
             const url = await imageProvider({
-              prompt: book.imagePrompt,
-              imageBase64: snapshotBase64,
-              imageMime: snapshotMime,
+              prompt: developPrompt(book, replyText, { typed: typedPage }),
+              imageBase64: typedPage ? null : snapshotBase64,
+              imageMime: typedPage ? null : snapshotMime,
               signal: abort.signal,
             });
             if (url) {

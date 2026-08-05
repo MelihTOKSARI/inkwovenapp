@@ -41,12 +41,20 @@ public struct SnapshotPayload: Equatable, Sendable {
     public var digest: String
     public var cropRect: CGRect
     public var pixelSize: CGSize
+    /// True when the typed hand wrote the page — the snapshot is a rendering
+    /// of words, not a sketch. The proxy develops those from the description
+    /// instead of running img2img on a picture of text, which repainted the
+    /// same page of words every time.
+    public var typed: Bool
 
-    public init(imageData: Data, digest: String, cropRect: CGRect, pixelSize: CGSize) {
+    public init(
+        imageData: Data, digest: String, cropRect: CGRect, pixelSize: CGSize, typed: Bool = false
+    ) {
         self.imageData = imageData
         self.digest = digest
         self.cropRect = cropRect
         self.pixelSize = pixelSize
+        self.typed = typed
     }
 }
 

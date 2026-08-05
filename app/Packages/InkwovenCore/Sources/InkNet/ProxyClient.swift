@@ -47,6 +47,10 @@ struct ExchangeRequestBody: Encodable {
     var snapshotBase64: String?
     var digest: String
     var ticketID: String?
+    /// The typed hand wrote this page — the snapshot is rendered words, not
+    /// a sketch. Rides the body (not the ticket), so it survives the
+    /// speculative-upload path.
+    var typed: Bool
 }
 
 /// A user-triggered request for a moving picture (task J4). The client names
@@ -272,7 +276,8 @@ public final class ProxyClient: Sendable {
             context: context,
             snapshotBase64: ticket == nil ? payload.imageData.base64EncodedString() : nil,
             digest: payload.digest,
-            ticketID: ticket?.id
+            ticketID: ticket?.id,
+            typed: payload.typed
         )
         request.httpBody = try JSONEncoder().encode(body)
         return request

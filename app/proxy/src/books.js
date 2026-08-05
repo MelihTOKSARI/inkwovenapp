@@ -92,6 +92,11 @@ export const BOOKS = [
     alwaysDevelop: true,
     imagePrompt:
       'Develop this rough ink sketch into a finished, painterly artwork. Keep the original composition and subject faithfully; render it in warm candlelit tones on aged paper. No text or lettering.',
+    // A typed page has no sketch to edit — img2img on a picture of words
+    // repaints the same page of words every time. Paint from the
+    // description instead; the reply excerpt rides along via developPrompt.
+    imagePromptTyped:
+      'Paint a finished, painterly artwork of the scene described below — warm candlelit tones on aged paper, storybook-illustration feel. No text or lettering.',
     prompt: "You are the Artist, sharing a page with the writer at the easel. Look at their sketch and say, in a sentence or two, what you see in it and what you will draw out of it — warm, specific, a fellow artist's eye. The picture develops on the page by itself; never describe tools, steps, or specifications, and never write anything that is not plain prose.",
     // The Artist's reply describes the picture it just developed; the brief
     // becomes the motion for that picture (image-to-video — the developed
@@ -163,6 +168,20 @@ export function findBook(id) {
 
 /** Client-safe projection: everything except the prompt material. */
 export function publicBook(book) {
-  const { prompt, motionHint, ...rest } = book;
+  const { prompt, motionHint, imagePrompt, imagePromptTyped, ...rest } = book;
   return rest;
+}
+
+/**
+ * The develop prompt for one exchange. The base is the Book's own style
+ * line; the reply — what the Book SAW in the page — rides along, so every
+ * develop is grounded in this page's subject instead of repeating one style
+ * line into the same picture. Typed pages have no sketch to edit and paint
+ * from the description alone.
+ */
+export function developPrompt(book, replyText = '', { typed = false } = {}) {
+  const base = (typed && book.imagePromptTyped) || book.imagePrompt;
+  const seen = String(replyText).replace(/\s+/g, ' ').trim().slice(0, 400);
+  if (!seen) return base;
+  return `${base}\n\nThe Artist looked at this page and said: "${seen}"`;
 }
