@@ -18,6 +18,9 @@ struct PageView: View {
     @State private var restSettled = false
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
+    /// Height of the whole opening block (opener + starter) — the status
+    /// marginalia hangs just below it, wherever it currently ends.
+    @State private var topBlockHeight: CGFloat = 0
     @State private var showHandPicker = false
     /// `.answered` also lands from revisits and canvas restores; only an
     /// exchange sent this visit is the value moment the ritual ask waits for.
@@ -408,21 +411,30 @@ struct PageView: View {
             .accessibilityLabel("Writing surface. Write with pencil or finger anywhere on the page — or with the keyboard when no pencil is at hand; rest to send.")
             .accessibilityValue(spokenStatus)
 
-            Text(book.opener)
-                .font(book.handFont(26))
-                .foregroundStyle(book.ink)
-                .opacity(0.92)
-                .lineSpacing(6)
-                .allowsHitTesting(false)
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { openerHeight = $0 }
-
-            starterFooter
-                .opacity(showStarter ? 1 : 0)
-                .inkAnimation(.easeOut(duration: 0.4), value: showStarter, reduce: reduceMotion)
-                .allowsHitTesting(false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            // The book's greeting and the starter invitation open the page
+            // together, at the top. The first stroke or keystroke fades them
+            // out — the whole page is the writer's — and a fresh blank page
+            // brings them back. The opener keeps its layout while invisible
+            // so the typed hand's inset never jumps mid-visit.
+            VStack(alignment: .leading, spacing: 0) {
+                Text(book.opener)
+                    .font(book.handFont(26))
+                    .foregroundStyle(book.ink)
+                    .opacity(showOpening ? 0.92 : 0)
+                    .lineSpacing(6)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { openerHeight = $0 }
+                if showOpening {
+                    starterOpening
+                        .transition(.opacity)
+                }
+            }
+            .allowsHitTesting(false)
+            .inkAnimation(.easeOut(duration: 0.4), value: showOpening, reduce: reduceMotion)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { topBlockHeight = $0 }
         }
         // Occlusion rule (task B6): the writing hand owns the bottom of
         // the page, so every status note is TOP-margin marginalia — just
@@ -439,7 +451,7 @@ struct PageView: View {
                 }
             }
             .frame(maxWidth: 440, alignment: writingEdge)
-            .padding(.top, openerHeight + 12)
+            .padding(.top, topBlockHeight + 12)
             .allowsHitTesting(false)
             .inkAnimation(.easeOut(duration: 0.35), value: interactor.status, reduce: reduceMotion)
         }
@@ -464,7 +476,10 @@ struct PageView: View {
         interactor.status == .answering ? "" : interactor.streamedText
     }
 
-    private var showStarter: Bool {
+    /// A fresh blank page shows the book's greeting and the starter; the
+    /// first stroke or keystroke fades them, and they stay away while a
+    /// reply stands.
+    private var showOpening: Bool {
         interactor.status == .idle && interactor.streamedText.isEmpty && interactor.typedDraft.isEmpty
     }
 
@@ -585,14 +600,11 @@ struct PageView: View {
             : "The spirit is distant tonight. Your page is safe — I will answer when the candle steadies."
     }
 
-    private var starterFooter: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Rectangle()
-                .fill(.clear)
-                .frame(height: 1)
-                .overlay(
-                    Line().stroke(Ink.ink.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                )
+    /// The invitation, directly under the opener — the ghost prompt sits
+    /// exactly where the typed hand begins, so it reads as a placeholder
+    /// the writer's own words replace.
+    private var starterOpening: some View {
+        VStack(alignment: .leading, spacing: 12) {
             SmallCapsLabel(text: "take up your pen", size: 12, tracking: 2.2, color: Ink.inkFaded)
             Text(book.starterPrompt)
                 .font(InkFont.hand("Caveat-Regular", 26))
@@ -609,7 +621,7 @@ struct PageView: View {
                         )
                 )
         }
-        .padding(.top, 20)
+        .padding(.top, 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Take up your pen. For instance: \(book.starterPrompt)")
     }
