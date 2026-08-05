@@ -445,10 +445,16 @@ struct PageView: View {
 
     private var headerTitle: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
+            // Both labels hold their single line whatever joins the rail
+            // (the history pill, the tray) — the divider line is the one
+            // flexible element, and the only thing allowed to give way.
             SmallCapsLabel(text: book.name, size: 13, tracking: 2.6, color: book.ink)
+                .fixedSize()
             LinearGradient(colors: [Ink.ink.opacity(0.22), .clear], startPoint: .leading, endPoint: .trailing)
                 .frame(height: 1)
+                .frame(minWidth: 12)
             SmallCapsLabel(text: Self.todayLabel, size: 12, tracking: 1.8, color: Ink.inkFaded)
+                .fixedSize()
         }
     }
 
