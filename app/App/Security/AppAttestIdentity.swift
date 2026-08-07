@@ -16,9 +16,9 @@ import InkNet
 /// into uselessness rather than becoming a permanent bearer secret.
 ///
 /// Falls back to the legacy anonymous token when App Attest is unsupported
-/// (the simulator, an old device) — the proxy is what decides whether that is
-/// acceptable, and in `appattest` mode it simply is not. Nothing here grants
-/// itself anything.
+/// (the simulator, an old device) or when the PROXY offers no handshake at
+/// all — the proxy is what decides whether that is acceptable, and in
+/// `appattest` mode it simply is not. Nothing here grants itself anything.
 actor AppAttestIdentity: AuthTokenProviding {
     private let service: DCAppAttestService
     private let endpoints: ProxyEndpoints
@@ -34,6 +34,11 @@ actor AppAttestIdentity: AuthTokenProviding {
     /// One in-flight handshake at a time: a cold launch fires several
     /// requests at once, and each would otherwise attest separately.
     private var inFlight: Task<String, Error>?
+    /// This deployment has no handshake to complete (see `AttestationNotOffered`).
+    /// Remembered for the process so every subsequent request does not pay a
+    /// round-trip to a route that will not answer; a redeployed proxy is
+    /// picked up on the next launch.
+    private var attestationNotOffered = false
 
     private static let log = Logger(subsystem: "com.empath.inkwoven", category: "attest")
 
@@ -63,9 +68,10 @@ actor AppAttestIdentity: AuthTokenProviding {
     }
 
     private func handshake() async throws -> String {
-        guard service.isSupported else {
-            // Simulator or unsupported hardware. The proxy decides what this
-            // is worth; in appattest mode it is worth nothing.
+        guard service.isSupported, !attestationNotOffered else {
+            // Simulator or unsupported hardware, or a proxy with no handshake
+            // to complete. The proxy decides what this is worth; in appattest
+            // mode it is worth nothing.
             return try await fallback.token()
         }
         do {
@@ -73,16 +79,35 @@ actor AppAttestIdentity: AuthTokenProviding {
                 return try await refresh(keyID: keyID)
             }
             return try await attestFresh()
+        } catch is AttestationNotOffered {
+            // Not a rejection of this device — there is simply nothing here to
+            // attest against. Carry on with the legacy identity and let the
+            // proxy judge it, rather than leaving the app with no identity at
+            // all and every page declining as "the spirit is distant".
+            Self.log.notice("proxy offers no App Attest handshake; using the anonymous identity")
+            attestationNotOffered = true
+            return try await fallback.token()
         } catch {
             Self.log.error("attestation failed: \(String(describing: error), privacy: .public)")
             throw error
         }
     }
 
+    /// The proxy has no handshake to complete. Distinct from a rejection: the
+    /// attest routes are absent (404 — a proxy older than the attest work),
+    /// gated behind the very identity they exist to mint (401 — the same
+    /// vintage, whose auth hook has no exemption for routes it does not know
+    /// about), or present with an unbound verifier (501). This device is not
+    /// what any of those three are about.
+    private struct AttestationNotOffered: Error {}
+
     /// First run: generate a key, attest it, receive the minted identity.
     private func attestFresh() async throws -> String {
-        let keyID = try await service.generateKey()
+        // The challenge comes FIRST so a proxy that offers no handshake is
+        // discovered before a Secure Enclave key is minted for it and thrown
+        // away — `generateKey` needs nothing from the challenge.
         let challenge = try await requestChallenge()
+        let keyID = try await service.generateKey()
         let attestation = try await service.attestKey(
             keyID, clientDataHash: Data(SHA256.hash(data: challenge))
         )
@@ -114,11 +139,19 @@ actor AppAttestIdentity: AuthTokenProviding {
         }
     }
 
+    /// The challenge is also the probe: it is the first thing every handshake
+    /// asks for, and the one step a correctly configured proxy answers without
+    /// an identity — so it is where "this deployment does not do attestation"
+    /// is cheapest and least ambiguous to read.
     private func requestChallenge() async throws -> Data {
         var request = URLRequest(url: endpoints.attestChallenge)
         request.httpMethod = "POST"
         let (data, response) = try await session.data(for: request)
-        try Self.check(response)
+        do {
+            try Self.check(response)
+        } catch ProxyError.server(let status) where status == 401 || status == 404 || status == 501 {
+            throw AttestationNotOffered()
+        }
         struct ChallengeResponse: Decodable { let challenge: String }
         let decoded = try JSONDecoder().decode(ChallengeResponse.self, from: data)
         guard let raw = Data(base64Encoded: decoded.challenge) else {
