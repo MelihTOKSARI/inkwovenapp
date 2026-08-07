@@ -80,6 +80,22 @@ public struct WalletView: Equatable, Sendable, Codable {
         self.freeClipsOpen = freeClipsOpen
     }
 
+    /// The free-clip half is optional ON THE WIRE: a proxy older than the
+    /// moving pictures reports a purse and nothing else, and requiring those
+    /// two keys made the whole balance undecodable — so the rooms showed no
+    /// vials at all rather than the ones the reader had actually bought.
+    /// Absent means none, which is what a proxy with no clips to give is
+    /// saying; `balance` and `available` stay required, because a purse
+    /// reported without them is not a purse. Mirrors `RemoteGateConfig`,
+    /// which already ignores keys the server has grown.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        balance = try container.decode(Int.self, forKey: .balance)
+        available = try container.decode(Int.self, forKey: .available)
+        freeClipsRemaining = try container.decodeIfPresent(Int.self, forKey: .freeClipsRemaining) ?? 0
+        freeClipsOpen = try container.decodeIfPresent(Bool.self, forKey: .freeClipsOpen) ?? false
+    }
+
     /// What the next clip would spend. The proxy makes the real decision — this
     /// only decides which sentence the page shows before the tap.
     public var nextClipIsFree: Bool { freeClipsRemaining > 0 && freeClipsOpen }
