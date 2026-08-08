@@ -57,6 +57,11 @@ final class PageArchive: PageArchiving {
     /// recoverable.
     private var openWritesBlocked = false
     private var keeperWritesBlocked = false
+    /// The backed-up open file still carries Keeper bytes: memory was
+    /// corrected but the rewrite failed (audit L-25). While set, the next
+    /// successful write of ANY Book retries the rewrite, so the sealed words
+    /// leave the file at the first opportunity instead of the next launch.
+    private var openStoreNeedsRewrite = false
 
     private static let log = Logger(subsystem: "com.empath.inkwoven", category: "archive")
 
@@ -94,12 +99,26 @@ final class PageArchive: PageArchiving {
             keeperEntries.insert(entry, at: 0)
             persist(keeperEntries, to: keeperFileURL, blocked: keeperWritesBlocked)
             if wasSealed { sealKeeper() }
+            // A Keeper write is also the moment to retry a deferred open-store
+            // rewrite (audit L-25) — this path never touches that file, so
+            // without the retry the stray sealed bytes would sit in the
+            // backed-up store until the next open-Book page or launch.
+            if openStoreNeedsRewrite { persistOpenStore() }
         } else {
             entries.insert(entry, at: 0)
-            persist(entries, to: openFileURL, blocked: openWritesBlocked)
+            persistOpenStore()
         }
         recordWrite(at: entry.createdAt)
         return entry.id
+    }
+
+    /// Writes the open store from memory — which never carries Keeper pages —
+    /// and, on success, stands down the deferred-rewrite flag: whatever this
+    /// write was for, the file it left behind is clean (audit L-25).
+    private func persistOpenStore() {
+        if persist(entries, to: openFileURL, blocked: openWritesBlocked) {
+            openStoreNeedsRewrite = false
+        }
     }
 
     /// The timestamp bypasses the write-holds deliberately: even when a store
@@ -159,6 +178,8 @@ final class PageArchive: PageArchiving {
         if allRemoved {
             openWritesBlocked = false
             keeperWritesBlocked = false
+            // A file that is verifiably gone carries nothing left to rewrite.
+            openStoreNeedsRewrite = false
         }
         return allRemoved
     }
@@ -342,10 +363,11 @@ final class PageArchive: PageArchiving {
         // The in-memory array is corrected FIRST and unconditionally: a failed
         // rewrite of the open file must not leave sealed pages readable
         // through `entries` for the whole session. The next successful write
-        // fixes the file; until then the pages simply live in the sealed
-        // store, where they belong.
+        // — any Book's, via `openStoreNeedsRewrite` — fixes the file; until
+        // then the pages simply live in the sealed store, where they belong.
         if !persist(remaining, to: openFileURL, blocked: openWritesBlocked) {
             Self.log.error("keeper migration: sealed store written, open store rewrite deferred")
+            openStoreNeedsRewrite = true
         }
     }
 
@@ -356,6 +378,11 @@ final class PageArchive: PageArchiving {
         guard remaining.count != entries.count else { return }
         Self.log.error("open store carried sealed pages; dropping them from memory")
         entries = remaining
-        _ = persist(remaining, to: openFileURL, blocked: openWritesBlocked)
+        if !persist(remaining, to: openFileURL, blocked: openWritesBlocked) {
+            // The Keeper bytes are still in the backed-up file. Flag it so
+            // the next write — any Book's — rewrites, rather than leaving
+            // them there until the next launch (audit L-25).
+            openStoreNeedsRewrite = true
+        }
     }
 }

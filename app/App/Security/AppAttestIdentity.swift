@@ -120,13 +120,26 @@ actor AppAttestIdentity: AuthTokenProviding {
         return token
     }
 
-    /// Later runs: the stored key signs a fresh challenge. A rejected key
-    /// (revoked, re-installed OS, server-side reset) attests anew rather than
-    /// leaving the app with no identity at all.
+    /// Later runs: the stored key signs a fresh challenge. A rejected key —
+    /// by the server (401) or by the Secure Enclave itself (`invalidKey`) —
+    /// attests anew rather than leaving the app with no identity at all.
     private func refresh(keyID: String) async throws -> String {
         let challenge = try await requestChallenge()
         let clientDataHash = Data(SHA256.hash(data: challenge))
-        let assertion = try await service.generateAssertion(keyID, clientDataHash: clientDataHash)
+        let assertion: Data
+        do {
+            assertion = try await service.generateAssertion(keyID, clientDataHash: clientDataHash)
+        } catch let error as DCError where error.code == .invalidKey {
+            // The stored keyID names a key the Secure Enclave no longer
+            // holds — invalidated, or restored onto other hardware. Left in
+            // place it repeats this failure on every request until reinstall
+            // (audit M-9). Only THIS error clears the key: any other DCError
+            // is transient trouble that must not cost the device the
+            // identity its wallet hangs on.
+            Self.log.notice("stored App Attest key is invalid locally; attesting anew")
+            InkKeychain.remove(account: Self.keyIDAccount)
+            return try await attestFresh()
+        }
         do {
             return try await post(
                 endpoints.attestRefresh,

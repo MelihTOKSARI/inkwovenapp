@@ -233,7 +233,7 @@ struct MovingPictureFrame: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button(action: onOpen) {
-                ClipLoopView(url: url, onFailure: { clipFailed = true })
+                ClipLoopView(url: url, onFailure: { clipFailed = true }, sealed: book.locked)
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .overlay(
@@ -372,6 +372,12 @@ struct ClipLoopView: View {
     /// Lets a host (the page frame) follow the clip's fate, so captions and
     /// spoken labels can stop promising a picture that never woke.
     var onFailure: (() -> Void)? = nil
+    /// A sealed Book's clip is cached apart from the rest, so the Keeper's
+    /// reseal can take the picture with the page it was made from (audit
+    /// M-13). The page frame knows its Book; hosts that do not (the
+    /// immersive cover) leave this false and ClipCache finds the sealed
+    /// copy already resting on disk.
+    var sealed: Bool = false
     @State private var localURL: URL?
     @State private var failed = false
 
@@ -399,7 +405,7 @@ struct ClipLoopView: View {
             failed = false
             localURL = nil
             do {
-                localURL = try await ClipCache.shared.localCopy(of: url)
+                localURL = try await ClipCache.shared.localCopy(of: url, sealed: sealed)
             } catch {
                 failed = true
                 onFailure?()
@@ -480,11 +486,32 @@ actor ClipCache {
     static let shared = ClipCache()
 
     private var inFlight: [URL: Task<URL, Error>] = [:]
+    /// Which in-flight downloads belong behind the seal, so `purgeSealed()`
+    /// can cancel exactly those — a sealed clip landing a moment after the
+    /// purge would reopen the very hole it closes.
+    private var sealedInFlight: Set<URL> = []
 
-    func localCopy(of remote: URL) async throws -> URL {
+    func localCopy(of remote: URL, sealed: Bool = false) async throws -> URL {
         if remote.isFileURL { return remote }
-        let destination = Self.cacheURL(for: remote)
+        let destination = Self.cacheURL(for: remote, sealed: sealed)
         if FileManager.default.fileExists(atPath: destination.path) { return destination }
+        // The same clip may already rest on the other side of the seal: the
+        // immersive cover replays a clip without knowing its Book, and a
+        // sealed page's clip fetched before the split lives in the open
+        // cache. Reuse the copy rather than fetching a second one — and when
+        // THIS request is sealed, move it behind the seal on the way, so the
+        // reseal's purge covers it from now on (audit M-13).
+        let sibling = Self.cacheURL(for: remote, sealed: !sealed)
+        if FileManager.default.fileExists(atPath: sibling.path) {
+            guard sealed else { return sibling }
+            try? FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            if (try? FileManager.default.moveItem(at: sibling, to: destination)) != nil {
+                return destination
+            }
+            return sibling
+        }
         if let existing = inFlight[remote] { return try await existing.value }
 
         let task = Task<URL, Error> {
@@ -492,6 +519,9 @@ actor ClipCache {
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw ProxyError.server(status: http.statusCode)
             }
+            // A reseal may have cancelled this while the bytes travelled; a
+            // sealed clip must not land after the purge meant to cover it.
+            try Task.checkCancellation()
             try? FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
             )
@@ -501,7 +531,11 @@ actor ClipCache {
             return destination
         }
         inFlight[remote] = task
-        defer { inFlight[remote] = nil }
+        if sealed { sealedInFlight.insert(remote) }
+        defer {
+            inFlight[remote] = nil
+            sealedInFlight.remove(remote)
+        }
         return try await task.value
     }
 
@@ -511,7 +545,19 @@ actor ClipCache {
     func purgeAll() {
         for task in inFlight.values { task.cancel() }
         inFlight.removeAll()
+        sealedInFlight.removeAll()
         try? FileManager.default.removeItem(at: Self.clipsDirectory)
+    }
+
+    /// The Keeper's reseal (audit M-13): the sealed Book's clips leave
+    /// Caches with the pages they were made from. Open Books keep theirs.
+    func purgeSealed() {
+        for remote in sealedInFlight {
+            inFlight[remote]?.cancel()
+            inFlight[remote] = nil
+        }
+        sealedInFlight.removeAll()
+        try? FileManager.default.removeItem(at: Self.sealedClipsDirectory)
     }
 
     /// One clip, by the URL it was fetched from — for a reseal that only
@@ -519,7 +565,9 @@ actor ClipCache {
     func purge(_ remote: URL) {
         inFlight[remote]?.cancel()
         inFlight[remote] = nil
-        try? FileManager.default.removeItem(at: Self.cacheURL(for: remote))
+        sealedInFlight.remove(remote)
+        try? FileManager.default.removeItem(at: Self.cacheURL(for: remote, sealed: false))
+        try? FileManager.default.removeItem(at: Self.cacheURL(for: remote, sealed: true))
     }
 
     private static var clipsDirectory: URL {
@@ -527,12 +575,19 @@ actor ClipCache {
             .appending(path: "clips")
     }
 
-    private static func cacheURL(for remote: URL) -> URL {
+    /// The sealed Book's clips, apart from the rest so the reseal can sweep
+    /// them without touching the open Books' cache. Inside `clips`, so
+    /// `purgeAll()` still means all.
+    private static var sealedClipsDirectory: URL {
+        clipsDirectory.appending(path: "keeper")
+    }
+
+    private static func cacheURL(for remote: URL, sealed: Bool) -> URL {
         // Hash the whole URL: fal's paths repeat, and the query is what makes
         // one clip distinct from another. SHA-256, never `hashValue` — that
         // seed changes every launch (audit H-9), so the cache could never hit
         // twice and every relaunch re-downloaded (and re-orphaned) every clip.
         let name = SnapshotProcessor.digest(of: Data(remote.absoluteString.utf8))
-        return clipsDirectory.appending(path: "\(name).mp4")
+        return (sealed ? sealedClipsDirectory : clipsDirectory).appending(path: "\(name).mp4")
     }
 }

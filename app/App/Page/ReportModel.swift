@@ -110,6 +110,10 @@ final class ReportModel {
     private let analytics: Analytics
     private let snapshotter: any ReportSnapshotting
     private let reportID = UUID()
+    /// The in-flight send, held so a dismissal can withdraw it (audit L-23):
+    /// without the handle, closing the sheet mid-send let the page travel
+    /// anyway.
+    private var sendTask: Task<Void, Never>?
 
     init(
         entry: PageArchive.Entry,
@@ -133,27 +137,51 @@ final class ReportModel {
     /// read like carrying any other. Same flow, stronger words.
     var isPrivatePage: Bool { book.locked }
 
-    /// Plain language, above the send seal, naming exactly what travels.
+    /// Plain language, above the send seal, naming exactly what travels —
+    /// the page's words in either hand, inked or typed (audit L-24), never
+    /// just "strokes" when the keyboard wrote them.
     var consentLine: String {
         if isPrivatePage {
-            return "This page is the Keeper's, sealed behind your face on this device. Sending this report carries this private page out from behind the seal — the reply, your strokes from that page, which Book it came from, and when it was written. Nothing leaves this device until you press send."
+            return "This page is the Keeper's, sealed behind your face on this device. Sending this report carries this private page out from behind the seal — the reply, your page's words whether inked or typed, which Book it came from, and when it was written. Nothing leaves this device until you press send."
         }
-        return "Sending this shows the binder: the reply, your strokes from that page, which Book it came from, and when it was written. Nothing leaves this device until you press send."
+        return "Sending this shows the binder: the reply, your page's words whether inked or typed, which Book it came from, and when it was written. Nothing leaves this device until you press send."
     }
 
     func send() async {
         guard let reason, canSend else { return }
         phase = .sending
+        let task = Task { await deliver(reason: reason) }
+        sendTask = task
+        await task.value
+        sendTask = nil
+    }
+
+    /// Closing the sheet mid-send takes the report back (audit L-23): "keep
+    /// it between us" must mean exactly that, even pressed a moment late.
+    func cancelSend() {
+        sendTask?.cancel()
+        sendTask = nil
+    }
+
+    private func deliver(reason: ReportReason) async {
         do {
             let snapshot = try snapshotter.snapshot(
                 strokeData: entry.strokeData, typedText: entry.typedText
             )
+            try Task.checkCancellation()
             try await submitter.report(payload(reason: reason, snapshot: snapshot))
+            try Task.checkCancellation()
             phase = .sent
             await analytics.track(
                 .reportSubmitted(book: BookID(rawValue: entry.bookID), reason: reason.rawValue)
             )
+        } catch is CancellationError {
+            // Withdrawn: the sheet is gone, and the page stayed home.
         } catch {
+            // A cancelled URLSession surfaces its own error, not
+            // CancellationError; a withdrawn send must not paint a failure
+            // onto a sheet that no longer stands.
+            guard !Task.isCancelled else { return }
             phase = .failed(Self.failureLine(for: error))
         }
     }

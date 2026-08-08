@@ -104,12 +104,31 @@ struct RootView: View {
                 Task { await model.refreshWallet() }
             }
         }
+        .onChange(of: keeperContentOnScreen) { wasShowing, isShowing in
+            // "One unlock buys one visit" (audit M-10): the visit ends when
+            // the route leaves the Keeper's pages, not only when the app
+            // backgrounds. A sheet over the page — report, clip consent, the
+            // immersive clip — changes no route and never trips this; and
+            // unlike the background path, sealing is ALL this does, so the
+            // navigation already in motion is never fought.
+            if wasShowing && !isShowing && model.keeperUnlocked {
+                sealKeeperVisit()
+            }
+        }
         .onChange(of: di.archive.lastWrittenAt) { _, _ in
             // A page written today — any Book, the Keeper included — keeps
             // tonight silent the moment it lands, not on the next foreground.
             model.scheduleRitualRearm()
         }
         .task { model.scheduleRitualRearm() }
+    }
+
+    /// Whether the room is showing the Keeper's content through an open gate.
+    /// Watches the whole route — screen AND active Book, since a ritual tap
+    /// can walk to another Book's page without the screen value changing.
+    private var keeperContentOnScreen: Bool {
+        model.keeperUnlocked && model.activeBook.locked
+            && (model.screen == .page || model.screen == .remembered)
     }
 
     private var keeperGate: some View {
@@ -123,14 +142,24 @@ struct RootView: View {
     /// animation would still be running while the snapshot is taken.
     private func relockKeeper() {
         guard model.keeperUnlocked else { return }
+        sealKeeperVisit()
+        if model.activeBook.locked && (model.screen == .page || model.screen == .remembered) {
+            model.screen = .shelf
+        }
+    }
+
+    /// The seal itself, shared by both closings — backgrounding and routing
+    /// away (audit M-10). Everything the unlock let out goes back behind it.
+    private func sealKeeperVisit() {
         model.keeperUnlocked = false
         di.archive.sealKeeper()
         if model.revisit?.bookID == BookID.keeper.rawValue { model.revisit = nil }
         // A pending report holds a full entry the same way revisit does; a
         // sealed Keeper page may not wait in memory behind a closed lock.
         if model.reportTarget?.bookID == BookID.keeper.rawValue { model.reportTarget = nil }
-        if model.activeBook.locked && (model.screen == .page || model.screen == .remembered) {
-            model.screen = .shelf
-        }
+        // A clip made from a consented Keeper page is that page's picture;
+        // it may not rest readable in Caches once the seal closes (audit
+        // M-13).
+        Task { await ClipCache.shared.purgeSealed() }
     }
 }

@@ -32,7 +32,7 @@ struct ReportSheet: View {
         ZStack {
             Color(hex: 0x080503, opacity: 0.66)
                 .ignoresSafeArea()
-                .onTapGesture(perform: onClose)
+                .onTapGesture(perform: close)
 
             VStack(spacing: 0) {
                 header
@@ -81,6 +81,17 @@ struct ReportSheet: View {
         .onChange(of: model.phase) { _, phase in
             if phase == .sent { onSent() }
         }
+        // The sheet can also be taken down from outside — the Keeper's
+        // reseal clearing `reportTarget` mid-send. Whatever removed it, a
+        // sheet that is gone has no send left to finish.
+        .onDisappear { model.cancelSend() }
+    }
+
+    /// Every way out of the sheet withdraws an in-flight send first (audit
+    /// L-23): a page must not travel after the writer closed the door on it.
+    private func close() {
+        model.cancelSend()
+        onClose()
     }
 
     private var header: some View {
@@ -93,7 +104,7 @@ struct ReportSheet: View {
             }
             HStack {
                 Spacer()
-                Button(action: onClose) {
+                Button(action: close) {
                     Image(systemName: "xmark")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(room.dim)
@@ -190,7 +201,7 @@ struct ReportSheet: View {
 
     private var actions: some View {
         HStack(spacing: 10) {
-            Button(action: onClose) {
+            Button(action: close) {
                 Text("Keep it between us")
                     .font(InkFont.body(15))
                     .foregroundStyle(room.dim)
