@@ -39,6 +39,16 @@ final class AppDI {
         UNUserNotificationCenter.current().delegate = ritualDelegate
     }
 
+    /// Routes a tapped ritual night to its Book (audit L-18). Bound by the
+    /// App the moment the model exists; the delegate holds a cold-launch tap
+    /// until then. The route runs through `AppModel.openFromRitual`, whose
+    /// open flow is where the Keeper's gate is enforced — never around it.
+    func routeRitualTaps(to model: AppModel) {
+        ritualDelegate.bind { [weak model] book in
+            model?.openFromRitual(book)
+        }
+    }
+
     /// Reads the vial balance for the rooms. In Release this is the proxy and
     /// nothing else; in Debug it is the stand-in below, which falls back to a
     /// local purse when the server cannot be reached.
@@ -68,6 +78,11 @@ final class AppDI {
         // First read of the server-tunable gate knobs; RootView re-reads on
         // every foreground. Failure keeps the compiled-in defaults.
         Task { await LiveCommerce.refreshGateConfig() }
+        // Sweep any export residue an abnormal exit left behind (audit L-22):
+        // the purge otherwise runs only around a share, and a force-quit with
+        // the sheet up leaves the journal's plaintext sitting in tmp. In a
+        // task so it never taxes the first frame.
+        Task { PageExporter.purge() }
         // TODO(A3): bind the real SDK adapter here for both configurations.
         #if DEBUG
         let analytics = Analytics(sink: ConsoleAnalyticsSink())

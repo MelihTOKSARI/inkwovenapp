@@ -25,7 +25,9 @@ protocol KeeperAuthenticating {
 
 /// LocalAuthentication adapter. Never returns `.granted` on any path other
 /// than a successful evaluation — a lock that opens when it cannot recognise
-/// anyone is not a lock.
+/// anyone is not a lock. `.deviceOwnerAuthentication` carries the system's
+/// own passcode fallback inside the prompt, which is why the gate offers one
+/// door and no separate "use passcode" button (audit L-20).
 struct LiveKeeperAuth: KeeperAuthenticating {
     func authenticate(reason: String) async -> KeeperAuthOutcome {
         // A fresh context per attempt: LAContext caches a successful

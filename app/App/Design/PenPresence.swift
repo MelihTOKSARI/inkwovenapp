@@ -30,20 +30,41 @@ final class PenPresence {
         didSet { defaults.set(keysPreferred, forKey: "ink.keysPreferred") }
     }
 
+    /// VoiceOver, mirrored into observable state (audit M-18): the static
+    /// `UIAccessibility.isVoiceOverRunning` read is a snapshot the surfaces
+    /// never re-take, so a curtain raised mid-session would have left them
+    /// on a canvas a VoiceOver user cannot write in.
+    private(set) var voiceOverRunning: Bool
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         // Read but never written in production: the UITest pencil scenarios
-        // inject `ink.pencilSeen` through the argument domain. Production
-        // launches start pencil-quiet and observe the session's touches.
+        // inject `ink.pencilSeen` through the argument domain, which the
+        // startup scrub cannot reach. A pre-fix build DID persist this key;
+        // AppModel removes that legacy value from the plist at launch (audit
+        // M-12), so an upgrader's old touch cannot re-latch the lockout.
+        // Production launches start pencil-quiet and observe the session's
+        // touches.
         pencilActive = defaults.bool(forKey: "ink.pencilSeen")
         keysPreferred = defaults.bool(forKey: "ink.keysPreferred")
+        voiceOverRunning = UIAccessibility.isVoiceOverRunning
+        NotificationCenter.default.addObserver(
+            forName: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // Delivered on the main queue (`queue: .main`), which is the
+            // main actor — the assume is a statement of fact, not a hope.
+            MainActor.assumeIsolated {
+                self?.voiceOverRunning = UIAccessibility.isVoiceOverRunning
+            }
+        }
     }
 
     /// What the writing surfaces honor.
     var pencilPreferred: Bool {
-        pencilActive && !keysPreferred && !UIAccessibility.isVoiceOverRunning
+        pencilActive && !keysPreferred && !voiceOverRunning
     }
 
     func note(_ type: UITouch.TouchType) {

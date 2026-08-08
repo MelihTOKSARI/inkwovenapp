@@ -5,21 +5,15 @@ import InkCore
 /// and reduce-motion resolve here and flow down the environment.
 struct RootView: View {
     let di: AppDI
-    @State private var model: AppModel
+    /// Owned by InkwovenApp (audit L-17): building the model here in an
+    /// `init` meant every re-init of this struct spun up a throwaway AppModel
+    /// whose commerce streams kept it alive forever. RootView only renders it.
+    let model: AppModel
     /// The launch veil (Design/LaunchGlow.swift): true exactly once per
     /// process, so foreground-resume never replays the ceremony.
     @State private var launchVeil = LaunchGlowView.shouldShow
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.scenePhase) private var scenePhase
-
-    init(di: AppDI) {
-        self.di = di
-        // The wallet reader was never bound, so `AppModel.wallet` stayed nil
-        // and every room that shows a balance showed a placeholder forever.
-        _model = State(initialValue: AppModel(
-            walletReader: di.wallet, ritual: di.ritual, ritualDiary: di.archive
-        ))
-    }
 
     var body: some View {
         ZStack {
@@ -104,6 +98,10 @@ struct RootView: View {
                 // fetch may have run offline, and stale eligibility shows a
                 // trial promise a returning subscriber will not receive.
                 Task { await model.refreshStore() }
+                // And the wallet (audit L-19): a refund, a purchase finished
+                // elsewhere, or the server's own bookkeeping may have moved
+                // the balance while the room stood dark.
+                Task { await model.refreshWallet() }
             }
         }
         .onChange(of: di.archive.lastWrittenAt) { _, _ in

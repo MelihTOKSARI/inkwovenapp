@@ -8,8 +8,9 @@ import PencilKit
 ///   tap focuses it (the surface never summons the keys itself — pen first),
 ///   typing lands on the page in a script hand, and a stray finger tap can
 ///   no longer ink a dot.
-/// The first pencil touch anywhere flips the surface to ink for good
-/// (PenPresence persists it); the keyboard bows out mid-session.
+/// The first pencil touch anywhere flips the surface to ink for the session
+/// (PenPresence keeps the observation in memory only — audit A-1); the
+/// keyboard bows out mid-session and stands ready again next launch.
 /// `setWantsKeys` remains for surfaces that DO invite typing on entry
 /// (the flyleaf signature); the page never calls it.
 @MainActor

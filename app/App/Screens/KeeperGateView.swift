@@ -27,6 +27,10 @@ struct KeeperGateView: View {
                     .foregroundStyle(room.dim)
                     .padding(.top, 6)
 
+                // One door, honestly named (audit L-20): the old "Use
+                // passcode instead" button ran this identical policy, and
+                // `.deviceOwnerAuthentication` already offers the device
+                // passcode as the system's own fallback inside the prompt.
                 Button(action: unlock) {
                     Text("Look to unlock")
                         .font(InkFont.body(16))
@@ -44,19 +48,10 @@ struct KeeperGateView: View {
                 .padding(.top, 28)
                 .disabled(asking)
 
-                Button(action: unlock) {
-                    Text("Use passcode instead")
-                        .font(InkFont.body(13))
-                        .foregroundStyle(Color(hex: 0x7A6A4D))
-                        .frame(minHeight: 44)
-                }
-                .padding(.top, 2)
-                .disabled(asking)
-
                 if let refusal, let line = Self.refusalLine(refusal) {
                     Text(line)
                         .font(InkFont.bodyItalic(13))
-                        .foregroundStyle(Ink.dangerEmber)
+                        .foregroundStyle(refusalEmber)
                         .multilineTextAlignment(.center)
                         .padding(.top, 6)
                         .transition(.opacity)
@@ -79,10 +74,23 @@ struct KeeperGateView: View {
                         .fill(.white.opacity(0.04))
                         .overlay(Capsule().stroke(room.accent.opacity(0.2), lineWidth: 1))
                 )
+                // 44pt hit floor (audit M-16) without swelling the capsule:
+                // the extra reach is invisible margin, all of it tappable.
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(PressScaleStyle())
             .padding(22)
         }
+    }
+
+    /// The refusal's ember, lifted to read in the dark (audit M-17):
+    /// `Ink.dangerEmber` #8C3B2E measured 2.26–2.62:1 against the night
+    /// room's gradient stops; #D4715A holds the same heat at 5.1:1 on the
+    /// lightest stop. Daylight keeps the deep ember, which already reads
+    /// dark-on-light at 5.6:1.
+    private var refusalEmber: Color {
+        room.variant == .daylight ? Ink.dangerEmber : Color(hex: 0xD4715A)
     }
 
     private var keeperCover: some View {

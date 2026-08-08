@@ -1,9 +1,9 @@
 import SwiftUI
 import PencilKit
 
-/// The notebook introduces itself in ink, asks your name, and gifts one
-/// sealed vial. AI disclosure is woven into the fiction and restated
-/// plainly at the foot.
+/// The notebook introduces itself in ink, asks your name, and names the two
+/// gifted moments waiting on its pages. AI disclosure is woven into the
+/// fiction and restated plainly at the foot.
 ///
 /// Signing is pen-first with a settle window: ink (or keys) never commits on
 /// the instant — the page bounces softly while you finish your hand, and only
@@ -15,7 +15,7 @@ struct OnboardingView: View {
     @State private var shownCharacters = 0
     @State private var streamTask: Task<Void, Never>?
 
-    /// Signature accepted — the vial and seal have bounced onto the page.
+    /// Signature accepted — the gift and seal have bounced onto the page.
     @State private var sealed = false
     /// A settle window is open: the bounce dances, nothing commits yet.
     @State private var settling = false
@@ -50,47 +50,63 @@ struct OnboardingView: View {
             )
             .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    SmallCapsLabel(text: "Inkwoven", size: 13, tracking: 3.9, color: Ink.inkFaded)
-                        .padding(.bottom, 24)
+            ScrollViewReader { scroll in
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        SmallCapsLabel(text: "Inkwoven", size: 13, tracking: 3.9, color: Ink.inkFaded)
+                            .padding(.bottom, 24)
 
-                    // AI disclosure as top-margin marginalia (occlusion rule:
-                    // the writing hand owns the bottom of the page) — plain
-                    // truth, worn like a bookplate.
-                    disclosure
-                        .padding(.bottom, 40)
+                        // AI disclosure as top-margin marginalia (occlusion rule:
+                        // the writing hand owns the bottom of the page) — plain
+                        // truth, worn like a bookplate.
+                        disclosure
+                            .padding(.bottom, 40)
 
-                    intro
-                        .frame(minHeight: 220, alignment: .topLeading)
+                        intro
+                            .frame(minHeight: 220, alignment: .topLeading)
 
-                    if streamed {
-                        signature
-                            .padding(.top, 40)
-                            .transition(InkMotion.arrival(
-                                .opacity.combined(with: .move(edge: .bottom)), reduce: reduceMotion
-                            ))
-                    }
-
-                    if sealed {
-                        giftedVial
-                            .padding(.top, 34)
-                            .transition(InkMotion.arrival(sealArrival, reduce: reduceMotion))
-
-                        WaxSealButton(
-                            label: "step up to the shelf",
-                            diameter: 52,
-                            labelFont: InkFont.display(22)
-                        ) {
-                            model.finishOnboarding()
+                        if streamed {
+                            signature
+                                .id(Self.flyleafLineID)
+                                .padding(.top, 40)
+                                .transition(InkMotion.arrival(
+                                    .opacity.combined(with: .move(edge: .bottom)), reduce: reduceMotion
+                                ))
                         }
-                        .padding(.top, 48)
-                        .transition(InkMotion.arrival(sealArrival, reduce: reduceMotion))
+
+                        if sealed {
+                            giftedMoments
+                                .padding(.top, 34)
+                                .transition(InkMotion.arrival(sealArrival, reduce: reduceMotion))
+
+                            WaxSealButton(
+                                label: "step up to the shelf",
+                                diameter: 52,
+                                labelFont: InkFont.display(22)
+                            ) {
+                                model.finishOnboarding()
+                            }
+                            .padding(.top, 48)
+                            .transition(InkMotion.arrival(sealArrival, reduce: reduceMotion))
+                        }
+                    }
+                    .frame(maxWidth: 640, alignment: .leading)
+                    .padding(EdgeInsets(top: 92, leading: 56, bottom: 60, trailing: 56))
+                    .frame(maxWidth: .infinity)
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: UIResponder.keyboardDidShowNotification
+                )) { _ in
+                    // The keys rise from a UIKit becomeFirstResponder this
+                    // SwiftUI scroll knows nothing about (audit M-19), so
+                    // nothing walks the signature line clear of them on its
+                    // own. `didShow`, not `willShow`: the keyboard inset has
+                    // landed by then, so the anchor measures the true room.
+                    guard !sealed else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        scroll.scrollTo(Self.flyleafLineID, anchor: .bottom)
                     }
                 }
-                .frame(maxWidth: 640, alignment: .leading)
-                .padding(EdgeInsets(top: 92, leading: 56, bottom: 60, trailing: 56))
-                .frame(maxWidth: .infinity)
             }
 
             Button {
@@ -98,7 +114,10 @@ struct OnboardingView: View {
             } label: {
                 SmallCapsLabel(text: "skip", size: 12, tracking: 1.7, color: Ink.ink.opacity(0.4))
                     .padding(.horizontal, 12)
-                    .frame(minHeight: 40)
+                    // 44pt floor (audit M-16): the word stays small; the
+                    // quiet air around it is all tappable.
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .padding(.top, 22)
             .padding(.trailing, 24)
@@ -125,6 +144,10 @@ struct OnboardingView: View {
             armSettle { commitTyped() }
         }
     }
+
+    /// Scroll anchor for the signature block, so the keyboard fix (audit
+    /// M-19) can walk the focused line back into view.
+    private static let flyleafLineID = "flyleaf-signature"
 
     /// Every prefix of the intro, built once. `String.prefix(_:)` walks
     /// graphemes from the start and allocates a fresh String, and it ran
@@ -163,7 +186,10 @@ struct OnboardingView: View {
                     } label: {
                         SmallCapsLabel(text: "begin again", size: 10.5, tracking: 1.3, color: Ink.inkFaded)
                             .padding(.horizontal, 10)
-                            .frame(minHeight: 34)
+                            // 44pt floor (audit M-16) — same small caps, a
+                            // taller reach; every point of it tappable.
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(PressScaleStyle())
                     .transition(.opacity)
@@ -275,7 +301,7 @@ struct OnboardingView: View {
         seal()
     }
 
-    /// The vial and the shelf door bounce onto the page together.
+    /// The gift and the shelf door bounce onto the page together.
     private var sealArrival: AnyTransition {
         .scale(scale: 0.88, anchor: .topLeading).combined(with: .opacity)
     }
@@ -293,7 +319,7 @@ struct OnboardingView: View {
         // Sealing is the whole gate on this screen and it happens on a timer,
         // with no touch to attribute it to — silence here reads as a dead end.
         AccessibilityNotification.Announcement(
-            "Signed. A first moving-picture credit is gifted; the shelf is open."
+            "Signed. Two gifted moments await; the shelf is open."
         ).post()
     }
 
@@ -309,14 +335,17 @@ struct OnboardingView: View {
         }
     }
 
-    private var giftedVial: some View {
+    /// The gift, named as the Drawer and the Vials name it (audit H-11): two
+    /// free moving pictures the house grants, not a vial the wallet holds —
+    /// wallets start empty, and a promised vial that never appears is a lie.
+    private var giftedMoments: some View {
         HStack(spacing: 16) {
             VialView(width: 26, height: 42, fill: 0.55)
             VStack(alignment: .leading, spacing: 2) {
-                Text("A first moving-picture credit, gifted.")
+                Text("Two gifted moments await.")
                     .font(InkFont.body(17))
                     .foregroundStyle(Ink.ink)
-                Text("One sealed vial — spend it when a page asks to move.")
+                Text("The first pages that ask to move, move freely — no vial needed.")
                     .font(InkFont.bodyItalic(14))
                     .foregroundStyle(Color(hex: 0x7A6A4D))
             }

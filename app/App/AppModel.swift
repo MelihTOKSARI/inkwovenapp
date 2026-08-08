@@ -152,7 +152,10 @@ final class AppModel {
         }
     }
     /// The system prompt can be shown once, ever — re-triggering it does
-    /// nothing. This flag is what makes the ask honest about that.
+    /// nothing. Recorded only after the dialog actually resolves (audit
+    /// M-11): latching before the answer meant a process death mid-prompt
+    /// left authorization `.notDetermined` behind a flag that said "asked",
+    /// and the Drawer's toggle went permanently dead.
     private(set) var ritualAsked: Bool {
         didSet { defaults.set(ritualAsked, forKey: "ink.ritualAsked") }
     }
@@ -282,7 +285,23 @@ final class AppModel {
         // Same for the local vial count, which the argument domain could set
         // and which no refund could ever claw back. The wallet is the server's.
         defaults.removeObject(forKey: "ink.credits")
+        // And the pencil observation a pre-fix build persisted (audit M-12):
+        // left in the plist it would re-latch the old for-good keyboard
+        // lockout (A-1) the moment an upgrader launched. This runs before any
+        // surface wakes PenPresence, and the UITest `-ink.pencilSeen YES`
+        // injection rides the argument domain, which removeObject cannot touch.
+        defaults.removeObject(forKey: "ink.pencilSeen")
         observeCommerce()
+    }
+
+    deinit {
+        // The streams end with their model (audit L-17): the for-await loops
+        // in `observeCommerce` hold `self` weakly, so the last reference dying
+        // actually reaches here — and this puts the tasks down rather than
+        // leaving them parked forever on streams that never finish.
+        entitlementTask?.cancel()
+        grantTask?.cancel()
+        ritualTask?.cancel()
     }
 
     // MARK: - Commerce
@@ -291,8 +310,11 @@ final class AppModel {
     /// Reads the server-side balance. Optional so previews and the harness can
     /// run with no network — they show the waiting state, never a fake purse.
     private let walletReader: (any WalletReading)?
-    private var entitlementTask: Task<Void, Never>?
-    private var grantTask: Task<Void, Never>?
+    // `nonisolated(unsafe)` so a nonisolated `deinit` can cancel them (audit
+    // L-17); every write happens on the main actor, and by the time deinit
+    // runs no other reference exists to race with.
+    @ObservationIgnored nonisolated(unsafe) private var entitlementTask: Task<Void, Never>?
+    @ObservationIgnored nonisolated(unsafe) private var grantTask: Task<Void, Never>?
 
     private static let purchaseFailure = "The seal would not take. Nothing was charged."
     private static let restoreFailure = "No binding was found for this hand."
@@ -302,23 +324,28 @@ final class AppModel {
         "The purchase went through, but the vials could not be delivered to this notebook. Write to the binder from the Drawer — nothing is lost."
 
     private func observeCommerce() {
-        entitlementTask = Task { [purchases] in
+        // Every capture below is weak (audit L-17): these loops run for the
+        // life of the streams, and a strong `self` would make any AppModel
+        // that ever armed them immortal.
+        entitlementTask = Task { [purchases, weak self] in
             // Armed before `start()` so the reconcile it performs is seen.
             for await snapshot in purchases.snapshots() {
+                guard let self else { return }
                 self.tier = snapshot.tier
             }
         }
-        grantTask = Task { [purchases] in
+        grantTask = Task { [purchases, weak self] in
             // A delivered purchase means the SERVER's balance changed; re-read
             // it rather than adding up what the client thinks it bought.
             for await _ in purchases.creditGrants() {
+                guard let self else { return }
                 await self.refreshWallet()
             }
         }
-        Task { [purchases] in
+        Task { [purchases, weak self] in
             await purchases.start()
-            await self.refreshStore()
-            await self.refreshWallet()
+            await self?.refreshStore()
+            await self?.refreshWallet()
         }
     }
 
@@ -406,7 +433,10 @@ final class AppModel {
     private let ritual: RitualScheduler?
     private let ritualDiary: (any RitualDiary)?
     /// The re-arm in flight, held so tests can await it instead of polling.
-    private(set) var ritualTask: Task<Void, Never>?
+    /// `nonisolated(unsafe)` for the same reason as the commerce tasks: the
+    /// nonisolated `deinit` must be able to cancel it, and all writes stay
+    /// on the main actor.
+    @ObservationIgnored nonisolated(unsafe) private(set) var ritualTask: Task<Void, Never>?
 
     /// The voice on tonight's notification: the Book last opened, or the
     /// Keeper for a writer with no history yet.
@@ -429,14 +459,29 @@ final class AppModel {
         ritualMinute = time.minute ?? 0
     }
 
+    /// A prompt already on screen; the flag never persists this state, so a
+    /// death mid-dialog leaves the question askable (audit M-11).
+    private var ritualAskInFlight = false
+
     /// The value moment — called after the first answered page, mirroring how
-    /// the paywall waits. Asks the system exactly once, ever; a grant turns
+    /// the paywall waits. Asks the system exactly once; the ask is recorded
+    /// only when the dialog actually resolves, and a recorded ask whose
+    /// authorization still reads `.notDetermined` (a death mid-prompt, or a
+    /// pre-fix build that latched early) counts as never asked. A grant turns
     /// the ritual on, a denial leaves it silently off. Returns nil when there
     /// was nothing to ask, so the caller knows whether an answer happened.
     func promptRitualIfNeeded() async -> Bool? {
-        guard let ritual, !ritualAsked else { return nil }
-        ritualAsked = true
+        guard let ritual, !ritualAskInFlight else { return nil }
+        if ritualAsked {
+            // Marked asked, yet the device still holds the question open —
+            // the system will happily show its dialog, so let it.
+            ritualAuthorization = await ritual.authorization()
+            guard ritualAuthorization == .notDetermined else { return nil }
+        }
+        ritualAskInFlight = true
+        defer { ritualAskInFlight = false }
         let granted = await ritual.requestAuthorization()
+        ritualAsked = true
         ritualAuthorization = granted ? .granted : .denied
         if granted {
             ritualEnabled = true
@@ -445,9 +490,12 @@ final class AppModel {
     }
 
     /// Fire-and-track re-arm for synchronous call sites (didSets, scene
-    /// changes). The task replaces any previous one; last write wins.
+    /// changes). The task replaces any previous one; last write wins — and
+    /// the predecessor is cancelled first (audit L-21), so two re-arms can
+    /// never interleave their cancel-then-schedule halves and double a night.
     func scheduleRitualRearm() {
         guard ritual != nil else { return }
+        ritualTask?.cancel()
         ritualTask = Task { await rearmRitual() }
     }
 
@@ -458,6 +506,10 @@ final class AppModel {
     func rearmRitual(now: Date = .now, calendar: Calendar = .current) async {
         guard let ritual else { return }
         ritualAuthorization = await ritual.authorization()
+        // A re-arm superseded while it awaited (audit L-21) stands down here
+        // rather than racing its replacement over the pending queue. Outside
+        // a cancelled task this is always false, so direct calls still run.
+        guard !Task.isCancelled else { return }
         guard ritualAsked, ritualEnabled, ritualAuthorization == .granted else {
             await ritual.cancelAll()
             return
@@ -492,6 +544,16 @@ final class AppModel {
             lastOpenedBookID = book.id
             go(.page)
         }
+    }
+
+    /// A ritual notification was tapped (audit L-18): walk to that Book's
+    /// page through the same door a shelf tap uses. The Keeper still meets
+    /// its gate — `open(book:)` is where the lock lives, and this path adds
+    /// no way around it. A Book the shelf no longer carries, or a tap landing
+    /// mid-onboarding, is quietly ignored.
+    func openFromRitual(_ id: BookID) {
+        guard screen != .onboarding, Book.all.contains(where: { $0.id == id }) else { return }
+        open(book: book(id))
     }
 
     /// First tap peeks (whisper), second tap opens — mirrors the shelf's
