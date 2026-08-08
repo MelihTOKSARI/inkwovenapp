@@ -239,7 +239,13 @@ export function createAppAttestVerifier(env = process.env) {
       if (signCount !== 0) throw new AppAttestError('bad_counter');
 
       const keyID = Buffer.from(keyIDBase64, 'base64');
-      const publicKey = createPublicKey(certs[0].publicKey);
+      // `X509Certificate#publicKey` IS the public KeyObject already. Passing it
+      // through createPublicKey() throws ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE —
+      // that call only accepts a PRIVATE key, to derive the public half from.
+      // It threw here on every real attestation, after every genuine check had
+      // passed, and the route flattened the TypeError into the catch-all
+      // 'attestation_rejected'. No device could complete the handshake.
+      const publicKey = certs[0].publicKey;
       const derivedKeyID = keyIDOfPublicKey(publicKey);
       if (
         !credentialID ||

@@ -305,6 +305,9 @@ final class PageInteractor {
 
     func strokeBegan() {
         tickTask?.cancel()
+        // Both hands land here — `typedDraftChanged` ends in strokeBegan/Ended
+        // — so one call covers the pen and the keys.
+        clearDeclinedHold()
         perform(machine.handle(.strokeBegan))
         // `.answered` too: taking the page back is what absorbs the standing
         // reply, and that begins at pen-down — the diary drinks the moment
@@ -378,6 +381,9 @@ final class PageInteractor {
         // while it does, the draft file IS that page — nothing here may
         // overwrite or clear it.
         guard !revisiting else { return }
+        // A declined page has already been dropped from disk; the teardown
+        // save must not put it back, or the next visit opens on the failure.
+        guard !sendDeclined else { return }
         let drawing = canvas?.drawing ?? PKDrawing()
         if drawing.strokes.isEmpty,
            typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -879,6 +885,7 @@ final class PageInteractor {
                 saveDraftNow()
             } else {
                 rollbackSend()
+                discardDeclinedDraft()
                 status = Self.declineStatus(for: .badResponse)
             }
         } catch let error as ProxyError {
@@ -889,6 +896,7 @@ final class PageInteractor {
             }
             guard isCurrent() else { return }
             rollbackSend()
+            discardDeclinedDraft()
             status = Self.declineStatus(for: error)
         } catch {
             for output in assembler.abandon() {
@@ -896,6 +904,7 @@ final class PageInteractor {
             }
             guard isCurrent() else { return }
             rollbackSend()
+            discardDeclinedDraft()
             status = .declined("inkRanDry")
         }
         if isCurrent() {
@@ -922,6 +931,33 @@ final class PageInteractor {
     /// A send that did not complete leaves its ink standing on the page —
     /// the accounting must agree, or the standing ink reads as already
     /// absorbed and `retry()` finds nothing to say (audit D-6).
+    /// A send that came back declined. The ink stays standing for the length
+    /// of THIS visit — "try again" needs something to retry — but it is no
+    /// longer kept on disk, so leaving the Book and opening it again gives a
+    /// fresh page instead of the failed one. Melih's call, twice stated: a
+    /// Book must open on a new session, never on the page that failed.
+    ///
+    /// Cleared the moment the writer touches the page again: work they are
+    /// actively rewriting is live unsent work, and that still survives a
+    /// navigation the way audit D-1 intended. The crisis path is untouched —
+    /// it flushes deliberately on its own branch, so a page that routed
+    /// someone to real help is still there when they come back.
+    private var sendDeclined = false
+
+    /// The writer took the page back up; whatever failed before is being
+    /// worked on again, so it is worth keeping once more.
+    private func clearDeclinedHold() {
+        guard sendDeclined else { return }
+        sendDeclined = false
+    }
+
+    /// Drops the failed page from disk and stops the teardown re-writing it.
+    private func discardDeclinedDraft() {
+        sendDeclined = true
+        draftSaveTask?.cancel()
+        drafts?.clear(book: book)
+    }
+
     private func rollbackSend() {
         sentStrokeCount = sentBase
         sentDrawing = nil

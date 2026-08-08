@@ -1347,8 +1347,17 @@ export function build(options = {}) {
         challenge: Buffer.from(challenge, 'base64'),
       });
     } catch (error) {
-      const code = error instanceof AppAttestError ? error.code : 'attestation_rejected';
-      request.log?.warn?.({ route: 'attest', reject: code });
+      const expected = error instanceof AppAttestError;
+      const code = expected ? error.code : 'attestation_rejected';
+      // A verifier BUG and a genuine rejection used to log the same word, so a
+      // TypeError thrown after every real check passed read as "this device
+      // failed attestation" — and cost a day. The detail rides the log only;
+      // the client still learns nothing beyond a flat 401.
+      request.log?.warn?.({
+        route: 'attest',
+        reject: code,
+        ...(expected ? {} : { unexpected: String(error?.stack ?? error) }),
+      });
       return reply.code(401).send({ error: 'attestation_rejected' });
     }
     // The identity is MINTED here; re-attesting a known key finds the same
@@ -1379,8 +1388,13 @@ export function build(options = {}) {
         challenge: Buffer.from(challenge, 'base64'),
       });
     } catch (error) {
-      const code = error instanceof AppAttestError ? error.code : 'assertion_rejected';
-      request.log?.warn?.({ route: 'attest_refresh', reject: code });
+      const expected = error instanceof AppAttestError;
+      const code = expected ? error.code : 'assertion_rejected';
+      request.log?.warn?.({
+        route: 'attest_refresh',
+        reject: code,
+        ...(expected ? {} : { unexpected: String(error?.stack ?? error) }),
+      });
       return reply.code(401).send({ error: 'assertion_rejected' });
     }
     await stores.bumpAttestCounter(keyID, verified.counter);
