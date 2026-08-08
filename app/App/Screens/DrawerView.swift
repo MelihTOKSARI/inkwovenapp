@@ -164,8 +164,8 @@ struct DrawerView: View {
                         section("The Pages") {
                             row("Export", divider: exporting || drawerNote != nil) {
                                 HStack(spacing: 8) {
-                                    exportButton("PDF") { try PageExporter.pdfFile(entries: archive.entries) }
-                                    exportButton("Text") { try PageExporter.textFile(entries: archive.entries) }
+                                    exportButton("PDF") { try PageExporter.pdfFile(entries: $0) }
+                                    exportButton("Text") { try PageExporter.textFile(entries: $0) }
                                 }
                             }
                             if exporting {
@@ -518,22 +518,24 @@ struct DrawerView: View {
     /// pages never pass through here: `archive.entries` is the open shelf only.
     ///
     /// The render used to run straight in the button action (audit L-31), so
-    /// a long journal froze the tap it was tapped with. It still cannot leave
-    /// the main actor — PageExporter is MainActor-isolated — but it now runs
-    /// behind the gathering note, re-entry-guarded, after the note has had a
-    /// beat to paint.
-    private func exportButton(_ label: String, generate: @escaping () throws -> URL) -> some View {
+    /// a long journal froze the tap it was tapped with. The entries are
+    /// copied on the main actor at tap time; the render itself gathers on a
+    /// detached task, so the room stays live under the gathering note.
+    private func exportButton(
+        _ label: String, generate: @escaping @Sendable ([PageArchive.Entry]) throws -> URL
+    ) -> some View {
         Button {
             guard !exporting else { return }
             exporting = true
             drawerNote = nil
+            let entries = archive.entries
             Task {
                 defer { exporting = false }
-                // One turn of the runloop, so the note is on screen before
-                // the main actor goes quiet under the render.
-                try? await Task.sleep(for: .milliseconds(50))
                 do {
-                    exportItem = ExportItem(url: try generate())
+                    let url = try await Task.detached(priority: .userInitiated) {
+                        try generate(entries)
+                    }.value
+                    exportItem = ExportItem(url: url)
                 } catch PageExporter.ExportError.nothingToExport {
                     drawerNote = "There are no pages to carry out yet — the Keeper's stay behind their seal."
                 } catch {

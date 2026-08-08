@@ -6,7 +6,9 @@ import InkCore
 /// Task F5's export half: the Remembered Pages archive as a shareable file.
 /// Reads only what the caller hands it — the Drawer passes the open shelf's
 /// entries, so the Keeper's pages never leave through here while sealed.
-@MainActor
+/// Deliberately unisolated: the render is pure value-in, file-out work
+/// (UIGraphicsPDFRenderer and PKDrawing rasterization are thread-safe), so a
+/// long journal can gather off the main actor (audit L-31).
 enum PageExporter {
     enum ExportError: Error {
         case nothingToExport
@@ -51,14 +53,15 @@ enum PageExporter {
     /// as such rather than silently dropped.
     static func textFile(entries: [PageArchive.Entry]) throws -> URL {
         guard !entries.isEmpty else { throw ExportError.nothingToExport }
+        let stamp = makeStamp()
         var lines: [String] = [
             "Inkwoven — Remembered Pages",
-            "Exported \(Self.stamp.string(from: .now))",
+            "Exported \(stamp.string(from: .now))",
         ]
         for entry in entries.sorted(by: { $0.createdAt < $1.createdAt }) {
             lines.append("")
             lines.append(String(repeating: "—", count: 34))
-            lines.append("\(bookName(entry)) · \(Self.stamp.string(from: entry.createdAt))")
+            lines.append("\(bookName(entry)) · \(stamp.string(from: entry.createdAt))")
             if let typed = entry.typedText, !typed.isEmpty {
                 lines.append("You wrote: \(typed)")
             } else {
@@ -85,12 +88,13 @@ enum PageExporter {
 
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
         let url = try prepare("Inkwoven Pages.pdf")
+        let stamp = makeStamp()
         try renderer.writePDF(to: url) { ctx in
             for entry in entries.sorted(by: { $0.createdAt < $1.createdAt }) {
                 ctx.beginPage()
                 var y = margin
                 y = draw(
-                    "\(bookName(entry)) · \(Self.stamp.string(from: entry.createdAt))",
+                    "\(bookName(entry)) · \(stamp.string(from: entry.createdAt))",
                     font: font("CormorantGaramond-SemiBold", 18, fallbackWeight: .semibold),
                     color: .init(white: 0.15, alpha: 1),
                     at: y, width: contentWidth, margin: margin
@@ -158,10 +162,13 @@ enum PageExporter {
         Book.by(id: BookID(rawValue: entry.bookID)).name
     }
 
-    private static let stamp: DateFormatter = {
+    /// A formatter per export, not a shared static: `DateFormatter` is not
+    /// Sendable, and an export happens rarely enough that the setup cost is
+    /// nothing next to the render.
+    private static func makeStamp() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         return formatter
-    }()
+    }
 }
