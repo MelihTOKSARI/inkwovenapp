@@ -110,13 +110,9 @@ struct ShelfView: View {
         Button {
             // No haptic: opening a room is navigation, and navigation is not
             // an event the hand needs told about.
-            // The shop remembers it was opened from the shelf, so closing it
-            // comes back here rather than to whatever room opened it last.
-            if destination == .wallet {
-                model.openVials(from: .shelf)
-            } else {
-                model.go(destination)
-            }
+            // Every room now remembers the door it was opened through, the
+            // shop included — `go` records the trail, `back` walks it.
+            model.go(destination)
         } label: {
             VStack(spacing: 5) {
                 icon().frame(height: 40, alignment: .bottom)

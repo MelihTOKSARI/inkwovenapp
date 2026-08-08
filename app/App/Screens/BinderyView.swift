@@ -72,7 +72,7 @@ struct BinderyView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomNavBar(title: "The Bindery") { model.go(.shelf) }
+            RoomNavBar(title: "The Bindery", backLabel: model.backLabel) { model.back() }
             GeometryReader { geo in
                 if geo.size.width >= 860 {
                     HStack(spacing: 0) {

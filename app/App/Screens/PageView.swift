@@ -282,11 +282,11 @@ struct PageView: View {
     }
 
     private var backPill: some View {
-        Button { model.go(.shelf) } label: {
+        Button { model.back() } label: {
             HStack(spacing: 7) {
                 Text("‹").font(InkFont.body(15)).foregroundStyle(Ink.inkFaded)
                     .accessibilityHidden(true) // ornament; the label carries it
-                SmallCapsLabel(text: "the shelf", size: 13, tracking: 1.5, color: Ink.inkFaded)
+                SmallCapsLabel(text: model.backLabel, size: 13, tracking: 1.5, color: Ink.inkFaded)
             }
             .padding(.leading, 11)
             .padding(.trailing, 14)

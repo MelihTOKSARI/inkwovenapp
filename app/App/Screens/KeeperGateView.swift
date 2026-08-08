@@ -60,11 +60,11 @@ struct KeeperGateView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(56)
 
-            Button { model.go(.shelf) } label: {
+            Button { model.back() } label: {
                 HStack(spacing: 7) {
                     Text("‹")
                         .accessibilityHidden(true) // ornament (audit A-7)
-                    SmallCapsLabel(text: "the shelf", size: 12, tracking: 1.4, color: room.accent)
+                    SmallCapsLabel(text: model.backLabel, size: 12, tracking: 1.4, color: room.accent)
                 }
                 .foregroundStyle(room.accent)
                 .padding(.horizontal, 15)

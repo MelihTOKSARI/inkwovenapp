@@ -30,7 +30,7 @@ struct RememberedView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomNavBar(title: "Remembered", backLabel: "the page") { model.go(.page) }
+            RoomNavBar(title: "Remembered", backLabel: model.backLabel) { model.back() }
 
             // The head of the room stands still; only the pages scroll.
             VStack(spacing: 0) {

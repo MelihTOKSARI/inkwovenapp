@@ -48,7 +48,7 @@ struct DrawerView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                RoomNavBar(title: "The Drawer") { model.go(.shelf) }
+                RoomNavBar(title: "The Drawer", backLabel: model.backLabel) { model.back() }
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         VStack(spacing: 5) {
@@ -204,7 +204,7 @@ struct DrawerView: View {
                             // buys one moving picture. Two rows, because
                             // conflating them is how someone pays twice for
                             // what they thought they already had.
-                            Button { model.openVials(from: .drawer) } label: {
+                            Button { model.go(.wallet) } label: {
                                 HStack {
                                     Text("The Vials").font(InkFont.body(16)).foregroundStyle(room.text)
                                     Spacer()

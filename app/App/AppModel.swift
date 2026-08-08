@@ -593,11 +593,75 @@ final class AppModel {
 
     // MARK: - Navigation
 
+    /// **The way back.** Every forward move records where it came from, so a
+    /// screen reachable from four places returns to whichever one was actually
+    /// used. Screens used to hardcode their own exit — almost all of them to
+    /// `.shelf` — which meant hitting the daily limit mid-page and binding the
+    /// notebook dropped you on the shelf instead of back on the page you were
+    /// still writing. The Vials had already solved this privately with a
+    /// `vialsReturn` field; this is that idea, once, for every screen.
+    private var trail: [AppScreen] = []
+
+    /// Screens with nothing behind them: arriving at one IS arriving home, and
+    /// whatever led there stops being a way back.
+    private static let roots: Set<AppScreen> = [.shelf, .onboarding]
+
     func go(_ target: AppScreen) {
+        if target != screen {
+            if Self.roots.contains(target) {
+                trail.removeAll()
+            } else if let already = trail.firstIndex(of: target) {
+                // Walking to a screen that is already behind you is a return,
+                // not a deeper push — otherwise page → paywall → page →
+                // paywall grows a trail no amount of backing out exhausts.
+                trail.removeSubrange(already...)
+            } else {
+                trail.append(screen)
+            }
+        }
         withAnimation(.easeInOut(duration: 0.35)) {
             screen = target
         }
         if target != .shelf { focusedBookID = nil }
+    }
+
+    /// One step back, to wherever this screen was opened from. An empty trail
+    /// means a root — or a debug launch argument that dropped us mid-app — and
+    /// the shelf is the floor under both.
+    func back() {
+        let destination = trail.popLast() ?? .shelf
+        withAnimation(.easeInOut(duration: 0.35)) {
+            screen = destination
+        }
+        if destination != .shelf { focusedBookID = nil }
+    }
+
+    /// What the back pill should SAY — the name of the place it actually
+    /// returns to. Labels and destinations were written separately and drifted
+    /// apart (a paywall pill reading "back" that always landed on the shelf);
+    /// deriving both from one trail makes a pill that lies impossible.
+    var backLabel: String {
+        switch trail.last {
+        case .page: activeBook.name
+        case .remembered: "remembered"
+        case .memory: "the memory"
+        case .drawer: "the drawer"
+        case .bindery: "the bindery"
+        case .wallet: "the vials"
+        case .paywall: "the binding"
+        case .keeperGate, .crisis, .onboarding: "back"
+        case .shelf, nil: "the shelf"
+        }
+    }
+
+    /// Hard reset to the shelf with the trail cut — the Keeper relocking, and
+    /// anything else that ejects a reader rather than letting them leave.
+    /// Deliberately unanimated: `relockKeeper` runs while the app-switcher
+    /// snapshot is being taken, and a transition would be caught mid-flight.
+    func evictToShelf() {
+        trail.removeAll()
+        screen = .shelf
+        focusedBookID = nil
     }
 
     func open(book: Book) {
@@ -742,22 +806,6 @@ final class AppModel {
     /// read — the room says "counting" rather than "none".
     var vialBalance: Int? { wallet?.available }
     var freeClipsRemaining: Int? { wallet?.freeClipsRemaining }
-
-    // MARK: - Reaching the Vials
-
-    /// Where the shop was opened from. Closing it returns there rather than
-    /// dumping the reader on the shelf — someone who stepped out of the Drawer
-    /// to look at the vials means to come back to the Drawer.
-    private(set) var vialsReturn: AppScreen = .shelf
-
-    func openVials(from origin: AppScreen) {
-        vialsReturn = origin
-        go(.wallet)
-    }
-
-    func closeVials() {
-        go(vialsReturn)
-    }
 
     func toggleShelf(book: Book) {
         if hiddenBooks.contains(book.id) {

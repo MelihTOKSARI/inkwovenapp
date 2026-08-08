@@ -21,7 +21,7 @@ struct VialsView: View {
             VStack(spacing: 0) {
                 // Back to wherever the shop was opened from — the Drawer, not
                 // the shelf, when that is where the reader came from.
-                RoomNavBar(title: "The Vials") { model.closeVials() }
+                RoomNavBar(title: "The Vials", backLabel: model.backLabel) { model.back() }
                 ScrollView(showsIndicators: false) {
                     VialsShop(model: model)
                         .frame(maxWidth: 720)

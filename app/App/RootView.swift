@@ -145,7 +145,9 @@ struct RootView: View {
         guard model.keeperUnlocked else { return }
         sealKeeperVisit()
         if model.activeBook.locked && (model.screen == .page || model.screen == .remembered) {
-            model.screen = .shelf
+            // Cuts the trail too: a sealed Keeper page may not sit behind a
+            // back button waiting to be walked into without the gate.
+            model.evictToShelf()
         }
     }
 

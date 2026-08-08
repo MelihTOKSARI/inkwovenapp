@@ -76,11 +76,11 @@ struct MemoryView: View {
         ZStack {
             SmallCapsLabel(text: "Memory", size: 12.5, tracking: 2.5, color: Color(hex: 0x8A7658))
             HStack {
-                Button { model.go(.shelf) } label: {
+                Button { model.back() } label: {
                     HStack(spacing: 6) {
                         Text("‹").font(InkFont.body(15))
                             .accessibilityHidden(true) // ornament (audit A-7)
-                        SmallCapsLabel(text: "the shelf", size: 11.5, tracking: 1.4, color: Ink.inkFaded)
+                        SmallCapsLabel(text: model.backLabel, size: 11.5, tracking: 1.4, color: Ink.inkFaded)
                     }
                     .foregroundStyle(Ink.inkFaded)
                     .padding(.horizontal, 14)

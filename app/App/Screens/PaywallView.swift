@@ -13,7 +13,7 @@ struct PaywallView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                RoomNavBar(title: "Binding", backLabel: "back") { model.go(.shelf) }
+                RoomNavBar(title: "Binding", backLabel: model.backLabel) { model.back() }
                 ScrollView(showsIndicators: false) {
                     parchmentSheet
                         .frame(maxWidth: 540)
@@ -33,11 +33,14 @@ struct PaywallView: View {
                 state: model.purchaseState,
                 successTitle: "The binding holds",
                 successBody: "The notebook is yours now — every page kept, and the ink never resting.",
-                successAction: "to the shelf",
+                // Back where the binding was needed. Someone who hit the daily
+                // limit mid-page and bound the notebook to get past it wants
+                // the page they were still writing, not the shelf.
+                successAction: "back to \(model.backLabel)",
                 onDismiss: { model.clearPurchaseNote() },
                 onSuccess: {
                     model.clearPurchaseNote()
-                    model.go(.shelf)
+                    model.back()
                 }
             )
         }

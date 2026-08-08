@@ -63,7 +63,10 @@ struct CrisisView: View {
                     .frame(maxWidth: 380)
                     .padding(.top, 26)
 
-                    Button { model.go(.shelf) } label: {
+                    // Back to the page they were writing when the room broke
+                    // character — being ejected to the shelf on top of it read
+                    // as the notebook closing itself on them.
+                    Button { model.back() } label: {
                         Text("Return to the notebook")
                             .font(.system(size: bodySize, weight: .medium))
                             .foregroundStyle(.white)
