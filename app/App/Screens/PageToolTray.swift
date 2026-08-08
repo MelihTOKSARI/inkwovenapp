@@ -31,7 +31,10 @@ struct PageToolTray: View {
                 .allowsHitTesting(showCancelSend)
                 .accessibilityHidden(!showCancelSend)
         }
-        .opacity(interactor.status == .inking ? 0.14 : 0.8)
+        // Resting at 0.92, not 0.8 (audit L-38): the faded-ink glyphs over
+        // parchment measured 3.65:1 through the old rest opacity; 0.92 blends
+        // to ≈4.65:1 while the tray still reads as dormant next to the ink.
+        .opacity(interactor.status == .inking ? 0.14 : 0.92)
         .inkAnimation(
             .easeOut(duration: 0.4), value: interactor.status == .inking, reduce: reduceMotion
         )

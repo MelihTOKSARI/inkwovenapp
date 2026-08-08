@@ -20,6 +20,9 @@ struct DrawerView: View {
     }
 
     @State private var exportItem: ExportItem?
+    /// A gathering in progress: the export buttons wait it out rather than
+    /// stacking a second render on the first (audit L-31).
+    @State private var exporting = false
     /// Marginalia for the rare failures: nothing to export, a wipe that
     /// could not finish. Never a raw error string.
     @State private var drawerNote: String?
@@ -159,13 +162,17 @@ struct DrawerView: View {
                         // Apple button with nothing behind it (task F4) may
                         // not ship as furniture.
                         section("The Pages") {
-                            row("Export", divider: drawerNote != nil) {
+                            row("Export", divider: exporting || drawerNote != nil) {
                                 HStack(spacing: 8) {
                                     exportButton("PDF") { try PageExporter.pdfFile(entries: archive.entries) }
                                     exportButton("Text") { try PageExporter.textFile(entries: archive.entries) }
                                 }
                             }
-                            if let note = drawerNote {
+                            if exporting {
+                                QuietBanner(text: "The pages are gathering — a moment.", size: 13.5)
+                                    .padding(EdgeInsets(top: 0, leading: 18, bottom: 12, trailing: 18))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if let note = drawerNote {
                                 QuietBanner(text: note, size: 13.5)
                                     .padding(EdgeInsets(top: 0, leading: 18, bottom: 12, trailing: 18))
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -338,8 +345,11 @@ struct DrawerView: View {
     /// What the row says before it is tapped. The free clips are named while
     /// they last — they are the reason a new reader has no business in the
     /// shop yet, and saying so is friendlier than showing them a zero.
+    /// While the wallet is still being read the row says so (audit L-28) —
+    /// "Fill the vials" before the count arrives invited a purchase from a
+    /// purse that may be full.
     private var vialsSummary: String {
-        guard let balance = model.vialBalance else { return "Fill the vials" }
+        guard let balance = model.vialBalance else { return "Counting the vials" }
         if let free = model.freeClipsRemaining, free > 0, balance == 0 {
             return free == 1 ? "1 gifted moment" : "\(free) gifted moments"
         }
@@ -504,17 +514,31 @@ struct DrawerView: View {
         }
     }
 
-    /// Generates the file on tap and hands it to the share sheet. The Keeper's
+    /// Generates the file and hands it to the share sheet. The Keeper's
     /// pages never pass through here: `archive.entries` is the open shelf only.
+    ///
+    /// The render used to run straight in the button action (audit L-31), so
+    /// a long journal froze the tap it was tapped with. It still cannot leave
+    /// the main actor — PageExporter is MainActor-isolated — but it now runs
+    /// behind the gathering note, re-entry-guarded, after the note has had a
+    /// beat to paint.
     private func exportButton(_ label: String, generate: @escaping () throws -> URL) -> some View {
         Button {
-            do {
-                exportItem = ExportItem(url: try generate())
-                drawerNote = nil
-            } catch PageExporter.ExportError.nothingToExport {
-                drawerNote = "There are no pages to carry out yet — the Keeper's stay behind their seal."
-            } catch {
-                drawerNote = "The pages would not gather this time. Try again in a moment."
+            guard !exporting else { return }
+            exporting = true
+            drawerNote = nil
+            Task {
+                defer { exporting = false }
+                // One turn of the runloop, so the note is on screen before
+                // the main actor goes quiet under the render.
+                try? await Task.sleep(for: .milliseconds(50))
+                do {
+                    exportItem = ExportItem(url: try generate())
+                } catch PageExporter.ExportError.nothingToExport {
+                    drawerNote = "There are no pages to carry out yet — the Keeper's stay behind their seal."
+                } catch {
+                    drawerNote = "The pages would not gather this time. Try again in a moment."
+                }
             }
         } label: {
             Text(label)
@@ -527,8 +551,14 @@ struct DrawerView: View {
                         .fill(room.accent.opacity(0.12))
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(room.accent.opacity(0.42), lineWidth: 1))
                 )
+                .opacity(exporting ? 0.55 : 1)
+                // The chip keeps its 36pt look; the target answers to the
+                // full 44 (audit M-16).
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle(scale: 0.96))
+        .disabled(exporting)
         .accessibilityLabel("Export pages as \(label)")
     }
 
@@ -565,7 +595,10 @@ struct DrawerView: View {
         let hidden = model.hiddenBooks.contains(book.id)
         let state = hidden ? "Hidden from the shelf"
             : book.locked ? "Private · opens with Face ID"
-            : book.suggested ? "Suggested tonight"
+            // No "tonight": the suggestion is hardcoded and does not rotate
+            // (audit L-32), so the claim stays temporal-free until it can be
+            // honest about the hour.
+            : book.suggested ? "Suggested"
             : book.resting ? "Resting"
             : "On the shelf"
         return HStack(spacing: 14) {
@@ -627,7 +660,9 @@ struct DrawerView: View {
                     .accessibilityFocused($deleteConfirmFocused)
                 Text("This tears out every page in every Book. The ink cannot be recovered.")
                     .font(InkFont.body(15))
-                    .foregroundStyle(Color(hex: 0xB8A684))
+                    // Theme-following (audit H-6): the hardcoded #B8A684 read
+                    // at ~2:1 on the daylight card.
+                    .foregroundStyle(room.text)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
                     .padding(.top, 10)
@@ -638,7 +673,7 @@ struct DrawerView: View {
                     } label: {
                         Text("Keep them")
                             .font(InkFont.body(15))
-                            .foregroundStyle(Color(hex: 0xC9B48A))
+                            .foregroundStyle(room.text) // theme-following (audit H-6)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
@@ -657,6 +692,11 @@ struct DrawerView: View {
                         // full plaintext copy of what was just torn out
                         // (audit C-6).
                         PageExporter.purge()
+                        // The thumbnail cache holds rasters of the same ink
+                        // (audit L-30) — torn out with the pages, along with
+                        // a report aimed at an entry that no longer exists.
+                        InkThumbnail.removeAll()
+                        model.reportTarget = nil
                         model.revisit = nil
                         model.showDeleteConfirm = false
                         drawerNote = clean

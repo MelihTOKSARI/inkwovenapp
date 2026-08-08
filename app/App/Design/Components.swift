@@ -295,6 +295,10 @@ struct RoomNavBar: View {
                             .fill(room.accent.opacity(0.08))
                             .overlay(Capsule().stroke(room.accent.opacity(0.28), lineWidth: 1))
                     )
+                    // The pill stays 38pt tall to the eye; the target does
+                    // not (audit M-16).
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScaleStyle())
                 Spacer()
@@ -343,9 +347,14 @@ struct GoldToggle: View {
                 // The knob crosses the capsule on an alignment change — real
                 // translation, so it takes the gate.
                 .inkAnimation(.easeOut(duration: 0.18), value: isOn, reduce: reduceMotion)
+                // 44pt target INSIDE the label with the shape declared after
+                // the frame (audit M-15): declared outside the Button, the
+                // frame only spaced the layout and the real target stayed the
+                // 50×29 capsule.
+                .frame(minWidth: 50, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(minWidth: 50, minHeight: 44)
         .accessibilityAddTraits(.isToggle)
         .accessibilityValue(isOn ? "on" : "off")
     }
@@ -373,12 +382,16 @@ struct SegmentedPills<T: Hashable>: View {
                         .padding(.horizontal, 15)
                         .padding(.vertical, 6)
                         .background(Capsule().fill(selected ? Ink.candle : .clear))
-                        .frame(minHeight: 38)
+                        // Each segment answers to the full 44pt (audit M-16);
+                        // the outer capsule keeps its height because its own
+                        // vertical padding gave the difference back below.
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
+        .padding(.horizontal, 3)
         .background(
             Capsule()
                 .fill(Color(hex: 0x785A28, opacity: 0.14))

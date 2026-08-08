@@ -64,23 +64,20 @@ targets:
         LSApplicationQueriesSchemes:
           - tel
           - sms
+        # Only faces the app actually asks for (audit L-37): every name here
+        # is referenced by PostScript name in InkFont, a Book's hand, or the
+        # Riddle-diary line. The unused weights were removed with their files.
         UIAppFonts:
-          - CormorantGaramond-500.ttf
           - CormorantGaramond-500Italic.ttf
           - CormorantGaramond-600.ttf
-          - CormorantGaramond-600Italic.ttf
           - EBGaramond-400.ttf
           - EBGaramond-400Italic.ttf
           - EBGaramond-500.ttf
-          - EBGaramond-500Italic.ttf
           - EBGaramond-600.ttf
           - Tangerine-400.ttf
           - Tangerine-700.ttf
           - Caveat-400.ttf
-          - Caveat-600.ttf
-          - Caveat-700.ttf
           - Fondamento-400.ttf
-          - Fondamento-400Italic.ttf
           - PinyonScript-400.ttf
           - HomemadeApple-400.ttf
           - HerrVonMuellerhoff-400.ttf
@@ -106,7 +103,11 @@ targets:
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        TARGETED_DEVICE_FAMILY: "1,2" # iPad-first, iPhone companion
+        # iPad-only for v1 (audit H-8): the app has zero compact-size-class
+        # adaptation — epic I is explicitly unbuilt — and an iPhone install
+        # would receive the iPad layout squeezed onto a phone. Reversible when
+        # epic I lands: return this to "1,2" here AND in project.pbxproj.
+        TARGETED_DEVICE_FAMILY: "2"
         SUPPORTS_MACCATALYST: false
         SWIFT_VERSION: "6.0"
     scheme:

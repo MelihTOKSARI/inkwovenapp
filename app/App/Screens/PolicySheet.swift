@@ -7,6 +7,10 @@ import SwiftUI
 /// truth in plain words rather than legalese.
 struct PolicySheet: View {
     @Environment(\.room) private var room
+    /// VoiceOver lands on the title when the sheet rises — paired with
+    /// `.isModal` so the room behind the scrim stops existing for the rotor
+    /// (audit H-7), matching the delete-confirm pattern.
+    @AccessibilityFocusState private var titleFocused: Bool
     let onClose: () -> Void
 
     var body: some View {
@@ -67,6 +71,8 @@ struct PolicySheet: View {
             .padding(30)
         }
         .transition(.opacity)
+        .accessibilityAddTraits(.isModal)
+        .onAppear { titleFocused = true }
     }
 
     private var header: some View {
@@ -76,6 +82,7 @@ struct PolicySheet: View {
                 Text("Terms & Privacy")
                     .font(InkFont.display(26))
                     .foregroundStyle(room.heading)
+                    .accessibilityFocused($titleFocused)
             }
             HStack {
                 Spacer()

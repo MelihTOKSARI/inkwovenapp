@@ -8,6 +8,10 @@ import SwiftUI
 /// user and for App Review alike.
 struct PurchaseNoteOverlay: View {
     @Environment(\.room) private var room
+    /// VoiceOver lands on the verdict when a note rises — paired with
+    /// `.isModal` so the room behind the scrim stops existing for the rotor
+    /// (audit H-7), matching the delete-confirm pattern.
+    @AccessibilityFocusState private var noteFocused: Bool
 
     let state: PurchaseState
     var successTitle: String
@@ -49,6 +53,7 @@ struct PurchaseNoteOverlay: View {
                 .padding(36)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityFocused($noteFocused)
             }
         case .deferred:
             note(
@@ -71,9 +76,12 @@ struct PurchaseNoteOverlay: View {
                 Text(title)
                     .font(InkFont.display(24))
                     .foregroundStyle(room.heading)
+                    .accessibilityFocused($noteFocused)
                 Text(body)
                     .font(InkFont.body(15))
-                    .foregroundStyle(Color(hex: 0xB8A684))
+                    // Theme-following (audit H-6): the hardcoded #B8A684 read
+                    // at ~2:1 on the daylight card.
+                    .foregroundStyle(room.text)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
                     .padding(.top, 10)
@@ -117,5 +125,10 @@ struct PurchaseNoteOverlay: View {
             content()
         }
         .transition(.opacity)
+        // A purchase verdict may not leave the room behind it swipe-reachable
+        // (audit H-7): without .isModal a VoiceOver user could land on — and
+        // activate — the paywall under the scrim.
+        .accessibilityAddTraits(.isModal)
+        .onAppear { noteFocused = true }
     }
 }

@@ -20,6 +20,13 @@ enum InkThumbnail {
         return image
     }
 
+    /// Delete-all calls this so the rasters go with the pages (audit L-30):
+    /// a cache of images of ink the user just destroyed has no business
+    /// outliving it.
+    static func removeAll() {
+        cache.removeAllObjects()
+    }
+
     /// What VoiceOver says in place of the picture. There is no transcript of
     /// handwriting anywhere in the schema (Vision OCR is unbuilt), so the
     /// honest label names the artifact rather than inventing its contents.

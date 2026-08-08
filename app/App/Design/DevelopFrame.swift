@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import ImageIO
 
 /// Darkroom-style progressive reveal of the developed picture. While the
 /// image is still in the bath (or on a failed load) the frame shows the
@@ -10,6 +12,12 @@ struct DevelopFrame: View {
     var imageURL: URL?
     @Environment(\.reduceInkMotion) private var reduceMotion
     @State private var pan = false
+    /// The developed plate, held downsampled (audit L-34). AsyncImage used to
+    /// decode fal's full-resolution delivery for a frame that never exceeds
+    /// ~420pt; CGImageSource now builds a plate-sized thumbnail off the main
+    /// actor instead, with the same phases AsyncImage gave — the weave while
+    /// it soaks, the weave if the load fails, the picture when it lands.
+    @State private var developedPlate: UIImage?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -52,6 +60,11 @@ struct DevelopFrame: View {
         .shadow(color: .black.opacity(0.5), radius: 15, y: 10)
         .onAppear { startPanIfMoving() }
         .onChange(of: isMoving) { startPanIfMoving() }
+        .task(id: imageURL) {
+            developedPlate = nil
+            guard let imageURL else { return }
+            developedPlate = await Self.downsampledPlate(from: imageURL)
+        }
         // The darkroom is otherwise silent: a plate that only reads as blur
         // and brightness has nothing to say to VoiceOver.
         .accessibilityElement(children: .ignore)
@@ -72,19 +85,42 @@ struct DevelopFrame: View {
     /// it, the woven gradient while it soaks (and if the load fails).
     @ViewBuilder
     private var plate: some View {
-        if let imageURL {
-            AsyncImage(url: imageURL) { phase in
-                if let image = phase.image {
-                    // Overlay on a clear base: fill the frame without letting
-                    // the image's own size inflate the 4:3 layout.
-                    Color.clear.overlay(image.resizable().scaledToFill())
-                } else {
-                    placeholderWeave
-                }
-            }
+        if let developedPlate {
+            // Overlay on a clear base: fill the frame without letting
+            // the image's own size inflate the 4:3 layout.
+            Color.clear.overlay(
+                Image(uiImage: developedPlate).resizable().scaledToFill()
+            )
         } else {
             placeholderWeave
         }
+    }
+
+    /// ≈2× the frame's largest point dimension — the frame caps near 420pt —
+    /// so the plate stays crisp on a 2× display without the bath holding the
+    /// whole negative (audit L-34).
+    private nonisolated static let maxPlatePixels = 840
+
+    /// Fetch and decode at plate size, off the main actor. Anything that is
+    /// not an image (an error page, a truncated body) simply fails the guard
+    /// and leaves the weave in the frame, exactly as AsyncImage's failure
+    /// phase did.
+    private nonisolated static func downsampledPlate(from url: URL) async -> UIImage? {
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        let open: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithData(data as CFData, open as CFDictionary) else {
+            return nil
+        }
+        let thumbnail: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPlatePixels,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnail as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cg)
     }
 
     private var placeholderWeave: some View {

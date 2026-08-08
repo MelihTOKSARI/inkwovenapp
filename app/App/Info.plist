@@ -29,22 +29,16 @@
 	<string>Face ID keeps your notebook — and the Keeper's pages — private.</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>CormorantGaramond-500.ttf</string>
 		<string>CormorantGaramond-500Italic.ttf</string>
 		<string>CormorantGaramond-600.ttf</string>
-		<string>CormorantGaramond-600Italic.ttf</string>
 		<string>EBGaramond-400.ttf</string>
 		<string>EBGaramond-400Italic.ttf</string>
 		<string>EBGaramond-500.ttf</string>
-		<string>EBGaramond-500Italic.ttf</string>
 		<string>EBGaramond-600.ttf</string>
 		<string>Tangerine-400.ttf</string>
 		<string>Tangerine-700.ttf</string>
 		<string>Caveat-400.ttf</string>
-		<string>Caveat-600.ttf</string>
-		<string>Caveat-700.ttf</string>
 		<string>Fondamento-400.ttf</string>
-		<string>Fondamento-400Italic.ttf</string>
 		<string>PinyonScript-400.ttf</string>
 		<string>HomemadeApple-400.ttf</string>
 		<string>HerrVonMuellerhoff-400.ttf</string>

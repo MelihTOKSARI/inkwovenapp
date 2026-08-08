@@ -223,7 +223,15 @@ struct ShelfView: View {
                             Feel.shared.play(opens ? .bookOpen : .tick)
                             model.tap(book: book)
                         },
-                        hide: { model.toggleShelf(book: book) }
+                        hide: {
+                            // A hidden book may not stay "focused" (audit
+                            // M-21) — the caption guard is the backstop,
+                            // this is the truth.
+                            if model.focusedBookID == book.id {
+                                model.focusedBookID = nil
+                            }
+                            model.toggleShelf(book: book)
+                        }
                     )
                 }
             }
@@ -258,7 +266,10 @@ struct ShelfView: View {
 
     @ViewBuilder
     private var caption: some View {
-        if let id = model.focusedBookID {
+        // Never for a hidden book (audit M-21): hiding the focused book from
+        // its context menu used to leave the caption naming an invisible
+        // spine, still promising "tap again to open".
+        if let id = model.focusedBookID, !model.hiddenBooks.contains(id) {
             let book = Book.by(id: id)
             HStack(spacing: 11) {
                 Text(book.name)
@@ -487,10 +498,18 @@ struct BookSpineView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
+            // The resting dim covers the spine only (audit M-17): applied to
+            // the whole button it dragged the caption below any readable
+            // contrast along with it.
+            .opacity(book.resting ? 0.62 : 1)
             .overlay(alignment: .top) { whisperBubble.offset(y: -40) }
             .overlay(alignment: .bottom) {
                 if book.resting {
-                    SmallCapsLabel(text: "resting", size: 10, tracking: 1.2, color: Color(hex: 0x6B5A43))
+                    // room.dim, at full strength (audit M-17): the hardcoded
+                    // #6B5A43 measured 2.83:1 on the candlelit room and 3.85
+                    // in daylight; dim holds ≥4.9 candlelit and ≥5.4 daylight
+                    // on the room gradient.
+                    SmallCapsLabel(text: "resting", size: 10, tracking: 1.2, color: room.dim)
                         .italic()
                         .offset(y: 16)
                 }
@@ -502,7 +521,6 @@ struct BookSpineView: View {
         // The peek is a bouncing 18pt translation on every tap; under the
         // setting the book brightens in place instead of hopping.
         .offset(y: focused && !reduceMotion ? -18 : 0)
-        .opacity(book.resting ? 0.62 : 1)
         .inkAnimation(.spring(duration: 0.3, bounce: 0.15), value: focused, reduce: reduceMotion)
         .contextMenu {
             Button("Hide from the shelf", systemImage: "eye.slash", action: hide)
@@ -521,7 +539,9 @@ struct BookSpineView: View {
         var notes: [String] = []
         if book.locked { notes.append("Locked — only your hand may open it") }
         if book.resting { notes.append("Resting") }
-        if book.suggested { notes.append("Awake tonight") }
+        // No "tonight" (audit L-32): the suggestion is hardcoded and does
+        // not rotate, so the spoken state stays temporal-free.
+        if book.suggested { notes.append("Awake") }
         return notes.joined(separator: ". ")
     }
 
@@ -635,12 +655,17 @@ struct BookSpineView: View {
             .font(InkFont.bodyItalic(13.5))
             .foregroundStyle(room.whisperInk)
             .lineLimit(1)
-            .fixedSize()
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, 13)
             .padding(.vertical, 5)
             .background(Capsule().fill(room.whisperBG))
             .background(.ultraThinMaterial, in: Capsule())
             .shadow(color: .black.opacity(0.55), radius: 10, y: 8)
+            // Bounded instead of fixedSize (audit L-33): the whisper still
+            // escapes the spine's narrow column, but a long line now shrinks
+            // a little and then truncates rather than running off a narrow
+            // screen. The capsule keeps hugging the text inside the bound.
+            .frame(width: 240)
             .opacity(focused ? 1 : 0)
             .offset(y: focused || reduceMotion ? 0 : 5)
             .inkAnimation(.easeOut(duration: 0.3), value: focused, reduce: reduceMotion)

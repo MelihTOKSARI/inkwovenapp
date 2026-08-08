@@ -90,6 +90,10 @@ struct MemoryView: View {
                             .fill(Ink.ink.opacity(0.05))
                             .overlay(Capsule().stroke(Ink.ink.opacity(0.18), lineWidth: 1))
                     )
+                    // The pill stays 38pt tall to the eye; the target does
+                    // not (audit M-16, matching RoomNavBar).
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScaleStyle())
                 Spacer()
@@ -109,6 +113,9 @@ struct MemoryView: View {
                 .font(InkFont.body(15))
                 .foregroundStyle(Ink.wax)
                 .padding(.top, 3)
+                // Ornament — VoiceOver spoke "floral heart" before every
+                // remembered note (audit L-16).
+                .accessibilityHidden(true)
             Text(note)
                 .font(InkFont.body(17))
                 .foregroundStyle(Ink.ink)
@@ -174,6 +181,10 @@ struct MemoryView: View {
                             )
                         )
                 )
+                // 34pt chip to the eye, 44pt to the hand (audit M-16) — and
+                // "yes" here tears a memory out for good.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
     }

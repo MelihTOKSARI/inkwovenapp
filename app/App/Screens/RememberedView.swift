@@ -91,13 +91,18 @@ struct RememberedView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(room.dim)
+                        // A ~20pt glyph was the whole target (audit M-16);
+                        // the pill's own height now carries the 44.
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear the search")
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 11)
         .frame(maxWidth: 420)
+        .frame(minHeight: 44)
         .background(
             Capsule()
                 .fill(Color.white.opacity(0.04))

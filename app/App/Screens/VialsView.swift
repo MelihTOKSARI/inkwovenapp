@@ -48,6 +48,10 @@ struct VialsShop: View {
     /// Shown when the shop is opened because a picture is waiting on a vial —
     /// the errand needs a sentence the deliberate visit does not.
     var errandNote: String?
+    /// Bound by a modal presentation (VialsSheet) so VoiceOver lands on the
+    /// title when the sheet rises (audit H-7); the room presentation leaves
+    /// it nil and keeps the nav bar's natural order.
+    var titleFocus: AccessibilityFocusState<Bool>.Binding?
     @Environment(\.room) private var room
 
     /// No fallback literals (audit C-3): a hardcoded USD price is charged at
@@ -57,9 +61,7 @@ struct VialsShop: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("The Vials")
-                .font(InkFont.display(34))
-                .foregroundStyle(room.heading)
+            title
             Text(errandNote ?? "Moving-picture credits, sealed in wax until you spend them.")
                 .font(InkFont.bodyItalic(16))
                 .foregroundStyle(room.dim)
@@ -75,7 +77,9 @@ struct VialsShop: View {
                     packCard(productID: pack, big: index == 2, index: index)
                 }
             }
-            .task {
+            // Re-keyed on reachability (audit L-29): a shop opened on a dark
+            // road used to show "—" forever, even after the way reopened.
+            .task(id: offline) {
                 await model.refreshWallet()
                 // The launch price fetch can have failed; the shop re-asks.
                 await model.refreshStore()
@@ -85,6 +89,22 @@ struct VialsShop: View {
                 .padding(.top, 24)
         }
     }
+
+    @ViewBuilder
+    private var title: some View {
+        let text = Text("The Vials")
+            .font(InkFont.display(34))
+            .foregroundStyle(room.heading)
+        if let titleFocus {
+            text.accessibilityFocused(titleFocus)
+        } else {
+            text
+        }
+    }
+
+    /// Whether the road is dark. Read in `body`, so the shop re-renders the
+    /// moment the way opens or closes (audit L-29).
+    private var offline: Bool { Reachability.shared.isOffline }
 
     /// The purse, as the server reports it. While the read is in flight the
     /// count is a quiet placeholder rather than a zero — telling someone they
@@ -103,13 +123,22 @@ struct VialsShop: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(model.vialBalance.map { "\($0) vials remain. \(balanceCaption)" }
-            ?? "Counting your vials.")
+            ?? (offline
+                ? "The road is dark — the vials cannot be counted until the connection returns."
+                : "Counting your vials."))
     }
 
     /// The free clips are named plainly: they are the reason a first-time
     /// reader never meets this room before they have seen what it buys.
+    /// When the road is dark and the purse unread, the caption says why the
+    /// count is a dash (audit L-29) — "—" forever explained nothing.
     private var balanceCaption: String {
-        guard let free = model.freeClipsRemaining else { return "moments remain" }
+        guard let free = model.freeClipsRemaining else {
+            if offline, model.vialBalance == nil {
+                return "the road is dark — the count waits"
+            }
+            return "moments remain"
+        }
         if free > 0 {
             return free == 1 ? "moments remain · 1 gifted" : "moments remain · \(free) gifted"
         }
@@ -185,6 +214,9 @@ struct VialsShop: View {
     private var refundNote: some View {
         HStack(alignment: .top, spacing: 10) {
             Text("✦").font(InkFont.body(15)).foregroundStyle(Color(hex: 0x6B8A4E))
+                // Ornament — VoiceOver spoke "four-pointed star" before the
+                // refund promise (audit L-16).
+                .accessibilityHidden(true)
             Text("If a picture fails to develop, its vial returns to you. You are never charged for a moment that did not arrive.")
                 .font(InkFont.bodyItalic(14.5))
                 .foregroundStyle(room.text)
@@ -213,6 +245,10 @@ struct VialsSheet: View {
     let onClose: () -> Void
 
     @Environment(\.room) private var room
+    /// VoiceOver lands on the shop's title when the errand rises — paired
+    /// with `.isModal` so the page behind the scrim stops existing for the
+    /// rotor (audit H-7), matching the delete-confirm pattern.
+    @AccessibilityFocusState private var titleFocused: Bool
 
     var body: some View {
         ZStack {
@@ -239,7 +275,8 @@ struct VialsSheet: View {
                 ScrollView(showsIndicators: false) {
                     VialsShop(
                         model: model,
-                        errandNote: "A picture is waiting to move. Fill the vials and it will."
+                        errandNote: "A picture is waiting to move. Fill the vials and it will.",
+                        titleFocus: $titleFocused
                     )
                     .padding(EdgeInsets(top: 4, leading: 34, bottom: 34, trailing: 34))
                 }
@@ -269,5 +306,10 @@ struct VialsSheet: View {
             )
         }
         .transition(.opacity)
+        // The errand covers the page entirely; without .isModal a VoiceOver
+        // user could land on — and write into — the page behind the scrim
+        // (audit H-7).
+        .accessibilityAddTraits(.isModal)
+        .onAppear { titleFocused = true }
     }
 }

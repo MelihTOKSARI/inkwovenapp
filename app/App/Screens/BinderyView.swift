@@ -219,6 +219,10 @@ struct BinderyView: View {
                         )
                     )
             )
+            // The chip keeps its quiet size; the target answers to the full
+            // 44pt (audit M-16).
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
             // snap the label swap: the ambient try-on animation otherwise
             // morphs PREVIEW↔TRYING glyphs into each other
             .transaction { $0.animation = nil }
@@ -448,6 +452,10 @@ struct BinderyView: View {
                         .padding(.horizontal, 12)
                         .frame(minHeight: 34)
                         .background(Capsule().stroke(room.accent.opacity(0.38), lineWidth: 1))
+                        // 34pt capsule to the eye, 44pt to the hand
+                        // (audit M-16).
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PressScaleStyle())
                 .padding(.top, 4)

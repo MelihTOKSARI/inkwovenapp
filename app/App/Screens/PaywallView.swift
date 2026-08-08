@@ -53,7 +53,9 @@ struct PaywallView: View {
 
             Text("An unbound notebook forgets by morning. A bound one keeps every page, and never rests the ink.")
                 .font(InkFont.bodyItalic(16))
-                .foregroundStyle(Color(hex: 0x7A6A4D))
+                // The palette's faded ink (audit M-17): #7A6A4D measured a
+                // marginal 4.40:1 on the parchment; inkFaded holds 5.55.
+                .foregroundStyle(Ink.inkFaded)
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
                 .frame(maxWidth: 400)
@@ -62,7 +64,11 @@ struct PaywallView: View {
             VStack(alignment: .leading, spacing: 12) {
                 benefit("Endless moments — the ink never has to rest.")
                 benefit("Every page kept — nothing fades at thirty days.")
-                benefit("Pictures develop freely, page after page.")
+                // Scoped to the one Book that develops (audit M-20): only
+                // the Artist makes pictures, and Plus rests the bath after
+                // eight in a day — "freely, page after page" promised more
+                // than either.
+                benefit("The Artist's pictures develop, day after day.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 26)
@@ -96,7 +102,10 @@ struct PaywallView: View {
             // only inside a tag on the plan card.
             Text(trialDisclosure)
                 .font(InkFont.body(12.5))
-                .foregroundStyle(Color(hex: 0x8A7658))
+                // Small print in the palette's faded ink (audit M-17):
+                // #8A7658 at 12.5pt measured 3.65:1 on the parchment;
+                // inkFaded holds ≥4.5 across the whole sheet gradient.
+                .foregroundStyle(Ink.inkFaded)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .padding(.top, 12)
@@ -278,7 +287,9 @@ struct PaywallView: View {
                         .accessibilityFocused($confirmFocused)
                     Text("\(trialDisclosure) Charged to your Apple account.")
                         .font(InkFont.body(15))
-                        .foregroundStyle(Color(hex: 0xB8A684))
+                        // Theme-following (audit H-6): the hardcoded #B8A684
+                        // read at ~2:1 on the daylight card.
+                        .foregroundStyle(room.text)
                         .multilineTextAlignment(.center)
                         .lineSpacing(4)
                         .padding(.top, 10)
@@ -310,7 +321,8 @@ struct PaywallView: View {
         Button(action: action) {
             Text(label)
                 .font(InkFont.body(15))
-                .foregroundStyle(prominent ? Ink.parchment : Color(hex: 0xC9B48A))
+                // theme-following for the quiet option (audit H-6)
+                .foregroundStyle(prominent ? Ink.parchment : room.text)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
