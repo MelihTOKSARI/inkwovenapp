@@ -8,6 +8,8 @@
 
 **Verdict: no blockers.** The core loop's happy path, the StoreKit 2 machinery, the Keeper's privacy discipline, and the crisis routing are all correct and verifiably better than the 2026-08-04 audit found them. What remains clusters in three places: **quiet data-loss edges around the exchange lifecycle** (three HIGHs, all with small local fixes), **copy that makes promises the app can't keep** (prices, gifted credits, dead settings), and **a daylight-theme/accessibility debt** on the newer surfaces. Fix the eleven HIGHs and this is a shippable v1.
 
+> **Remediation, 2026-08-08:** every finding now carries a Status. All 11 HIGHs and 21 of 22 MEDIUMs are **fixed** (commits `c16c46e`, `d66be51`, `8a14b3c`, `698654e`, `5b42729`, `5261454`, `d10eb27`, `cd4aa22`); P-1 is fixed in its launch-adjacent halves' companions but its structural core is **deferred** (see §13). Four LOWs are **accepted** by design, one **deferred**; the other 33 are fixed. Verification: clean build, 136/136 package tests, full app unit bundle green, and a simulator pass over onboarding → shelf → drawer. Details in §13.
+
 ---
 
 ## 1. Method
@@ -48,43 +50,43 @@ Of the 2026-08-04 findings that live app-side, the following are **verified clos
 
 ## 3. Findings index
 
-| ID | Sev | Area | Summary |
-|---|---|---|---|
-| H‑1 | HIGH | Core loop | Teardown/backgrounding mid-exchange strands the page as "sent," permanently inert |
-| H‑2 | HIGH | Core loop | Revisiting a remembered page silently destroys the standing unsent draft |
-| H‑3 | HIGH | Core loop | "Turn the page" files the previous reply against ink it never answered (×2) |
-| H‑4 | HIGH | Money | "save 54% · best" is a hardcoded literal beside storefront-localized prices |
-| H‑5 | HIGH | Money | Hardcoded "$4.99" in the moving-picture offer line |
-| H‑6 | HIGH | Design | Daylight theme: modal body/button text at 1.7–2.1:1 contrast |
-| H‑7 | HIGH | A11y | VialsSheet, PolicySheet, PurchaseNoteOverlay lack `.isModal` (×2) |
-| H‑8 | HIGH | Design | iPhone is a shipping device family with zero compact-layout adaptation |
-| H‑9 | HIGH | Perf | Clip cache keyed on per-launch-randomized `hashValue` — never hits, leaks files (×2) |
-| H‑10 | HIGH | Settings | Drawer "Reply length" is a dead control — nothing reads it |
-| H‑11 | HIGH | Onboarding | First-run promises a gifted vial that no longer exists (×2) |
-| M‑1 | MED | Core loop | Hold engaged mid-exchange silently releases when the exchange resolves |
-| M‑2 | MED | Core loop | Ink written while the Book answers never auto-sends |
-| M‑3 | MED | Core loop | Writing during the answer happens on an 18%-opacity canvas |
-| M‑4 | MED | Core loop | Undo/redo bypass the send machine (stale speculation; stuck settle dots) |
-| M‑5 | MED | Core loop | Mixed keyboard+pencil pages absorb ink the Book never saw |
-| M‑6 | MED | Money | Cooldown card upsells Plus to users who already have Plus |
-| M‑7 | MED | Money | "Restore a binding" ends in silence when there's nothing to restore |
-| M‑8 | MED | Money | Device-bound vials never disclosed (prior M-7) |
-| M‑9 | MED | Safety | App Attest: a locally invalid key has no recovery path short of reinstall |
-| M‑10 | MED | Privacy | Keeper never reseals on route-away; unlock is foreground-session-long |
-| M‑11 | MED | Lifecycle | `ritualAsked` latches before the permission dialog resolves — toggle can go dead |
-| M‑12 | MED | Lifecycle | Legacy persisted `ink.pencilSeen` re-latches A-1 for upgraders (×2) |
-| M‑13 | MED | Privacy | Delete-all leaves moving-picture clips on disk — including Keeper-derived ones |
-| M‑14 | MED | Video | Failed clip download renders as a silent black rectangle (×2) |
-| M‑15 | MED | A11y | GoldToggle's real hit target is 50×29pt — every Drawer toggle |
-| M‑16 | MED | A11y | Sub-44pt targets across nav pills, segments, onboarding, Bindery, Memory |
-| M‑17 | MED | A11y | KeeperGate refusal line 2.48:1; shelf "resting" label 2.83:1; paywall small print 3.65:1 |
-| M‑18 | MED | A11y | VoiceOver override in `pencilPreferred` is not reactive mid-session |
-| M‑19 | MED | Design | Keyboard can cover the flyleaf signature/typed field |
-| M‑20 | MED | Copy | Paywall benefit "Pictures develop freely, page after page" is false for 7 of 8 Books |
-| M‑21 | MED | Shelf | Hiding the focused book leaves a stale "tap again to open" caption |
-| P‑1 | MED | Perf | Archive scalability: whole journal decoded sync on main before first frame, resident forever, rewritten whole per exchange (×3) |
+| ID | Sev | Area | Summary | Status |
+|---|---|---|---|---|
+| H‑1 | HIGH | Core loop | Teardown/backgrounding mid-exchange strands the page as "sent," permanently inert | ✔ Fixed `c16c46e` |
+| H‑2 | HIGH | Core loop | Revisiting a remembered page silently destroys the standing unsent draft | ✔ Fixed `c16c46e` |
+| H‑3 | HIGH | Core loop | "Turn the page" files the previous reply against ink it never answered (×2) | ✔ Fixed `c16c46e` |
+| H‑4 | HIGH | Money | "save 54% · best" is a hardcoded literal beside storefront-localized prices | ✔ Fixed `5261454` — computed from live `Product.price` |
+| H‑5 | HIGH | Money | Hardcoded "$4.99" in the moving-picture offer line | ✔ Fixed `c16c46e` |
+| H‑6 | HIGH | Design | Daylight theme: modal body/button text at 1.7–2.1:1 contrast | ✔ Fixed `8a14b3c` — `room.text` everywhere |
+| H‑7 | HIGH | A11y | VialsSheet, PolicySheet, PurchaseNoteOverlay lack `.isModal` (×2) | ✔ Fixed `8a14b3c` |
+| H‑8 | HIGH | Design | iPhone is a shipping device family with zero compact-layout adaptation | ✔ Fixed `8a14b3c` — **iPad-only for v1** (decision, reversible; see §13) |
+| H‑9 | HIGH | Perf | Clip cache keyed on per-launch-randomized `hashValue` — never hits, leaks files (×2) | ✔ Fixed `c16c46e` — SHA-256 keys |
+| H‑10 | HIGH | Settings | Drawer "Reply length" is a dead control — nothing reads it | ✔ Fixed `5261454` — removed for v1 (tasks H3 is its future home) |
+| H‑11 | HIGH | Onboarding | First-run promises a gifted vial that no longer exists (×2) | ✔ Fixed `d66be51` — verified on-screen |
+| M‑1 | MED | Core loop | Hold engaged mid-exchange silently releases when the exchange resolves | ✔ Fixed `c16c46e` |
+| M‑2 | MED | Core loop | Ink written while the Book answers never auto-sends | ✔ Fixed `c16c46e` |
+| M‑3 | MED | Core loop | Writing during the answer happens on an 18%-opacity canvas | ✔ Fixed `c16c46e` |
+| M‑4 | MED | Core loop | Undo/redo bypass the send machine (stale speculation; stuck settle dots) | ✔ Fixed `c16c46e` |
+| M‑5 | MED | Core loop | Mixed keyboard+pencil pages absorb ink the Book never saw | ✔ Fixed `c16c46e` |
+| M‑6 | MED | Money | Cooldown card upsells Plus to users who already have Plus | ✔ Fixed `5261454` — wait surfaced, honest 429 copy |
+| M‑7 | MED | Money | "Restore a binding" ends in silence when there's nothing to restore | ✔ Fixed `5261454` — endings split by cause |
+| M‑8 | MED | Money | Device-bound vials never disclosed (prior M-7) | ✔ Fixed `5261454` — PolicySheet + shop |
+| M‑9 | MED | Safety | App Attest: a locally invalid key has no recovery path short of reinstall | ✔ Fixed `d10eb27` — `.invalidKey` heals via re-attest |
+| M‑10 | MED | Privacy | Keeper never reseals on route-away; unlock is foreground-session-long | ✔ Fixed `d10eb27` — seal follows the visit |
+| M‑11 | MED | Lifecycle | `ritualAsked` latches before the permission dialog resolves — toggle can go dead | ✔ Fixed `d66be51` |
+| M‑12 | MED | Lifecycle | Legacy persisted `ink.pencilSeen` re-latches A-1 for upgraders (×2) | ✔ Fixed `d66be51` — scrubbed at startup |
+| M‑13 | MED | Privacy | Delete-all leaves moving-picture clips on disk — including Keeper-derived ones | ✔ Fixed `c16c46e`+`5261454`+`d10eb27` — purge API, delete-all wiring, sealed clips die with the seal |
+| M‑14 | MED | Video | Failed clip download renders as a silent black rectangle (×2) | ✔ Fixed `c16c46e`+`5b42729` — in-fiction line, honest caption/label |
+| M‑15 | MED | A11y | GoldToggle's real hit target is 50×29pt — every Drawer toggle | ✔ Fixed `8a14b3c` |
+| M‑16 | MED | A11y | Sub-44pt targets across nav pills, segments, onboarding, Bindery, Memory | ✔ Fixed `8a14b3c`+`d66be51`+`5b42729` — full sweep incl. PageView back pill |
+| M‑17 | MED | A11y | KeeperGate refusal line 2.48:1; shelf "resting" label 2.83:1; paywall small print 3.65:1 | ✔ Fixed `d66be51`+`8a14b3c` — all recomputed ≥4.5:1 |
+| M‑18 | MED | A11y | VoiceOver override in `pencilPreferred` is not reactive mid-session | ✔ Fixed `d66be51` |
+| M‑19 | MED | Design | Keyboard can cover the flyleaf signature/typed field | ✔ Fixed `d66be51` |
+| M‑20 | MED | Copy | Paywall benefit "Pictures develop freely, page after page" is false for 7 of 8 Books | ✔ Fixed `8a14b3c` |
+| M‑21 | MED | Shelf | Hiding the focused book leaves a stale "tap again to open" caption | ✔ Fixed `8a14b3c` |
+| P‑1 | MED | Perf | Archive scalability: whole journal decoded sync on main before first frame, resident forever, rewritten whole per exchange (×3) | ▸ **Deferred** — structural per-entry-store rework, tracked as its own task (§13); bounded at v1 volumes |
 
-Lows are grouped in §6.
+Lows are grouped in §6, each carrying its status inline.
 
 ## 4. HIGH findings in detail
 
@@ -169,6 +171,8 @@ Lows are grouped in §6.
 
 ## 6. LOW findings (grouped)
 
+**Status legend (2026-08-08):** ✔ fixed · ✳ accepted by design · ▸ deferred. Fixed: L‑1, L‑2 (`c16c46e`); L‑4..L‑8 (`c16c46e`); L‑10, L‑11, L‑13, L‑14, L‑15 (`5261454`); L‑16..L‑22 (`d66be51`, `8a14b3c`); L‑23..L‑25 (`d10eb27`); L‑27 (`5261454`); L‑28..L‑33 (`8a14b3c`, `698654e` completing L‑31); L‑34..L‑38 (`8a14b3c`, `d66be51`, `c16c46e`, `5b42729`); the money-misc lows — paywall-shown undercount (`cd4aa22`), video-moment doc comment, per-use calendar, privacy-policy link (`5261454`). Accepted: L‑3 (server-contract trust; a client workaround would mask real failures), L‑9 (drafts are real; auto-send on reachability stays out of v1), L‑26 (owner-initiated capture is the user's own act), clock-forward rollover (the proxy quota is the backstop). Deferred: L‑12 (`appAccountToken` only matters once the proxy consumes it — pair with the next proxy release).
+
 **Core loop.** L‑1: teardown saves the draft before cancelling the exchange task — race subsumed by H‑1's fix ([PageInteractor.swift:788](app/App/Page/PageInteractor.swift:788)). L‑2: a stroke landed during the gate hop is absorbed without being uploaded (:560 vs :609). L‑3: malformed `done` chunk → fully streamed reply resolves as a failed send; server has billed, client shows decline ([ChunkDecoder.swift:77](app/Packages/InkwovenCore/Sources/InkNet/ChunkDecoder.swift:77)) — server-contract trust. L‑4: `SSEParser` splits only on LF; lone-CR terminators (legal SSE) would break behind a CDN rewrite ([SSEParser.swift:36](app/Packages/InkwovenCore/Sources/InkNet/SSEParser.swift:36)). L‑5: `.pageAnswered` analytics always reports `.ink` even when a picture developed ([PageInteractor.swift:706](app/App/Page/PageInteractor.swift:706)). L‑6: mid-stream erase breaks stroke-count prefix identity — `dropFirst(sentCount)` keeps wrong strokes or wipes fresh ones (:1045). L‑7: `attach`/`restore` mutate observable state inside `makeUIView` on the revisit path ([InkCanvasView.swift:70](app/App/Page/InkCanvasView.swift:70)). L‑8: snapshot rasterization (PKDrawing render + CIFilter + JPEG) on the main actor at every speculation — visible pen-up hitch on a full page (:523). L‑9: offline banner still promises "sends when the way opens" but nothing observes `Reachability` to auto-send ([PageView.swift:639](app/App/Screens/PageView.swift:639)).
 
 **Money.** L‑10: purchase-overlay title "The seal would not take" contradicts the delivery-pending/rejected bodies that say payment succeeded ([PurchaseNotes.swift:59](app/App/Design/PurchaseNotes.swift:59)). L‑11: five sequential one-product StoreKit fetches per refresh, re-issued every foreground (×2 — [AppModel.swift:339](app/App/AppModel.swift:339), [PurchaseService.swift:308](app/App/Money/PurchaseService.swift:308)); batch into one `Product.products(for:)`. L‑12: no `appAccountToken` on purchases — a redelivered grant after an identity change lands in a different wallet ([PurchaseService.swift:180](app/App/Money/PurchaseService.swift:180)). L‑13: paywall has no explicit error/retry state if StoreKit never answers (mitigated by re-fetch on appear/foreground). L‑14: `buyVials` lacks a re-entrancy guard — two rapid taps, two purchase tasks ([AppModel.swift:551](app/App/AppModel.swift:551)). L‑15: `.purchasing` scrim has no timeout — a hung StoreKit call bricks the room until force-quit ([PurchaseNotes.swift:41](app/App/Design/PurchaseNotes.swift:41)). Also: paywall-shown analytics undercounts (ghost-archive tap and cooldown CTA untracked); video never records a daily moment while the InkMoney doc comment says it does ([DailyUsage.swift:55](app/Packages/InkwovenCore/Sources/InkMoney/DailyUsage.swift:55)); clock-forward rolls the local counter (proxy quota is the backstop); `Calendar.current` captured at init so a timezone change rolls on the old zone until relaunch; in-app privacy policy is prose without a hosted URL beside the EULA.
@@ -229,7 +233,7 @@ The discipline is genuinely good: precomputed typewriter prefixes, static line a
 - The client gate (5 moments/day) is advisory; the proxy quota against the attested identity is the only real ceiling. `DailyUsageStore.reconcile(with:)` awaits a server usage endpoint.
 - The vials shop sells credits for clips the live proxy currently cannot deliver (`/v1/video` 404s until redeploy) — H‑9/M‑14 make the failure mode a black rectangle rather than an honest error.
 
-## 12. Suggested fix order
+## 12. Suggested fix order (as issued 2026-08-07; executed 2026-08-08 — see §13)
 
 1. **The three quiet data-loss HIGHs** (H‑1, H‑2, H‑3) — small, local, and they defend the product's core promise that the ink is kept.
 2. **The two price literals** (H‑4, H‑5) and the paywall/pictures copy (M‑20) — App Review 3.1.2 exposure.
@@ -238,3 +242,30 @@ The discipline is genuinely good: precomputed typewriter prefixes, static line a
 5. **Daylight modal hexes + the three `.isModal`s** (H‑6, H‑7) — four color constants and two modifiers.
 6. **Clip cache key + delete-all purge + failure state** (H‑9, M‑13, M‑14) — one small ClipCache patch covers all three.
 7. The remaining mediums as a sweep: exchange-lifecycle UX (M‑1..M‑5), money UX (M‑6..M‑8), Keeper/attest (M‑9, M‑10), latches (M‑11, M‑12), a11y (M‑15..M‑19), and P‑1's off-main write as the first scalability step.
+
+## 13. Remediation record (2026-08-08)
+
+Executed in five wave commits plus three coordinator commits, each building clean before landing:
+
+| Commit | Wave | Closes |
+|---|---|---|
+| `c16c46e` | Core loop & clips | H‑1/H‑2/H‑3, H‑5, H‑9, M‑1..M‑5, M‑13 (API), M‑14, L‑1/L‑2/L‑4..L‑8, L‑36 |
+| `d66be51` | Lifecycle & onboarding | H‑11, M‑11/M‑12, M‑16 (slice), M‑17 (slice), M‑18/M‑19, L‑17..L‑22, L‑35 |
+| `8a14b3c` | Design, books, shelf | H‑6/H‑7/H‑8, M‑15..M‑17, M‑20/M‑21, L‑16, L‑28..L‑34, L‑37/L‑38 |
+| `698654e` | Coordinator | L‑31 completed (PageExporter off the main actor) |
+| `5b42729` | Coordinator | M‑16/L‑38 PageView residuals, M‑14 caption honesty |
+| `5261454` | Money | H‑4, H‑10, M‑6..M‑8, M‑13 (delete-all), L‑10/L‑11/L‑13..L‑15, L‑27, money-misc lows |
+| `d10eb27` | Keeper & safety | M‑9/M‑10, M‑13 (sealed clips), L‑23..L‑25 |
+| `cd4aa22` | Coordinator | paywall-shown undercount (ghosted-archive road) |
+
+**Decisions taken (both reversible):**
+- **H‑8 → iPad-only v1.** `TARGETED_DEVICE_FAMILY` is `"2"` in `project.yml`; every pbxproj occurrence updated by hand (no xcodegen run). Note: `project.pbxproj` is **gitignored**, so its half lives on disk only — after any `xcodegen generate` the yml remains the source of truth. Restoring iPhone means shipping tasks.md epic I first.
+- **H‑10 → removed, not threaded.** The Reply-length row, its AppModel plumbing, and the persisted `ink.replyLength` key are gone; threading a preference the proxy doesn't yet honor would have kept the control a lie.
+
+**Deferred (tracked):**
+- **P‑1 core** — the per-entry-store rework (async launch load with a Remembered loading state, off-main coalesced writes, migration). Deferred deliberately: a bolt-on async write risks a stale background write landing after delete-all — a data-loss class worse than the hitch it removes — and v1 journal volumes keep the current cost invisible. Spawned as its own follow-up task. The adjacent costs named in §9 that *were* safe to take are done: off-main PDF export (`698654e`), off-main snapshot rasterization (`c16c46e` L‑8), downsampled develop images (`8a14b3c` L‑34), stable clip cache (`c16c46e` H‑9).
+- **L‑12** — `appAccountToken`; pair with the proxy release that consumes it.
+
+**Verification:** every wave built the app target clean in isolation; final state builds clean, `InkwovenCore` passes 136/136 tests across 22 suites, the frozen `InkwovenTests` bundle passes untouched (the exchange-lifecycle suites exercise the reworked interactor directly), and a fresh-install simulator pass confirmed onboarding (new gifted-moments card live), the shelf, and the Drawer (Reply-length row gone, ritual/hand/theme rows intact). The money wave additionally verified the paywall's computed savings tag, Vials, and PolicySheet on-screen; the design wave hand-verified the pbxproj after font removal with a double build.
+
+**Residual notes for the next session:** the audit's server-coupling caveats (§11) all still stand — nothing here changes the proxy redeploy prerequisite. New-in-remediation behaviors worth knowing: while a revisit is open, a fresh unsent tail lives in RAM only (H‑2's conservative trade); a declined exchange under an engaged hold shows the decline but stays held; sealed clips now live under `Caches/clips/keeper/` and die with the seal.
