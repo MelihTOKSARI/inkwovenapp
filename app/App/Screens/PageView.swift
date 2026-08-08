@@ -79,6 +79,11 @@ struct PageView: View {
             ZStack(alignment: .topLeading) {
                 paperBackground
 
+                // Under the writing, over the grain: the ink went down through
+                // the paper a second ago, and this is what it went down into.
+                QuickeningBloom(present: pageIsQuickening)
+                    .frame(width: geo.size.width, height: geo.size.height)
+
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     if spread {
@@ -608,6 +613,19 @@ struct PageView: View {
     /// through the rest — it returns only when something new stands.
     private var writerHasThePage: Bool {
         interactor.status == .inking || interactor.status == .resting
+    }
+
+    /// The window the bloom breathes through: ink gone, answer not yet up.
+    /// It clears the instant the exchange resolves — the reply rises into the
+    /// same centre, and the two must never share it. A writer who takes the
+    /// page back mid-stream owns it outright, so the bloom withdraws for them
+    /// too rather than stirring under a moving nib.
+    private var pageIsQuickening: Bool {
+        guard !interactor.writerReclaimed else { return false }
+        switch interactor.status {
+        case .sending, .answering: return true
+        default: return false
+        }
     }
 
     /// A fresh blank page shows the book's greeting and the starter; the
