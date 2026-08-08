@@ -291,6 +291,10 @@ struct PageView: View {
                     .fill(Ink.ink.opacity(0.06))
                     .overlay(Capsule().stroke(Ink.ink.opacity(0.14), lineWidth: 1))
             )
+            // The pill keeps its 38pt look; the target answers to the full
+            // 44 (audit M-16).
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
         .padding(.top, 18)
@@ -390,7 +394,9 @@ struct PageView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
-        .opacity(interactor.status == .inking ? 0.14 : 0.8)
+        // 0.92 resting, not 0.8: faded ink over parchment reads ~4.65:1 at
+        // this weight, back above AA for the 11pt small caps (audit L-38).
+        .opacity(interactor.status == .inking ? 0.14 : 0.92)
         .inkAnimation(
             .easeOut(duration: 0.4), value: interactor.status == .inking, reduce: reduceMotion
         )

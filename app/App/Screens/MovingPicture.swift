@@ -226,11 +226,14 @@ struct MovingPictureFrame: View {
     let onOpen: () -> Void
 
     @Environment(\.reduceInkMotion) private var reduceMotion
+    // The frame's caption and spoken label follow the clip's fate: a failed
+    // picture must not keep inviting a tap "to fall in" (audit M-14).
+    @State private var clipFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button(action: onOpen) {
-                ClipLoopView(url: url)
+                ClipLoopView(url: url, onFailure: { clipFailed = true })
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .overlay(
@@ -246,12 +249,19 @@ struct MovingPictureFrame: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressScaleStyle(scale: 0.985))
-            .accessibilityLabel("The moving picture from your page")
-            .accessibilityHint("Opens it full screen.")
+            .disabled(clipFailed)
+            .accessibilityLabel(
+                clipFailed
+                    ? "The moving picture would not wake."
+                    : "The moving picture from your page"
+            )
+            .accessibilityHint(clipFailed ? "" : "Opens it full screen.")
 
-            Text("tap to fall in")
-                .font(InkFont.bodyItalic(13))
-                .foregroundStyle(Ink.inkFaded)
+            if !clipFailed {
+                Text("tap to fall in")
+                    .font(InkFont.bodyItalic(13))
+                    .foregroundStyle(Ink.inkFaded)
+            }
         }
         .frame(maxWidth: 420, alignment: .leading)
         .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
@@ -359,6 +369,9 @@ struct ImmersiveClipView: View {
 ///    that re-buffers on every pass is not a living page.
 struct ClipLoopView: View {
     let url: URL
+    /// Lets a host (the page frame) follow the clip's fate, so captions and
+    /// spoken labels can stop promising a picture that never woke.
+    var onFailure: (() -> Void)? = nil
     @State private var localURL: URL?
     @State private var failed = false
 
@@ -389,6 +402,7 @@ struct ClipLoopView: View {
                 localURL = try await ClipCache.shared.localCopy(of: url)
             } catch {
                 failed = true
+                onFailure?()
             }
         }
     }
