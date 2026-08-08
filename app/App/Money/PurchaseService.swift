@@ -27,6 +27,21 @@ enum CommerceError: Error, Equatable {
     /// by another identity, invalid). The transaction is finished so it can
     /// never loop (audit M-4); the wallet was not credited.
     case deliveryRejected
+    /// The user closed the App Store's own sheet themselves (audit M-7):
+    /// not a failure, and nothing the room needs words for.
+    case cancelled
+    /// The App Store could not be reached — a dark road, not a refusal.
+    case offline
+}
+
+/// A storefront price as the rooms need it: the localized string a room may
+/// print, and the raw decimal the paywall's savings arithmetic runs on (audit
+/// H-4) — a percentage is never parsed back out of a display string.
+struct StorePrice: Equatable, Sendable {
+    /// The storefront's own localized string ("₺49,99").
+    let display: String
+    /// The bare decimal behind it, for arithmetic only.
+    let amount: Decimal
 }
 
 /// The App layer's purchase seam. It extends `EntitlementProviding` rather
@@ -36,12 +51,20 @@ protocol PurchaseServicing: EntitlementProviding {
     /// Begins the `Transaction.updates` listener and reconciles entitlements.
     func start() async
     func refresh() async
-    /// "Restore a binding" — App Review requires this to work.
-    func restore() async throws
+    /// "Restore a binding" — App Review requires this to work. Returns whether
+    /// a live entitlement was actually found (audit M-7): a sync that came back
+    /// empty-handed is neither a success nor an error, and the room needs to
+    /// say "nothing to restore" in so many words. A closed sheet throws
+    /// `CommerceError.cancelled`; a dark road throws `.offline`.
+    @discardableResult
+    func restore() async throws -> Bool
     func purchase(_ productID: String) async throws -> PurchaseOutcome
-    /// Localized storefront price. Hardcoded USD literals are a misleading-price
-    /// rejection in every non-USD storefront.
-    func displayPrice(for productID: String) async -> String?
+    /// Every product the rooms price, in ONE StoreKit round trip (audit L-11)
+    /// — this replaced five serial one-product fetches per refresh. Ids the
+    /// storefront does not answer for are simply absent from the result, so
+    /// callers keep their last known values. Localized strings only: hardcoded
+    /// USD literals are a misleading-price rejection in every other storefront.
+    func products(for ids: [String]) async -> [String: StorePrice]
     /// Whether the introductory offer (the weekly trial) is open to THIS
     /// Apple ID. Nil while unknown. The paywall shows trial claims only on
     /// `true` — a returning subscriber shown "free for 3 days" is charged
@@ -166,9 +189,23 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         }
     }
 
-    func restore() async throws {
-        try await AppStore.sync()
+    @discardableResult
+    func restore() async throws -> Bool {
+        do {
+            try await AppStore.sync()
+        } catch StoreKitError.userCancelled {
+            // The user closed Apple's sheet; the room stays quiet (audit M-7).
+            throw CommerceError.cancelled
+        } catch StoreKitError.networkError {
+            throw CommerceError.offline
+        } catch let error as URLError {
+            throw error.code == .cancelled ? CommerceError.cancelled : CommerceError.offline
+        }
         await refresh()
+        // Read straight off this actor, never off a racing entitlement stream
+        // (audit M-7): `refresh()` has settled the tier by the time this
+        // returns, so the caller's verdict cannot outrun the receipt.
+        return tier == .plus
     }
 
     // MARK: - Buying
@@ -213,8 +250,17 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         }
     }
 
-    func displayPrice(for productID: String) async -> String? {
-        (try? await product(for: productID))??.displayPrice
+    func products(for ids: [String]) async -> [String: StorePrice] {
+        // One wire call for everything the cache is missing (audit L-11); a
+        // failed fetch returns whatever is already cached, never less.
+        let missing = ids.filter { products[$0] == nil }
+        if !missing.isEmpty, let fetched = try? await Product.products(for: missing) {
+            for product in fetched { products[product.id] = product }
+        }
+        return ids.reduce(into: [:]) { quotes, id in
+            guard let product = products[id] else { return }
+            quotes[id] = StorePrice(display: product.displayPrice, amount: product.price)
+        }
     }
 
     func isEligibleForIntroOffer(_ productID: String) async -> Bool? {
@@ -353,11 +399,13 @@ struct UnboundPurchaseService: PurchaseServicing {
 
     func start() async {}
     func refresh() async {}
-    func restore() async throws {}
+    /// Nothing is entitled here, so there is never anything to restore.
+    @discardableResult
+    func restore() async throws -> Bool { false }
     func purchase(_ productID: String) async throws -> PurchaseOutcome {
         throw CommerceError.productUnavailable(productID)
     }
-    func displayPrice(for productID: String) async -> String? { nil }
+    func products(for ids: [String]) async -> [String: StorePrice] { [:] }
     /// Unknown — the paywall shows no trial claim it cannot back.
     func isEligibleForIntroOffer(_ productID: String) async -> Bool? { nil }
     func creditGrants() -> AsyncStream<Void> {

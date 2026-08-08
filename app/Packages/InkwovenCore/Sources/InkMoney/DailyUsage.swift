@@ -53,8 +53,10 @@ public struct DailyUsageLedger: Equatable, Sendable {
     }
 
     /// Records one consumed moment and returns the counters after the roll.
-    /// Ink and video both count as moments; images additionally tick the image
-    /// counter that drives the Plus soft-cap cooldown.
+    /// Ink counts as a moment; an image counts as a moment AND ticks the image
+    /// counter that drives the Plus soft-cap cooldown. Moving pictures never
+    /// pass through here — video is vial-gated, spent from the server-side
+    /// wallet, and costs no daily moment.
     @discardableResult
     public mutating func record(_ modality: Modality, at now: Date = Date()) -> DailyUsage {
         var rolled = current(at: now)

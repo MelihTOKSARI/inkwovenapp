@@ -622,7 +622,7 @@ struct PageView: View {
         case .answered: return "\(book.name) has answered. The reply is on the facing page."
         case .held: return "The page is held — nothing sends until you lift the hold."
         case .paywall: return "The ink has run dry for today."
-        case .cooldown: return "The ink has run hot today, and must rest a while."
+        case .cooldown(let seconds): return cooldownCopy(seconds)
         case .declined: return declineCopy
         case .crisis: return "Opening help."
         }
@@ -673,16 +673,16 @@ struct PageView: View {
     @ViewBuilder
     private var errorNote: some View {
         switch interactor.status {
-        case .cooldown:
-            VStack(alignment: .leading, spacing: 12) {
-                QuietBanner(text: "The ink has run hot today, and must rest a while. Come back when it has settled — or bind the notebook, and write without pause.")
-                WaxSealButton(label: "bind to write without pause", diameter: 30, labelFont: InkFont.body(14)) {
-                    model.go(.paywall)
-                }
-            }
-            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
-            .background(parchmentCard)
-            .transition(.opacity)
+        case .cooldown(let seconds):
+            // No seal on this card (audit M-6): the gate emits cooldown only
+            // for a hand that is ALREADY bound, and the server's rate limit —
+            // the one way a free hand lands here — is nothing a binding would
+            // lift. The old card sold Plus to people who had it, and promised
+            // relief it could not deliver to people who did not.
+            QuietBanner(text: cooldownCopy(seconds))
+                .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                .background(parchmentCard)
+                .transition(.opacity)
         case .declined:
             VStack(alignment: .leading, spacing: 12) {
                 QuietBanner(text: declineCopy)
@@ -710,6 +710,26 @@ struct PageView: View {
             .transition(.opacity)
         default:
             EmptyView()
+        }
+    }
+
+    /// The cooldown's two truths (audit M-6), with the wait named in both.
+    /// A bound hand hit the Plus picture soft-cap: rest copy, nothing for
+    /// sale. A free hand only lands here from the server's own rate limit —
+    /// the pause is honest about being crowded roads, and promises nothing.
+    private func cooldownCopy(_ seconds: TimeInterval) -> String {
+        model.bound
+            ? "The ink has run hot today, and must rest — it settles for \(Self.settleLabel(seconds)). The page will take your hand again then."
+            : "The roads are crowded tonight — too many pages travelling at once. The ink rests for \(Self.settleLabel(seconds)); your page is safe, ask again when it has settled."
+    }
+
+    /// The wait, in the room's own units — never a raw seconds count.
+    private static func settleLabel(_ seconds: TimeInterval) -> String {
+        switch seconds {
+        case ..<90: return "a minute"
+        case ..<3600: return "\(max(2, Int((seconds / 60).rounded()))) minutes"
+        case ..<5400: return "an hour"
+        default: return "\(Int((seconds / 3600).rounded())) hours"
         }
     }
 

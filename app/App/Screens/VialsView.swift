@@ -87,6 +87,16 @@ struct VialsShop: View {
 
             refundNote
                 .padding(.top, 24)
+
+            // One honest sentence before the money changes hands (audit M-8):
+            // the vials are credits held for THIS device's notebook — they do
+            // not follow the Apple ID the way the binding does.
+            Text("The vials belong to this notebook, on this device. A binding follows your Apple ID; the vials stay here.")
+                .font(InkFont.bodyItalic(13))
+                .foregroundStyle(room.dim)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 14)
         }
     }
 

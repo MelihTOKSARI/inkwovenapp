@@ -29,7 +29,11 @@ struct PolicySheet: View {
                         )
                         section(
                             "What leaves the device",
-                            "To answer a page, Inkwoven sends a picture of what you wrote or drew — with a little surrounding context — to its own server, which passes it to AI providers (Google, OpenAI, fal.ai) solely to compose the reply. A page may begin its journey a moment after your pen rests. A random install token identifies this device to the server; there is no account, no advertising, no tracking, and nothing is ever sold. The Keeper's lock is a lock on this device — its pages still travel, like any other Book's, to be answered."
+                            // The shipping identity (audit L-27): an App-Attest-
+                            // proved, server-minted session token, with the
+                            // random token only as fallback — "a random install
+                            // token" undersold what actually travels.
+                            "To answer a page, Inkwoven sends a picture of what you wrote or drew — with a little surrounding context — to its own server, which passes it to AI providers (Google, OpenAI, fal.ai) solely to compose the reply. A page may begin its journey a moment after your pen rests. An anonymous device identity — proved by the device's own hardware where it can be, a random token where it cannot — tells the server which notebook is asking; there is no account, no advertising, no tracking, and nothing is ever sold. The Keeper's lock is a lock on this device — its pages still travel, like any other Book's, to be answered."
                         )
                         section(
                             "What stays with you",
@@ -42,14 +46,27 @@ struct PolicySheet: View {
                             // none. There is no annual plan; describing one
                             // here put two contradictory trial disclosures in
                             // one binary.
-                            "The binding is an auto-renewing subscription, charged to your Apple account at the price shown on the paywall in your local currency — by the week, or by the moon. A weekly binding may begin with three days free when Apple's introductory offer applies to your account; the paywall says so only when it truly does. It renews until cancelled, at least a day before renewal, in your device Settings under your Apple ID subscriptions. \"Restore a binding\" on the paywall recovers a purchase on a new or reinstalled device."
+                            // The vials' one honest sentence (audit M-8):
+                            // server-side credits keyed to this device's
+                            // identity — they do not follow the Apple ID the
+                            // way the subscription does, and nothing said so.
+                            "The binding is an auto-renewing subscription, charged to your Apple account at the price shown on the paywall in your local currency — by the week, or by the moon. A weekly binding may begin with three days free when Apple's introductory offer applies to your account; the paywall says so only when it truly does. It renews until cancelled, at least a day before renewal, in your device Settings under your Apple ID subscriptions. \"Restore a binding\" on the paywall recovers a purchase on a new or reinstalled device. The vials — moving-picture credits — are different: they stay with this notebook on this device. The binding follows your Apple ID; the vials do not travel with it."
                         )
-                        Link(destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!) {
-                            Text("Apple's standard licence agreement (EULA)")
-                                .font(InkFont.body(14))
-                                .foregroundStyle(room.accent)
-                                .underline()
-                                .frame(minHeight: 44, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Link(destination: URL(string: "https://melihtoksari.github.io/inkwoven/privacy")!) {
+                                Text("The privacy policy, in full")
+                                    .font(InkFont.body(14))
+                                    .foregroundStyle(room.accent)
+                                    .underline()
+                                    .frame(minHeight: 44, alignment: .leading)
+                            }
+                            Link(destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!) {
+                                Text("Apple's standard licence agreement (EULA)")
+                                    .font(InkFont.body(14))
+                                    .foregroundStyle(room.accent)
+                                    .underline()
+                                    .frame(minHeight: 44, alignment: .leading)
+                            }
                         }
                     }
                     .padding(EdgeInsets(top: 24, leading: 30, bottom: 36, trailing: 30))

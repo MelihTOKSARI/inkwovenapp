@@ -91,24 +91,28 @@ struct PaywallView: View {
                 planCard(
                     .monthly, name: "One moon",
                     price: monthlyPrice ?? "—",
-                    period: "/mo", tag: "save 54% · best"
+                    period: "/mo", tag: monthlySavingsTag
                 )
             }
             .padding(.bottom, 22)
 
             sealCTA
 
-            // The trial's full terms, stated where the seal is pressed — not
-            // only inside a tag on the plan card.
-            Text(trialDisclosure)
-                .font(InkFont.body(12.5))
-                // Small print in the palette's faded ink (audit M-17):
-                // #8A7658 at 12.5pt measured 3.65:1 on the parchment;
-                // inkFaded holds ≥4.5 across the whole sheet gradient.
-                .foregroundStyle(Ink.inkFaded)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .padding(.top, 12)
+            if model.storeFetchFailed && !pricesReady {
+                storefrontRetry
+            } else {
+                // The trial's full terms, stated where the seal is pressed —
+                // not only inside a tag on the plan card.
+                Text(trialDisclosure)
+                    .font(InkFont.body(12.5))
+                    // Small print in the palette's faded ink (audit M-17):
+                    // #8A7658 at 12.5pt measured 3.65:1 on the parchment;
+                    // inkFaded holds ≥4.5 across the whole sheet gradient.
+                    .foregroundStyle(Ink.inkFaded)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.top, 12)
+            }
 
             HStack(spacing: 24) {
                 linkText("Restore a binding") { model.restorePurchases() }
@@ -146,6 +150,52 @@ struct PaywallView: View {
     /// real prices — a purchase sheet reached from a placeholder is exactly
     /// the productUnavailable dead end the audit describes (C-3).
     private var pricesReady: Bool { weeklyPrice != nil && monthlyPrice != nil }
+
+    /// "save 54%" is arithmetic now, not copy (audit H-4): weekly annualised
+    /// (52×) against monthly (12×), from the storefront's own decimals — a
+    /// storefront whose ratio differs from the US one gets its own truth. No
+    /// tag at all until both real prices are in hand, and none when the
+    /// arithmetic cannot honestly call the moon the better bargain.
+    private var monthlySavingsTag: String? {
+        guard let weekly = model.storeAmounts[ProductID.plusWeekly],
+              let monthly = model.storeAmounts[ProductID.plusMonthly],
+              pricesReady, weekly > 0 else { return nil }
+        let yearOfWeeks = NSDecimalNumber(decimal: weekly).doubleValue * 52
+        let yearOfMoons = NSDecimalNumber(decimal: monthly).doubleValue * 12
+        let saved = (yearOfWeeks - yearOfMoons) / yearOfWeeks
+        guard saved >= 0.005 else { return nil }
+        return "save \(Int((saved * 100).rounded()))% · best"
+    }
+
+    /// The storefront was asked and did not answer (audit L-13): the seal
+    /// cannot be pressed, so the page says so and offers the asking again —
+    /// "waking…" forever was indistinguishable from broken.
+    private var storefrontRetry: some View {
+        VStack(spacing: 12) {
+            Text("The storefront did not answer — the road to it may be dark.")
+                .font(InkFont.bodyItalic(14))
+                .foregroundStyle(Ink.inkFaded)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+            Button {
+                Task { await model.refreshStore() }
+            } label: {
+                Text("ask the storefront again")
+                    .font(InkFont.body(14))
+                    .foregroundStyle(Ink.inkFaded)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 40)
+                    .background(
+                        Capsule()
+                            .fill(Ink.ink.opacity(0.06))
+                            .overlay(Capsule().stroke(Ink.ink.opacity(0.18), lineWidth: 1))
+                    )
+            }
+            .buttonStyle(PressScaleStyle())
+            .accessibilityHint("Asks the App Store for its prices again.")
+        }
+        .padding(.top, 14)
+    }
 
     private var trialDisclosure: String {
         switch model.selectedPlan {

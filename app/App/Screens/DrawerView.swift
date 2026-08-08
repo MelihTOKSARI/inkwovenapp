@@ -78,12 +78,10 @@ struct DrawerView: View {
                         }
 
                         section("The Voice") {
-                            row("Reply length", divider: true) {
-                                SegmentedPills(
-                                    options: AppModel.ReplyLength.allCases.map { ($0.rawValue, $0) },
-                                    selection: model.replyLength
-                                ) { model.replyLength = $0 }
-                            }
+                            // No "Reply length" row (audit H-10): the pills
+                            // wrote a preference nothing downstream ever read
+                            // — a dead control until the engine honors it
+                            // (tasks.md H3 is its future home).
                             handRow
                             if showHands {
                                 shelfHandPicker
@@ -698,6 +696,10 @@ struct DrawerView: View {
                         // (audit L-30) — torn out with the pages, along with
                         // a report aimed at an entry that no longer exists.
                         InkThumbnail.removeAll()
+                        // And the moving pictures those pages played (audit
+                        // M-13): a cached clip is the page's picture in
+                        // another coat, and "delete all" promises all.
+                        Task { await ClipCache.shared.purgeAll() }
                         model.reportTarget = nil
                         model.revisit = nil
                         model.showDeleteConfirm = false

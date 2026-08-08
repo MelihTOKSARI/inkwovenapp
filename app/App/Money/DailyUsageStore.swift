@@ -63,32 +63,42 @@ final class EphemeralDailyUsageStorage: DailyUsageStorage, @unchecked Sendable {
 /// The proxy stays authoritative: `reconcile(with:)` folds a server count in
 /// (upward only) the day the client gains a usage endpoint.
 actor DailyUsageStore: DailyUsageAccounting {
-    private var ledger: DailyUsageLedger
+    /// The last settled counters; nil until the first roll on a fresh install.
+    private var usage: DailyUsage?
     private let storage: any DailyUsageStorage
 
-    init(storage: any DailyUsageStorage = UserDefaultsDailyUsageStorage(), calendar: Calendar = .current) {
+    init(storage: any DailyUsageStorage = UserDefaultsDailyUsageStorage()) {
         self.storage = storage
-        if let restored = storage.load() {
-            ledger = DailyUsageLedger(usage: restored, calendar: calendar)
-        } else {
-            ledger = DailyUsageLedger(calendar: calendar)
-        }
+        usage = storage.load()
+    }
+
+    /// One ledger per operation, built on the CURRENT calendar: a ledger kept
+    /// from init pinned the time zone it was born in, so a writer who crossed
+    /// an ocean mid-session kept rolling the day on the old zone until
+    /// relaunch. `Calendar.current` is read fresh here, and the ledger stays
+    /// exactly what InkMoney means it to be — roll math, never state.
+    private func settle(_ operate: (inout DailyUsageLedger) -> DailyUsage) -> DailyUsage {
+        var ledger = usage.map { DailyUsageLedger(usage: $0, calendar: .current) }
+            ?? DailyUsageLedger(calendar: .current)
+        let settled = operate(&ledger)
+        usage = ledger.usage
+        return settled
     }
 
     func currentUsage(at now: Date = Date()) -> DailyUsage {
-        let before = ledger.usage
-        let usage = ledger.current(at: now)
+        let before = usage
+        let current = settle { $0.current(at: now) }
         // Only a real day roll changes anything; reading the counters must not
         // write a preference on every send gate.
-        if usage != before { storage.save(usage) }
-        return usage
+        if current != before { storage.save(current) }
+        return current
     }
 
     @discardableResult
     func record(_ modality: Modality, at now: Date = Date()) -> DailyUsage {
-        let usage = ledger.record(modality, at: now)
-        storage.save(usage)
-        return usage
+        let recorded = settle { $0.record(modality, at: now) }
+        storage.save(recorded)
+        return recorded
     }
 
     /// Folds a server-reported count in. Unused until the client gains a usage
@@ -96,8 +106,8 @@ actor DailyUsageStore: DailyUsageAccounting {
     /// bound so the authoritative path is one call away.
     @discardableResult
     func reconcile(with server: DailyUsage, at now: Date = Date()) -> DailyUsage {
-        let usage = ledger.reconcile(with: server, at: now)
-        storage.save(usage)
-        return usage
+        let reconciled = settle { $0.reconcile(with: server, at: now) }
+        storage.save(reconciled)
+        return reconciled
     }
 }

@@ -61,8 +61,11 @@ struct PurchaseNoteOverlay: View {
                 body: "Your purchase is waiting for approval — Ask to Buy sends it to your family organizer first. The notebook binds itself the moment word arrives.",
                 action: "very well", onTap: onDismiss
             )
-        case .failed(let message):
-            note(title: "The seal would not take", body: message, action: "very well", onTap: onDismiss)
+        case .failed(let title, let message):
+            // The state carries its own headline (audit L-10): "The seal
+            // would not take" over a body saying the payment DID take —
+            // delivery pending, delivery rejected — read as a contradiction.
+            note(title: title, body: message, action: "very well", onTap: onDismiss)
         case .succeeded:
             note(title: successTitle, body: successBody, action: successAction, onTap: onSuccess)
         }

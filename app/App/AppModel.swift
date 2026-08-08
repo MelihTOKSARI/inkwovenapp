@@ -18,7 +18,11 @@ enum PurchaseState: Equatable {
     case idle
     case purchasing
     case deferred
-    case failed(String)
+    /// Headline and body travel together (audit L-10): the overlay used to
+    /// stamp "The seal would not take" over bodies that said the payment DID
+    /// take — delivery-pending and delivery-rejected now carry titles that
+    /// agree with their own words.
+    case failed(title: String, message: String)
     case succeeded
 }
 
@@ -84,6 +88,15 @@ final class AppModel {
     /// answers. Hardcoded USD literals are charged at a different amount in
     /// every other storefront.
     private(set) var storePrices: [String: String] = [:]
+    /// The raw decimals behind `storePrices`, for arithmetic only (audit H-4):
+    /// the paywall's savings tag is computed from these, never parsed back out
+    /// of a localized string — and never rendered directly.
+    private(set) var storeAmounts: [String: Decimal] = [:]
+    /// True once a store refresh has COMPLETED without prices for the plans
+    /// the paywall sells (audit L-13) — the difference between "still waking"
+    /// and "did not answer", which is the difference between waiting quietly
+    /// and offering a retry.
+    private(set) var storeFetchFailed = false
     /// Whether the weekly trial is open to THIS Apple ID (audit C-2). Nil
     /// until StoreKit answers; the paywall shows trial copy only on `true` —
     /// a returning subscriber promised "free for 3 days" is charged at once.
@@ -121,9 +134,6 @@ final class AppModel {
     }
     var leftHanded: Bool {
         didSet { defaults.set(leftHanded, forKey: "ink.leftHanded") }
-    }
-    var replyLength: ReplyLength {
-        didSet { defaults.set(replyLength.rawValue, forKey: "ink.replyLength") }
     }
     var showDeleteConfirm = false
     /// The completed reply under report (guideline 1.2): set by a long-press
@@ -196,10 +206,6 @@ final class AppModel {
         var label: String { self == .weekly ? "seven nights" : "one moon" }
     }
 
-    enum ReplyLength: String, CaseIterable {
-        case terse = "Terse", measured = "Measured", full = "Full"
-    }
-
     init(
         defaults: UserDefaults = .standard,
         purchases: any PurchaseServicing = LiveCommerce.purchases,
@@ -262,7 +268,6 @@ final class AppModel {
         inkColorHex = UInt32(exactly: defaults.object(forKey: "ink.inkColor") as? Int ?? 0x2E2418)
             ?? 0x2E2418
         leftHanded = defaults.bool(forKey: "ink.leftHanded")
-        replyLength = ReplyLength(rawValue: defaults.string(forKey: "ink.replyLength") ?? "") ?? .measured
         ritualEnabled = defaults.bool(forKey: "ink.ritualEnabled")
         // Out-of-range hours (the argument domain, a forged plist) fall back
         // to eight in the evening rather than to a night that never comes.
@@ -291,6 +296,10 @@ final class AppModel {
         // surface wakes PenPresence, and the UITest `-ink.pencilSeen YES`
         // injection rides the argument domain, which removeObject cannot touch.
         defaults.removeObject(forKey: "ink.pencilSeen")
+        // And the reply-length choice (audit H-10): the control was a dead
+        // switch — nothing downstream ever read it — so the row is gone until
+        // the engine honors it, and the persisted key goes with it.
+        defaults.removeObject(forKey: "ink.replyLength")
         observeCommerce()
     }
 
@@ -302,6 +311,7 @@ final class AppModel {
         entitlementTask?.cancel()
         grantTask?.cancel()
         ritualTask?.cancel()
+        purchaseWatchdog?.cancel()
     }
 
     // MARK: - Commerce
@@ -315,13 +325,43 @@ final class AppModel {
     // runs no other reference exists to race with.
     @ObservationIgnored nonisolated(unsafe) private var entitlementTask: Task<Void, Never>?
     @ObservationIgnored nonisolated(unsafe) private var grantTask: Task<Void, Never>?
+    /// Resolves a hung `.purchasing` scrim (audit L-15) — see
+    /// `setPurchaseState`. `nonisolated(unsafe)` for the same deinit reason
+    /// as the commerce tasks above.
+    @ObservationIgnored nonisolated(unsafe) private var purchaseWatchdog: Task<Void, Never>?
 
-    private static let purchaseFailure = "The seal would not take. Nothing was charged."
-    private static let restoreFailure = "No binding was found for this hand."
-    private static let deliveryPending =
-        "The vials are paid for but still in the post. They will arrive when the road clears — open the app again in a moment."
-    private static let deliveryRejected =
-        "The purchase went through, but the vials could not be delivered to this notebook. Write to the binder from the Drawer — nothing is lost."
+    // Titles and bodies agree with each other (audit L-10): a payment still
+    // in the post is not a seal that "would not take".
+    private static let purchaseFailure = PurchaseState.failed(
+        title: "The seal would not take",
+        message: "Nothing was charged. Try once more in a moment."
+    )
+    private static let deliveryPending = PurchaseState.failed(
+        title: "Paid, and in the post",
+        message: "The vials are paid for but still in the post. They will arrive when the road clears — open the app again in a moment."
+    )
+    private static let deliveryRejected = PurchaseState.failed(
+        title: "Sealed, but undelivered",
+        message: "The purchase went through, but the vials could not be delivered to this notebook. Write to the binder from the Drawer — nothing is lost."
+    )
+    // The restore's endings, told apart (audit M-7).
+    private static let restoreEmpty = PurchaseState.failed(
+        title: "No binding was found",
+        message: "The App Store keeps no binding for this Apple ID. If the notebook was bound under another, sign in with that hand and restore again."
+    )
+    private static let restoreOffline = PurchaseState.failed(
+        title: "The road is dark",
+        message: "The App Store could not be reached. Try the restore again when the way opens."
+    )
+    private static let restoreFailure = PurchaseState.failed(
+        title: "The restore would not take",
+        message: "Nothing has changed. Try again in a moment."
+    )
+    /// The watchdog's verdict (audit L-15) — honest about not knowing.
+    private static let storefrontSilent = PurchaseState.failed(
+        title: "The storefront did not answer",
+        message: "No word has come from the App Store. If the purchase went through, it will land on its own — nothing is lost. Otherwise, try again in a moment."
+    )
 
     private func observeCommerce() {
         // Every capture below is weak (audit L-17): these loops run for the
@@ -362,18 +402,45 @@ final class AppModel {
     /// fell back to a hardcoded USD literal, and pressing the seal met
     /// `productUnavailable`. Now the paywall re-asks on appear and RootView
     /// re-asks on every foreground; failures keep the last known values.
+    /// One batched wire call for all five products (audit L-11), and
+    /// `storeFetchFailed` tells the paywall when the storefront has still not
+    /// answered for the plans it sells (audit L-13).
     func refreshStore() async {
         let ids = [ProductID.plusWeekly, ProductID.plusMonthly] + ProductID.consumables.sorted()
-        for id in ids {
-            if let price = await purchases.displayPrice(for: id) { storePrices[id] = price }
+        let quotes = await purchases.products(for: ids)
+        for (id, quote) in quotes {
+            storePrices[id] = quote.display
+            storeAmounts[id] = quote.amount
         }
         if let eligible = await purchases.isEligibleForIntroOffer(ProductID.plusWeekly) {
             weeklyTrialEligible = eligible
         }
+        storeFetchFailed = storePrices[ProductID.plusWeekly] == nil
+            || storePrices[ProductID.plusMonthly] == nil
     }
 
     func clearPurchaseNote() {
-        purchaseState = .idle
+        setPurchaseState(.idle)
+    }
+
+    /// Every purchase-state write passes through here so the watchdog's clock
+    /// matches the scrim exactly (audit L-15): `.purchasing` arms it, any
+    /// verdict stands it down. The watchdog resolves a StoreKit call that
+    /// never answers into an honest note rather than a room bricked until
+    /// force-quit — WITHOUT cancelling the purchase task, so a late answer
+    /// still runs the normal paths and overwrites the verdict truthfully.
+    private func setPurchaseState(_ next: PurchaseState) {
+        purchaseWatchdog?.cancel()
+        purchaseState = next
+        guard next == .purchasing else { return }
+        purchaseWatchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled, let self else { return }
+            // Only a still-hung purchase gets the silent-storefront note; a
+            // verdict that landed while the watchdog slept stands untouched.
+            guard self.purchaseState == .purchasing else { return }
+            self.purchaseState = Self.storefrontSilent
+        }
     }
 
     var theme: RoomTheme {
@@ -582,7 +649,7 @@ final class AppModel {
     /// receipt reaches the entitlement stream.
     func confirmBind() {
         showBindConfirm = false
-        purchaseState = .purchasing
+        setPurchaseState(.purchasing)
         let productID = selectedPlan.productID
         Task { [purchases] in
             do {
@@ -592,17 +659,17 @@ final class AppModel {
                     // user sees, and its dismissal walks back to the shelf.
                     // (The Memory screen this used to open showed demo notes —
                     // cross-page memory is not a v1 feature.)
-                    self.purchaseState = .succeeded
+                    self.setPurchaseState(.succeeded)
                 case .pending:
                     // Ask to Buy / SCA: the transaction is real, the
                     // entitlement is not. Opening Memory here is how a minor
                     // ends up with Plus nobody approved.
-                    self.purchaseState = .deferred
+                    self.setPurchaseState(.deferred)
                 case .cancelled:
-                    self.purchaseState = .idle
+                    self.setPurchaseState(.idle)
                 }
             } catch {
-                self.purchaseState = .failed(Self.purchaseFailure)
+                self.setPurchaseState(Self.purchaseFailure)
             }
         }
     }
@@ -611,47 +678,62 @@ final class AppModel {
     /// the transaction verifies and the proxy accepts it — never here. This was
     /// once `credits += pack` behind a button labelled with a price.
     func buyVials(_ productID: String) {
+        // One purchase at a time (audit L-14): two rapid taps used to start
+        // two StoreKit tasks before the scrim could rise to block the second.
+        guard purchaseState != .purchasing else { return }
         guard ProductID.consumables.contains(productID) else {
-            purchaseState = .failed(Self.purchaseFailure)
+            setPurchaseState(Self.purchaseFailure)
             return
         }
-        purchaseState = .purchasing
+        setPurchaseState(.purchasing)
         Task { [purchases] in
             do {
                 switch try await purchases.purchase(productID) {
                 case .success:
-                    self.purchaseState = .succeeded
+                    self.setPurchaseState(.succeeded)
                     await self.refreshWallet()
-                case .pending: self.purchaseState = .deferred
-                case .cancelled: self.purchaseState = .idle
+                case .pending: self.setPurchaseState(.deferred)
+                case .cancelled: self.setPurchaseState(.idle)
                 }
             } catch CommerceError.deliveryPending {
                 // Paid, but the wallet has not been credited yet. The
                 // transaction stays open, so StoreKit redelivers it — say so
                 // honestly rather than claiming a failure that lost the money.
-                self.purchaseState = .failed(Self.deliveryPending)
+                self.setPurchaseState(Self.deliveryPending)
             } catch CommerceError.deliveryRejected {
                 // The server refused the receipt terminally (audit M-4): the
                 // transaction is finished so it can never loop, and the way
                 // forward is a human, not a retry.
-                self.purchaseState = .failed(Self.deliveryRejected)
+                self.setPurchaseState(Self.deliveryRejected)
             } catch {
-                self.purchaseState = .failed(Self.purchaseFailure)
+                self.setPurchaseState(Self.purchaseFailure)
             }
         }
     }
 
     /// "Restore a binding." App Review requires a working restore on any
     /// auto-renewable subscription, and it is the only way back for a user who
-    /// reinstalled or changed device.
+    /// reinstalled or changed device. The endings are told apart (audit M-7):
+    /// a binding found, an empty-handed sync, a sheet the user closed
+    /// themselves (silent), a dark road, and a real failure each get their own
+    /// words — the old flow ended a successful-but-empty sync in silence and
+    /// blamed "no binding" for airplane mode.
     func restorePurchases() {
-        purchaseState = .purchasing
+        guard purchaseState != .purchasing else { return }
+        setPurchaseState(.purchasing)
         Task { [purchases] in
             do {
-                try await purchases.restore()
-                self.purchaseState = self.bound ? .succeeded : .idle
+                // The verdict rides the return value, settled inside the
+                // store before it answers — never a race against the
+                // entitlement stream reaching `bound` first.
+                let found = try await purchases.restore()
+                self.setPurchaseState(found ? .succeeded : Self.restoreEmpty)
+            } catch CommerceError.cancelled {
+                self.setPurchaseState(.idle)
+            } catch CommerceError.offline {
+                self.setPurchaseState(Self.restoreOffline)
             } catch {
-                self.purchaseState = .failed(Self.restoreFailure)
+                self.setPurchaseState(Self.restoreFailure)
             }
         }
     }
