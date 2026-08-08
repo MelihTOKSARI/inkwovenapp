@@ -108,10 +108,16 @@ final class PageInteractor {
     private let entitlements: PageEntitlements
     private let memory: any MemoryProviding
 
-    // Gentler than the machine defaults (2s/3s): writing is thought, and the
-    // pause between words must never feel like a countdown. The settle bounce
-    // in the page margin shows the window is open.
-    private var machine = IdleSendMachine(speculateAfter: 2.5, commitAfter: 4.0)
+    // The room's beat: the page drinks 2s after the hand stops, and pre-pays
+    // the network at 1s — half the window, so a cancelled send has wasted at
+    // most one upload. This used to be 2.5s/4.0s with a bouncing countdown in
+    // the margin to explain the wait; the wait is now short enough to need no
+    // explaining, and nothing in the margin explains it. A writer learns this
+    // beat in one page and writes to it after that.
+    //
+    // Everything visual hangs off the same 2s: `InkMotion.Surface` takes half
+    // of it to put the ink under, and the same half to bring the answer up.
+    private var machine = IdleSendMachine(speculateAfter: 1.0, commitAfter: 2.0)
     private weak var canvas: PKCanvasView?
     private var tickTask: Task<Void, Never>?
     private var draftSaveTask: Task<Void, Never>?

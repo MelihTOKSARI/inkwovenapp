@@ -341,11 +341,14 @@ struct PageView: View {
         .accessibilityHint("Every page you have filled in \(book.name).")
     }
 
-    /// Cancel is only meaningful while a send is pending, but surfacing it
-    /// the instant the pen lifts made every between-words pause flash a
-    /// button. It waits for the same settle beat as the rest seal.
+    /// Cancel is only meaningful while a send is pending — a 2s window, which
+    /// is too short for a button to fade in, be read, and be hit, and long
+    /// enough for one to flash on every pause between words. It rides the
+    /// same switch as the settle bounce; with the switch off, an absorbed
+    /// page comes back through undo instead, and the tray's hold is what
+    /// stops the clock for long writing.
     private var showCancelSend: Bool {
-        interactor.canCancelSend && restSettled
+        RestWindowAffordances.shown && interactor.canCancelSend && restSettled
     }
 
     private var header: some View {
@@ -513,8 +516,16 @@ struct PageView: View {
                 inkColor: UIColor(Color(hex: model.inkColorHex)),
                 typedTopInset: openerHeight + 14
             )
-            .opacity(canvasAbsorbed ? 0.18 : 1)
-            .blur(radius: canvasAbsorbed ? 2 : 0)
+            // The ink GOES — all the way, not to a ghost. PRD §4 is explicit
+            // that absorption ends in removal and never in minimum-opacity
+            // ghosting, and a half-erased page held for the length of a model
+            // call was the opposite of the effect: the diary is supposed to
+            // swallow what you wrote. The strokes themselves stay in the
+            // PKDrawing the whole time, so a declined send still brings them
+            // back at full strength — only the view goes under.
+            .opacity(canvasAbsorbed ? 0 : 1)
+            .blur(radius: canvasAbsorbed ? InkMotion.Surface.haze : 0)
+            .offset(y: canvasAbsorbed ? InkMotion.Surface.depth : 0)
             // `.contain`, never the bare `.accessibilityElement()`: the
             // no-argument form ignores children, which hid the typed hand's
             // UITextView outright — on an iPad with no Pencil that is the
@@ -636,34 +647,41 @@ struct PageView: View {
     private var statusNote: some View {
         switch interactor.status {
         case .resting:
-            // The settle bounce is the promise: the page waits while the dots
-            // still dance — finish the thought, nothing sends yet. Dots only:
-            // every between-words pause lands here, so any caption or button
-            // would nag on every breath. The send commits on its own; the
-            // mechanic is taught once, in onboarding.
-            SettleBounce()
-                .transition(.opacity)
-        case .sending, .answering:
-            // The banner holds through the whole exchange: the reply no
-            // longer streams, so the wait needs a voice until it surfaces.
-            QuietBanner(text: "the ink drinks into the page…")
-                .transition(.opacity)
+            // Silent by default. The rest window used to carry a bouncing
+            // settle mark that fired on every pause between words; the page
+            // now says nothing while the hand is off it, and the ink going
+            // under 2s later is the whole of the feedback. `SettleBounce`
+            // returns with one `true` in `RestWindowAffordances`.
+            if RestWindowAffordances.shown {
+                SettleBounce()
+                    .transition(.opacity)
+            } else {
+                offlineNote
+            }
         case .held:
             QuietBanner(text: "the page waits — nothing sends until you lift the hold")
                 .transition(.opacity)
         default:
-            // Said BEFORE the ink is committed: a writer with no road spent
-            // the whole rest window and a send attempt to be told the spirit
-            // was distant, with a retry that could never succeed.
-            if net.isOffline {
-                // Says what is true (audit D-10): the ink is kept — drafts
-                // persist now — but nothing queues itself, so the page waits
-                // for a hand to send it rather than promising to travel alone.
-                QuietBanner(text: "the road is dark — write on; your ink is kept, and sends when the way opens")
-                    .transition(.opacity)
-            } else {
-                EmptyView()
-            }
+            // `.sending` and `.answering` land here and stay quiet: the wait
+            // used to be narrated ("the ink drinks into the page…"), and the
+            // narration outlived its job the moment the ink began actually
+            // leaving the page. A blank page IS the Book thinking.
+            offlineNote
+        }
+    }
+
+    /// Said BEFORE the ink is committed: a writer with no road spent the whole
+    /// rest window and a send attempt to be told the spirit was distant, with
+    /// a retry that could never succeed. Says what is true (audit D-10): the
+    /// ink is kept — drafts persist now — but nothing queues itself, so the
+    /// page waits for a hand rather than promising to travel alone.
+    @ViewBuilder
+    private var offlineNote: some View {
+        if net.isOffline {
+            QuietBanner(text: "the road is dark — write on; your ink is kept, and sends when the way opens")
+                .transition(.opacity)
+        } else {
+            EmptyView()
         }
     }
 
@@ -907,21 +925,19 @@ struct PageView: View {
         } action: { height in
             if abs(exchangeHeight - height) > 0.5 { exchangeHeight = height }
         }
-        // The absorb, reply-side: the writer took the page back at pen-down,
-        // so the standing answer sinks into the paper — fade, soften, settle
-        // downward, the same direction the canvas drinks ink. Reduce Motion
-        // keeps only the fade.
+        // The sink, reply-side: the writer took the page back at pen-down, so
+        // the standing answer goes under exactly the way their ink does —
+        // same distance, same haze, same curve, off the one shared token.
+        // Reduce Motion keeps the arrival and drops the journey.
         .opacity(writerHasThePage ? 0 : 1)
-        .blur(radius: writerHasThePage && !reduceMotion ? 4 : 0)
-        .offset(y: writerHasThePage && !reduceMotion ? 8 : 0)
-        .inkAnimation(.easeIn(duration: 0.7), value: writerHasThePage, reduce: reduceMotion)
+        .blur(radius: writerHasThePage && !reduceMotion ? InkMotion.Surface.haze : 0)
+        .offset(y: writerHasThePage && !reduceMotion ? InkMotion.Surface.depth : 0)
+        .animation(InkMotion.Surface.sink(reduce: reduceMotion), value: writerHasThePage)
         .accessibilityHidden(writerHasThePage)
-        // Mirror of the absorb veil (0.9s easeIn out of sight): the reply
-        // surfaces over the same beat, blurred-and-faint to sharp.
-        .animation(
-            .easeOut(duration: reduceMotion ? 0.3 : 0.9),
-            value: displayedReply.isEmpty
-        )
+        // And the rise: the ink went under over `Surface.travel`, the answer
+        // comes up over the same, through the same depth of paper. One
+        // gesture, run backwards.
+        .animation(InkMotion.Surface.rise(reduce: reduceMotion), value: displayedReply.isEmpty)
     }
 
     private var reply: some View {
@@ -1081,10 +1097,13 @@ struct PageView: View {
             // A fresh exchange gets a fresh darkroom.
             developStep = 0
             sentThisVisit = true
-            withAnimation(.easeIn(duration: reduceMotion ? 0.3 : 0.9)) {
+            withAnimation(InkMotion.Surface.sink(reduce: reduceMotion)) {
                 canvasAbsorbed = true
             }
         case .inking:
+            // Deliberately faster than the surface crossing: the pen is
+            // already down. Reclaiming the page has to put the ink under the
+            // nib now, not perform a rise the writer is drawing through.
             withAnimation(.easeOut(duration: 0.2)) {
                 canvasAbsorbed = false
             }
@@ -1093,8 +1112,11 @@ struct PageView: View {
             // lands from revisits and restores, which must stay silent.
             if sentThisVisit { Feel.shared.play(.replyArrived) }
             // The interactor has archived and removed the strokes; lift the
-            // absorption veil so the (now empty) canvas is ready to write on.
-            withAnimation(.easeOut(duration: 0.25)) {
+            // veil so the canvas is ready to write on. Usually invisible —
+            // the page is empty by now — but a tail written while the Book
+            // answered survives absorption, and that ink rises like anything
+            // else coming back through the paper.
+            withAnimation(InkMotion.Surface.rise(reduce: reduceMotion)) {
                 canvasAbsorbed = false
             }
             // The value moment: the first answered page, and only then, earns
@@ -1110,8 +1132,10 @@ struct PageView: View {
             // A quiet no — deliberately softer than an error.
             Feel.shared.play(.refusal)
             // Failed send: the ink must come back at FULL strength — an error
-            // may never leave the page ghosted.
-            withAnimation(.easeOut(duration: 0.2)) {
+            // may never leave the page ghosted. It surfaces the way anything
+            // else does, which is also the honest reading: the page tried to
+            // swallow the words and gave them back.
+            withAnimation(InkMotion.Surface.rise(reduce: reduceMotion)) {
                 canvasAbsorbed = false
             }
         case .paywall:
@@ -1138,19 +1162,19 @@ struct PageView: View {
         }
     }
 
-    /// The cancel button used to pop in the instant the pen lifted — a flash
-    /// on every between-words pause. It now fades in only once the rest has
-    /// held for a beat (commit fires at 4s, so 1.1s still leaves a usable
-    /// window), and vanishes the moment any other status lands. The settle
-    /// bounce, by contrast, shows for the whole rest window.
+    /// The cancel button's reveal delay, kept alive only for the switch. It
+    /// waited 1.1s against the old 4s window; at 2s it would fade in with
+    /// half a second left, which is a flash, not an affordance — so with
+    /// `RestWindowAffordances` off nothing is scheduled at all, and with it
+    /// on the delay is a quarter of the window rather than a fixed beat.
     private func settleRestAffordances(for status: PageInteractor.PageStatus) {
         restSettleTask?.cancel()
-        guard status == .resting else {
+        guard RestWindowAffordances.shown, status == .resting else {
             restSettled = false
             return
         }
         restSettleTask = Task {
-            try? await Task.sleep(for: .milliseconds(1100))
+            try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             withAnimation(.easeIn(duration: 0.35)) { restSettled = true }
         }

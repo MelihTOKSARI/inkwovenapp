@@ -37,13 +37,17 @@
 
 ### Epic B — The pen & the page (D2)
 - [ ] B1 PencilKit canvas: pressure ink, palm rejection, both orientations, per-Book paper texture; **finger-drawing fallback (Pencil recommended, never required)** — **M**
-- [ ] B2 Idle-send state machine (~3s rest → snapshot; stroke cancels) + **speculative upload at ~2s (cancel on new stroke)** + unit tests — **M**
-  - AC: stroke at 2.9s → send cancelled AND speculative upload aborted; no model call billed.
+- [x] B2 Idle-send state machine (**2s rest** → snapshot; stroke cancels) + **speculative upload at 1s (cancel on new stroke)** + unit tests — **M**
+  - AC: stroke at 1.9s → send cancelled AND speculative upload aborted; no model call billed.
 - [x] B3 Ink-absorption animation — **ends in stroke removal: strokes archived to Page.strokeData then removed from live canvas; opacity is the animation, never the end state** — **S**
   - AC: after reply completes, zero user strokes remain on canvas at any opacity; archived page shows them in Remembered Pages. On send failure, strokes retained fully visible + in-fiction retry.
+- [x] B3a One surface gesture (`InkMotion.Surface`): ink sinks to **opacity 0** over 1s (half the rest window), the reply/picture/clip rises over the same 1s through the same 8pt of paper — one token, run forwards and backwards, no per-site durations — **S**
+  - AC: nothing renders the writer's ink at a held partial opacity at any point in the exchange; sink and rise are visibly the same move in opposite directions.
+- [x] B3b Silent rest window: settle bounce and cancel-send button behind `RestWindowAffordances.shown` (off); no "the ink drinks into the page…" banner while sending/answering — **S**
+  - AC: from pen-up to reply, the page shows no status chrome; only the offline note and the hold banner can still speak. VoiceOver still announces every status.
 - [ ] B4 Snapshot pipeline: crop, contrast, downscale — **S**
 - [x] B5 Canvas tool tray (in-fiction, top corner, dormant while pen moves): undo/redo (PKCanvasView undoManager), eraser + Pencil double-tap, **hold ("the page waits" → IdleSendMachine .held state, idle-send paused)**, cancel send, turn page — **M**
-  - AC: hold active → no send at any rest duration; release → normal 3s cadence resumes; cancel during .speculating → upload aborted, ink retained.
+  - AC: hold active → no send at any rest duration; release → normal 2s cadence resumes; cancel during .speculating → upload aborted, ink retained. (Cancel-send is built but switched off with the rest-window affordances — see B3b; undo restores an absorbed page.)
 - [x] B6 Occlusion audit: no informative UI in bottom page region while canvas active; all status/error cards render as top-margin marginalia (QuietBanner); placement flips for left-handed mode — **S**
 
 ### Epic C — The page answers (D2)

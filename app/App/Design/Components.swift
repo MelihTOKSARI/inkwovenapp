@@ -41,6 +41,68 @@ enum InkMotion {
     static func arrival(_ transition: AnyTransition, reduce: Bool) -> AnyTransition {
         reduce ? .opacity : transition
     }
+
+    // MARK: - The page surface (the one gesture the product speaks)
+
+    /// **Ink goes down, the answer comes up — one move, two directions.**
+    ///
+    /// The whole concept is disappearing and appearing: the page drinks what
+    /// you wrote and hands something back through the same surface. So the
+    /// sink and the rise are not two animations that happen to look alike;
+    /// they are one spec run forwards and backwards, defined here once and
+    /// read by everything that crosses the paper — the canvas ink, the ink
+    /// reply, the developed picture, the moving picture.
+    ///
+    /// Timings hang off the 2s rest beat: the send commits at 2s, the ink
+    /// takes half of that to go under, and the answer takes the same half to
+    /// come back up. Nothing in the room moves at a duration that isn't a
+    /// part of that beat.
+    enum Surface {
+        /// How long the ink takes to go under, and the answer to come up.
+        /// Half the rest window, so the page keeps one tempo throughout.
+        static let travel: Double = 1.0
+        /// Reduce Motion keeps the arrival, drops the journey.
+        static let calmTravel: Double = 0.3
+        /// How far a thing drifts as it crosses the paper. Down for ink
+        /// going under, up for an answer surfacing — same distance, so the
+        /// two read as the same depth of page.
+        static let depth: CGFloat = 8
+        /// Out-of-focus at the moment of crossing: paper is not glass.
+        static let haze: CGFloat = 2.5
+
+        /// Going under: the page drinking. Slow to start, gone by the end.
+        static func sink(reduce: Bool) -> Animation {
+            .easeIn(duration: reduce ? calmTravel : travel)
+        }
+
+        /// Coming up: the answer surfacing. The exact inverse — same
+        /// distance, same haze, the curve mirrored.
+        static func rise(reduce: Bool) -> Animation {
+            .easeOut(duration: reduce ? calmTravel : travel)
+        }
+    }
+}
+
+/// The rise, as a transition — for content that is inserted rather than
+/// toggled (the ink reply, the develop frame). Enters from `depth` below,
+/// hazy and absent, and arrives sharp: the same crossing `Surface.sink`
+/// performs in the other direction.
+private struct SurfaceCrossing: ViewModifier {
+    var submerged: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(submerged ? 0 : 1)
+            .blur(radius: submerged ? InkMotion.Surface.haze : 0)
+            .offset(y: submerged ? InkMotion.Surface.depth : 0)
+    }
+}
+
+extension AnyTransition {
+    @MainActor static let inkSurface = AnyTransition.modifier(
+        active: SurfaceCrossing(submerged: true),
+        identity: SurfaceCrossing(submerged: false)
+    )
 }
 
 extension View {
@@ -402,10 +464,27 @@ struct SegmentedPills<T: Hashable>: View {
 
 // MARK: - Settle bounce
 
+/// **Off.** Whether the page shows anything at all during its rest window —
+/// the settle bounce and the cancel-send button, the only two things that
+/// ever spoke while the writer paused.
+///
+/// The room is an enchanted object, not an interface: ink goes under, an
+/// answer comes up, and a writer learns that beat in one page. Chrome that
+/// counts down to the send taught nothing the disappearance doesn't teach
+/// better, and at a 2s window it fired on every pause between words.
+///
+/// Left as a switch, not a deletion: `SettleBounce` still builds, and one
+/// `true` here brings both affordances back. The flyleaf signature keeps its
+/// captioned bounce either way — that page teaches the mechanic on purpose.
+enum RestWindowAffordances {
+    static let shown = false
+}
+
 /// "Take your time" — three ink droplets bobbing in a slow stagger while the
 /// page waits out a pause in the writing. The bounce is the promise: nothing
 /// sends while the dots still dance. Used wherever a rest window is open
-/// (the flyleaf signature, the page's idle-send).
+/// (the flyleaf signature; the page's idle-send when `RestWindowAffordances`
+/// is switched back on).
 struct SettleBounce: View {
     var color: Color = Ink.inkFaded
     var caption: String?
@@ -492,27 +571,6 @@ struct Line: Shape {
     }
 }
 
-// MARK: - Ink surfacing
-
-/// The absorb veil in reverse: absorbed ink sinks out of sight through blur
-/// and fade, so arriving ink rises the same way — blurred and faint, then
-/// sharp at full strength. Used for the Book's reply (never streamed).
-private struct InkSurfaceModifier: ViewModifier {
-    var submerged: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(submerged ? 0 : 1)
-            .blur(radius: submerged ? 2.5 : 0)
-    }
-}
-
-extension AnyTransition {
-    @MainActor static let inkSurface = AnyTransition.modifier(
-        active: InkSurfaceModifier(submerged: true),
-        identity: InkSurfaceModifier(submerged: false)
-    )
-}
 
 // MARK: - Room card
 

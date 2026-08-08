@@ -41,10 +41,11 @@ final class Feel {
         /// elsewhere. Fires only for an exchange sent in this visit —
         /// revisits and archive restores stay silent.
         case replyArrived
-        /// THE SEND COMMITS ON STILLNESS. The page leaves after ~4s of pen-down
+        /// THE SEND COMMITS ON STILLNESS. The page leaves after 2s of pen-down
         /// stillness, an irreversible-ish thing triggered by doing nothing
-        /// against a deadline nobody can perceive. This is the only signal
-        /// that it passed — not polish.
+        /// against a deadline nobody can perceive. Now the ONLY signal that it
+        /// passed besides the ink going under — the margin no longer counts
+        /// the window down, so this tap and the sink carry the whole moment.
         case sendCommitted
         /// THE KEEPER'S LOCK OPENS. Rare, and the one moment the app says
         /// "I recognise you."
