@@ -14,9 +14,14 @@ public struct ServerSentEvent: Equatable, Sendable {
 
 /// Incremental SSE parser fed raw bytes (we deliberately do not use
 /// `AsyncLineSequence` — the blank line that delimits SSE events must be seen).
-/// Handles `event:`/`data:`/`id:` fields, multi-line data, CRLF, and comments.
+/// Handles `event:`/`data:`/`id:` fields, multi-line data, comments, and all
+/// three spec line terminators: LF, CRLF, and a lone CR.
 public struct SSEParser: Sendable {
     private var lineBuffer: [UInt8] = []
+    /// The previous byte was a CR that already ended its line — the LF of a
+    /// CRLF pair, should one follow, is part of that terminator and must be
+    /// swallowed rather than read as an empty line (audit L-4).
+    private var pendingCR = false
     private var currentEvent: String?
     private var currentData: [String] = []
     private var currentID: String?
@@ -34,13 +39,26 @@ public struct SSEParser: Sendable {
     }
 
     public mutating func consume(byte: UInt8) -> ServerSentEvent? {
-        guard byte == UInt8(ascii: "\n") else {
+        if pendingCR {
+            pendingCR = false
+            // The tail of a CRLF; its line was dispatched at the CR.
+            if byte == UInt8(ascii: "\n") { return nil }
+        }
+        switch byte {
+        case UInt8(ascii: "\n"):
+            return endLine()
+        case UInt8(ascii: "\r"):
+            // A CR ends the line NOW — waiting to see whether an LF follows
+            // would hold a complete event hostage to the next segment.
+            pendingCR = true
+            return endLine()
+        default:
             lineBuffer.append(byte)
             return nil
         }
-        if lineBuffer.last == UInt8(ascii: "\r") {
-            lineBuffer.removeLast()
-        }
+    }
+
+    private mutating func endLine() -> ServerSentEvent? {
         let line = String(decoding: lineBuffer, as: UTF8.self)
         lineBuffer.removeAll(keepingCapacity: true)
         return consume(line: line)
@@ -53,13 +71,9 @@ public struct SSEParser: Sendable {
     /// after the payload and before the blank line, spec behaviour would throw
     /// away a reply the reader already watched land on the page.
     public mutating func flush() -> ServerSentEvent? {
+        pendingCR = false
         if !lineBuffer.isEmpty {
-            if lineBuffer.last == UInt8(ascii: "\r") {
-                lineBuffer.removeLast()
-            }
-            let line = String(decoding: lineBuffer, as: UTF8.self)
-            lineBuffer.removeAll(keepingCapacity: true)
-            if let event = consume(line: line) { return event }
+            if let event = endLine() { return event }
         }
         return dispatch()
     }

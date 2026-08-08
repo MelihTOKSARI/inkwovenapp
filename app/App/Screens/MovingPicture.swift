@@ -83,7 +83,9 @@ struct MovingPictureOffer: View {
         if wallet.available > 0 {
             return wallet.available == 1 ? "your last vial" : "one of \(wallet.available) vials"
         }
-        return "none left — three from $4.99"
+        // No price here — the shop states its own (audit H-5): a literal
+        // dollar figure drifts from the storefront the moment tiers differ.
+        return "none left — the shop refills them"
     }
 
     private var spokenHint: String {
@@ -366,6 +368,18 @@ struct ClipLoopView: View {
             if let localURL {
                 LoopingPlayerLayer(url: localURL)
                     .transition(.opacity)
+            } else if failed {
+                // A clip that would not arrive is told, never shown as an
+                // endless black frame captioned like a working one (audit
+                // M-14). The immersive cover embeds this same view, so the
+                // line stands wherever the picture was meant to.
+                Text("the picture would not wake tonight — let the page rest, and ask for another")
+                    .font(InkFont.bodyItalic(15))
+                    .foregroundStyle(Ink.parchment.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                    .padding(24)
+                    .transition(.opacity)
             }
         }
         .task(id: url) {
@@ -477,11 +491,34 @@ actor ClipCache {
         return try await task.value
     }
 
+    /// "Delete every page" and the Keeper's reseal reach here (audit M-13):
+    /// a clip is a page's picture, and the promise that the ink cannot be
+    /// recovered has to cover the copies resting in Caches too.
+    func purgeAll() {
+        for task in inFlight.values { task.cancel() }
+        inFlight.removeAll()
+        try? FileManager.default.removeItem(at: Self.clipsDirectory)
+    }
+
+    /// One clip, by the URL it was fetched from — for a reseal that only
+    /// needs one Book's pictures gone.
+    func purge(_ remote: URL) {
+        inFlight[remote]?.cancel()
+        inFlight[remote] = nil
+        try? FileManager.default.removeItem(at: Self.cacheURL(for: remote))
+    }
+
+    private static var clipsDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appending(path: "clips")
+    }
+
     private static func cacheURL(for remote: URL) -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         // Hash the whole URL: fal's paths repeat, and the query is what makes
-        // one clip distinct from another.
-        let name = String(UInt64(bitPattern: Int64(remote.absoluteString.hashValue)), radix: 16)
-        return caches.appending(path: "clips/\(name).mp4")
+        // one clip distinct from another. SHA-256, never `hashValue` — that
+        // seed changes every launch (audit H-9), so the cache could never hit
+        // twice and every relaunch re-downloaded (and re-orphaned) every clip.
+        let name = SnapshotProcessor.digest(of: Data(remote.absoluteString.utf8))
+        return clipsDirectory.appending(path: "\(name).mp4")
     }
 }

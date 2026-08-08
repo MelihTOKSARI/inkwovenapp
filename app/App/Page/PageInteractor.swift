@@ -138,6 +138,15 @@ final class PageInteractor {
     /// canvas by then — ink laid down while the Book answers belongs to the
     /// next exchange, not this one.
     private var sentDrawing: PKDrawing?
+    /// The in-flight exchange sent the typed hand alone (audit M-5): the
+    /// pencil strokes standing on the page were never in its snapshot, and
+    /// its completion must leave them exactly as they stand — unsent.
+    private var sentTypedOnly = false
+    /// The writer took the page back mid-stream (audit M-3): a stroke began
+    /// while the Book was still answering. Purely visual — the exchange
+    /// logic never reads it; PageView observes it to lift the absorb veil so
+    /// the new ink lands at full strength, not on 18%-opacity paper.
+    private(set) var writerReclaimed = false
     /// Monotonic token for the exchange lifecycle (audit D-2/D-8): only the
     /// task holding the current generation may write status, archive, or
     /// clear the in-flight flag. A cancelled or superseded stream can then
@@ -211,12 +220,32 @@ final class PageInteractor {
     /// arrive before the page's PKCanvasView exists.
     private var pendingRestore: PKDrawing?
 
+    /// True for the rest of the visit once a revisit arrived over unsent work
+    /// (audit H-2): the draft file holds the writer's own standing page, and
+    /// while this is set no save may overwrite it and no clear may delete it —
+    /// leaving the revisit rehydrates the page exactly as the writer left it.
+    private var revisiting = false
+
+    /// Whether the draft FILE holds unsent work. The canvas may not have
+    /// attached yet when a revisit arrives, so the file is the only witness
+    /// the pending-restore path has.
+    private var draftHoldsUnsentWork: Bool {
+        guard let draft = drafts?.load(book: book) else { return false }
+        if !draft.typedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        guard let drawing = try? PKDrawing(data: draft.strokeData) else { return false }
+        return drawing.strokes.count > draft.accountedStrokeCount
+    }
+
     /// REMEMBERED — reopen an archived exchange on the page: the user's ink
     /// returns to the canvas and the Book's reply stands on the right page,
     /// exactly as the exchange ended. The restored ink already belongs to its
     /// archived exchange, so nothing re-sends and nothing re-archives; fresh
     /// strokes on top of it start a new exchange as usual.
     func revisit(drawing: PKDrawing, replyText: String, entryID: UUID? = nil) {
+        // The standing page comes first (audit H-2): reopening a memory must
+        // never destroy unsent work. Checked before anything below clears —
+        // on the canvas if it attached, in the draft file if it has not.
+        revisiting = hasUnsentInk || draftHoldsUnsentWork
         tickTask?.cancel()
         gateTask?.cancel()
         exchangeTask?.cancel()
@@ -225,6 +254,7 @@ final class PageInteractor {
         exchangeGeneration += 1
         exchangeInFlight = false
         sentDrawing = nil
+        sentTypedOnly = false
         // A generation in flight belongs to the exchange being left; cancelling
         // is what tells the server to release its hold.
         videoTask?.cancel()
@@ -264,8 +294,10 @@ final class PageInteractor {
         previousDigest = nil
         canvas.undoManager?.removeAllActions()
         status = .answered
-        // The revisited page becomes the standing draft, fully accounted —
-        // a relaunch shows it exactly as it stands, and re-sends nothing.
+        // With no unsent work standing, the revisited page becomes the
+        // standing draft, fully accounted — a relaunch shows it exactly as
+        // it stands, and re-sends nothing. Over unsent work `saveDraftNow`
+        // stands down (audit H-2), and the writer's own page keeps the file.
         saveDraftNow()
     }
 
@@ -279,6 +311,12 @@ final class PageInteractor {
         // the nib lands, not at the first stroke's end.
         if status == .idle || status == .resting || status == .answered {
             status = .inking
+        } else if status == .sending || status == .answering {
+            // Mid-stream the status belongs to the exchange — no fake
+            // transition — but the writer has taken the page back, and the
+            // absorb veil must lift so the new ink lands at full strength
+            // (audit M-3). Visual signal only; nothing else reads it.
+            writerReclaimed = true
         }
     }
 
@@ -336,16 +374,25 @@ final class PageInteractor {
     func saveDraftNow() {
         guard let drafts else { return }
         draftSaveTask?.cancel()
+        // A revisit stands over the writer's own unsent page (audit H-2):
+        // while it does, the draft file IS that page — nothing here may
+        // overwrite or clear it.
+        guard !revisiting else { return }
         let drawing = canvas?.drawing ?? PKDrawing()
         if drawing.strokes.isEmpty,
            typedDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             drafts.clear(book: book)
             return
         }
+        // An exchange still in flight has not earned its ink (audit H-1): if
+        // it never resolves — teardown, jetsam, a scene-phase save racing the
+        // stream — the strokes it advanced the accounting for must rehydrate
+        // as unsent, so the file remembers the pre-exchange base.
+        let accounted = exchangeInFlight ? sentBase : sentStrokeCount
         drafts.save(PageDraft(
             strokeData: drawing.dataRepresentation(),
             typedText: typedDraft,
-            accountedStrokeCount: min(sentStrokeCount, drawing.strokes.count)
+            accountedStrokeCount: min(accounted, drawing.strokes.count)
         ), book: book)
     }
 
@@ -478,16 +525,22 @@ final class PageInteractor {
         tickTask?.cancel()
         gateTask?.cancel()
         exchangeTask?.cancel()
+        // What may pair with any ink being turned away (audit H-3): a reply
+        // already filed — this exchange's, or a revisited page's — files
+        // NOTHING again, or Remembered shows it twice against ink it never
+        // answered; and a partial stream was never a reply at all.
+        let unfiledReply = displayedEntryID == nil && !exchangeInFlight ? streamedText : ""
         // The teardown owns the flags; the cancelled task's late writes are
         // fenced out by the generation token.
         exchangeGeneration += 1
         exchangeInFlight = false
         sentDrawing = nil
+        sentTypedOnly = false
         videoTask?.cancel()
         video = .none
         offer = nil
         upload.abort()
-        completeExchange()
+        completeExchange(filing: unfiledReply)
         streamedText = ""
         displayedEntryID = nil
         ttfsMS = nil
@@ -499,10 +552,38 @@ final class PageInteractor {
 
     func undo() {
         canvas?.undoManager?.undo()
+        resyncAfterHistoryStep()
     }
 
     func redo() {
         canvas?.undoManager?.redo()
+        resyncAfterHistoryStep()
+    }
+
+    /// Undo and redo rewrite the page behind the send machine's back (audit
+    /// M-4): a speculated snapshot goes stale the moment the strokes it
+    /// pictured change, and the stroke-count delta fires events into states
+    /// with no transition — settle dots that dance forever, sending nothing.
+    /// Reset, then re-arm from what actually stands on the page.
+    private func resyncAfterHistoryStep() {
+        // The rewritten page invalidates any speculated snapshot: a commit
+        // must never send strokes the writer just removed.
+        upload.abort()
+        // Mid-exchange the resolution owns the machine; a held page stays
+        // held, absorbing the edit without arming anything.
+        guard !exchangeInFlight, machine.state != .held else { return }
+        tickTask?.cancel()
+        machine.reset()
+        if hasUnsentInk {
+            // Unsent work still stands: re-arm the rest cadence from the
+            // page as it now reads, exactly as if the pen had just lifted.
+            perform(machine.handle(.strokeBegan))
+            perform(machine.handle(.strokeEnded(at: Date())))
+            status = .resting
+            startTicking()
+        } else {
+            status = streamedText.isEmpty ? .idle : .answered
+        }
     }
 
     // MARK: - Machine effects
@@ -511,7 +592,7 @@ final class PageInteractor {
         for effect in effects {
             switch effect {
             case .beginSpeculativeUpload:
-                if let payload = snapshotPayload() { upload.begin(payload) }
+                beginSpeculativeUpload()
             case .commitSend:
                 commitSend()
             case .abortUpload:
@@ -520,26 +601,51 @@ final class PageInteractor {
         }
     }
 
-    private func snapshotPayload() -> SnapshotPayload? {
+    /// The rest mark's speculative upload: rasterize off the main actor,
+    /// then open the window — but only if the rest still stands. The page
+    /// may have moved on while the snapshot rendered; `SpeculativeUpload`'s
+    /// generation fences late completions, and this fences late beginnings.
+    private func beginSpeculativeUpload() {
+        let typed = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let drawing = canvas?.drawing
+        Task { [weak self] in
+            guard let self else { return }
+            guard let payload = await self.snapshotPayload(typed: typed, drawing: drawing) else {
+                return
+            }
+            guard case .speculating = self.machine.state else { return }
+            self.upload.begin(payload)
+        }
+    }
+
+    private func snapshotPayload(typed: String, drawing: PKDrawing?) async -> SnapshotPayload? {
         // The typed hand takes precedence: when the keys wrote the page, the
         // snapshot is a rendering of that text, same pipeline downstream.
-        let typed = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty {
             guard let payload = TypedInkRasterizer.payload(
                 text: typed, pageWidth: canvas?.bounds.width ?? 720
             ), payload.digest != previousDigest else { return nil }
             return payload
         }
-        guard let drawing = canvas?.drawing, let canvasBounds = canvas?.bounds else { return nil }
-        let newStrokes = drawing.strokes.dropFirst(sentStrokeCount)
-        let processor = SnapshotProcessor(rasterizer: PKDrawingRasterizer(drawing: drawing))
-        let result = try? processor.process(
-            newStrokeBounds: newStrokes.map(\.renderBounds),
-            canvasBounds: canvasBounds,
-            previousDigest: previousDigest
-        )
-        guard case .send(let payload) = result else { return nil }
-        return payload
+        guard let drawing, let canvasBounds = canvas?.bounds else { return nil }
+        // The heavy half — PKDrawing render, grayscale filter, JPEG encode —
+        // runs off the main actor (audit L-8): pen-up on a full page must
+        // never hitch the stroke still being drawn. The drawing is a value
+        // and the rasterizer is immutable after init; copying them out is
+        // the whole safety story.
+        let newStrokeBounds = drawing.strokes.dropFirst(sentStrokeCount).map(\.renderBounds)
+        let rasterizer = PKDrawingRasterizer(drawing: drawing)
+        let previous = previousDigest
+        return await Task.detached(priority: .userInitiated) { () -> SnapshotPayload? in
+            let processor = SnapshotProcessor(rasterizer: rasterizer)
+            let result = try? processor.process(
+                newStrokeBounds: newStrokeBounds,
+                canvasBounds: canvasBounds,
+                previousDigest: previous
+            )
+            guard case .send(let payload) = result else { return nil }
+            return payload
+        }.value
     }
 
     private func commitSend() {
@@ -552,17 +658,29 @@ final class PageInteractor {
             machine.reset()
             return
         }
-        guard let payload = upload.payload ?? snapshotPayload() else {
-            machine.reset()
-            status = .idle
-            return
-        }
-        // Freeze what this exchange carries before the gate suspends, so a
-        // keystroke landing during the hop cannot change what was gated.
+        // Freeze what this exchange carries before anything suspends (audit
+        // L-2): the drawing captured here is what the archive will file, so
+        // a stroke or keystroke landing during the hop can neither change
+        // what was gated nor be absorbed without ever being uploaded.
         let typed = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let committedDrawing = canvas?.drawing
         gateTask?.cancel()
         gateTask = Task { [weak self] in
             guard let self else { return }
+            // The speculated snapshot if its window is still open, or a
+            // fresh rasterization — off the main actor either way.
+            let payload: SnapshotPayload?
+            if let speculated = self.upload.payload {
+                payload = speculated
+            } else {
+                payload = await self.snapshotPayload(typed: typed, drawing: committedDrawing)
+            }
+            guard let payload else {
+                self.machine.reset()
+                self.status = .idle
+                return
+            }
+            guard !Task.isCancelled else { return }
             // The tier and the day's counters both come from durable
             // accounting; the counter this replaces lived on this object,
             // which SwiftUI rebuilds on every Book switch and every
@@ -590,24 +708,38 @@ final class PageInteractor {
                 await self.analytics.track(.cooldownHit(seconds: seconds))
             case .allow:
                 self.beginExchange(
-                    payload: payload, typed: typed, memoryEnabled: snapshot.memoryEnabled
+                    payload: payload, typed: typed, drawing: committedDrawing,
+                    memoryEnabled: snapshot.memoryEnabled
                 )
             }
         }
     }
 
-    private func beginExchange(payload: SnapshotPayload, typed: String, memoryEnabled: Bool) {
+    private func beginExchange(
+        payload: SnapshotPayload, typed: String, drawing: PKDrawing?, memoryEnabled: Bool
+    ) {
         status = .sending
         streamedText = ""
         displayedEntryID = nil
+        writerReclaimed = false
         sentTypedText = typed.isEmpty ? nil : typed
         // Freeze what this exchange carries (audit D-2/D-3): the committed
-        // drawing is what the archive will file, and `sentStrokeCount`
+        // drawing — captured with the payload, before the gate hop (audit
+        // L-2) — is what the archive will file, and `sentStrokeCount`
         // advances NOW — a snapshot taken while this exchange streams must
         // crop from here, not from a stale base that defeats the dedupe.
         sentBase = sentStrokeCount
-        sentDrawing = canvas?.drawing
-        sentStrokeCount = sentDrawing?.strokes.count ?? sentStrokeCount
+        sentTypedOnly = payload.typed
+        if payload.typed {
+            // The typed hand wrote this exchange alone (audit M-5): the
+            // snapshot pictured words, not the canvas — whatever pencil
+            // strokes stand stay standing, unsent, and the accounting does
+            // not move.
+            sentDrawing = nil
+        } else {
+            sentDrawing = drawing
+            sentStrokeCount = sentDrawing?.strokes.count ?? sentStrokeCount
+        }
         exchangeGeneration += 1
         exchangeInFlight = true
         let generation = exchangeGeneration
@@ -703,7 +835,12 @@ final class PageInteractor {
                             await entitlements.record(imageURL == nil ? .ink : .image)
                         }
                         if let ttfsMS {
-                            await analytics.track(.pageAnswered(book: book, modality: .ink, ttfsMS: ttfsMS))
+                            // Same key as the billing above (audit L-5): an
+                            // exchange that developed a picture answered in
+                            // `.image`, and the funnel must say so.
+                            await analytics.track(.pageAnswered(
+                                book: book, modality: imageURL == nil ? .ink : .image, ttfsMS: ttfsMS
+                            ))
                         }
                     case .offerVideo(let verdict):
                         // The page may now OFFER (task J3). It does not
@@ -727,8 +864,11 @@ final class PageInteractor {
             // `.done` is a completed exchange. Crisis preemption keeps the
             // user's ink; a stream that fell silent is a failed send.
             if completed {
-                completeExchange()
-                status = .answered
+                completeExchange(filing: streamedText)
+                // A hold pressed while the Book answered still stands once
+                // the answer lands (audit M-1): the reply surfaces either
+                // way, but the page stays held rather than quietly re-arming.
+                status = machine.state == .held ? .held : .answered
             } else if preempted {
                 // "Keeps the user's ink" in fact, not just in comment (audit
                 // D-5): the send accounting rolls back so the standing
@@ -759,9 +899,23 @@ final class PageInteractor {
             status = .declined("inkRanDry")
         }
         if isCurrent() {
-            machine.reset()
+            // The machine belongs to the writer again — unless they held the
+            // page mid-stream, in which case the hold stands (audit M-1).
+            if machine.state != .held { machine.reset() }
             exchangeInFlight = false
             exchangeTask = nil
+            // Ink laid down while the Book answered was refused mid-stream
+            // (one send at a time), so re-arm the cadence now — the tail
+            // sends after the normal settle instead of sitting silently
+            // unsent (audit M-2). Only a completed exchange: a failed send
+            // stands behind its decline card and retries by hand, and a
+            // crisis interception never re-sends anything.
+            if completed, !preempted, machine.state != .held, hasUnsentInk {
+                perform(machine.handle(.strokeBegan))
+                perform(machine.handle(.strokeEnded(at: Date())))
+                status = .resting
+                startTicking()
+            }
         }
     }
 
@@ -771,6 +925,7 @@ final class PageInteractor {
     private func rollbackSend() {
         sentStrokeCount = sentBase
         sentDrawing = nil
+        sentTypedOnly = false
         sentTypedText = nil
         // A partial stream must not stand as the reply: `beginExchange`
         // already cleared the previous exchange, so whatever accumulated
@@ -993,13 +1148,18 @@ final class PageInteractor {
     /// `.exchangeComplete`: archive the strokes to the page record, then
     /// REMOVE them from the live canvas — absorption ends in removal, never
     /// minimum-opacity ghosting. The canvas is ready for the next exchange.
-    private func completeExchange() {
+    /// The reply to file is the caller's to name (audit H-3): the resolving
+    /// stream passes what it streamed; `turnPage` passes "" when the standing
+    /// reply is already archived, so no reply ever files twice.
+    private func completeExchange(filing replyText: String) {
         // The typed page is absorbed the same way ink is: the draft clears
         // and the field stands empty for the next exchange — but it files to
         // the archive first, so typed exchanges are remembered like ink ones.
         let draft = typedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let typed = sentTypedText ?? (draft.isEmpty ? nil : draft)
+        let typedOnly = sentTypedOnly
         sentTypedText = nil
+        sentTypedOnly = false
         typedDraft = ""
         // Archive what was SENT (audit D-3), never whatever stands on the
         // canvas at completion — a sentence written while the Book answered
@@ -1009,41 +1169,66 @@ final class PageInteractor {
         let sent = sentDrawing
         let drawing = sent ?? canvas?.drawing ?? PKDrawing()
         // Strokes at or below the base were restored from the archive by a
-        // revisit — turning that page unchanged must not file the same
-        // exchange twice.
+        // revisit or already absorbed — turning that page unchanged must not
+        // file the same exchange twice.
         let base = sent == nil ? sentStrokeCount : sentBase
-        let hasFreshInk = drawing.strokes.count > base
+        // A typed-only send never pictured the pencil strokes (audit M-5):
+        // they are not this exchange's ink and must not file under its reply.
+        let hasFreshInk = !typedOnly && drawing.strokes.count > base
         // ONE exchange files ONE entry carrying both hands. The two branches
         // used to run unconditionally, so a page with ink and typed words filed
         // two entries with the same reply — and since `snapshotPayload` gives
         // the typed hand absolute precedence, the ink entry claimed the Book
         // had answered strokes it never saw.
         if typed != nil || hasFreshInk {
+            // Only the strokes past the base: anything below it belongs to a
+            // past page, and filing it again would duplicate that page inside
+            // this entry (audit H-3).
             let entryID = archive?.archive(
                 book: book,
-                drawing: hasFreshInk ? drawing : PKDrawing(),
+                drawing: hasFreshInk
+                    ? PKDrawing(strokes: Array(drawing.strokes.dropFirst(base)))
+                    : PKDrawing(),
                 typedText: typed,
-                replyText: streamedText
+                replyText: replyText
             )
             displayedEntryID = entryID
             // A page filed this visit joins the session thread.
             if let entryID { sessionEntryIDs.insert(entryID) }
-            lastTurn = PageContextBuilder.Turn(written: typed, reply: streamedText)
+            lastTurn = PageContextBuilder.Turn(written: typed, reply: replyText)
         }
-        let sentCount = sent?.strokes.count
         sentDrawing = nil
         sentBase = 0
         guard let canvas else {
-            sentStrokeCount = 0
+            if !typedOnly { sentStrokeCount = 0 }
             previousDigest = nil
             return
         }
+        if typedOnly {
+            // The typed page absorbed; the canvas was never part of it
+            // (audit M-5). The strokes stand exactly as written — unsent,
+            // accounting untouched — and the draft records them that way.
+            previousDigest = nil
+            saveDraftNow()
+            return
+        }
         let current = canvas.drawing
+        if let sent, !Self.sentPrefixStands(in: current, sent: sent) {
+            // An erase while the Book answered rewrote the stroke list the
+            // count was taken from (audit L-6): dropping by count would keep
+            // the wrong strokes — or wipe fresh ink outright. The page stays
+            // as the writer made it, all of it unsent; the reply above still
+            // filed against what was actually sent.
+            sentStrokeCount = 0
+            previousDigest = nil
+            saveDraftNow()
+            return
+        }
         // Absorption removes exactly the sent strokes: a tail written while
         // the Book answered stays on the page, fully visible and still
         // unsent — never silently wiped with the absorbed exchange.
-        if let sentCount, current.strokes.count > sentCount {
-            canvas.drawing = PKDrawing(strokes: Array(current.strokes.dropFirst(sentCount)))
+        if let sent, current.strokes.count > sent.strokes.count {
+            canvas.drawing = PKDrawing(strokes: Array(current.strokes.dropFirst(sent.strokes.count)))
         } else {
             canvas.drawing = PKDrawing()
         }
@@ -1061,5 +1246,16 @@ final class PageInteractor {
         // The absorbed page left the canvas; the draft follows — an empty
         // page clears the file, a kept tail persists as the new draft.
         saveDraftNow()
+    }
+
+    /// Cheap prefix identity (audit L-6): the canvas still begins with the
+    /// sent strokes iff the count allows it and the LAST sent stroke sits
+    /// where it did — an erase anywhere in the prefix shifts or removes it.
+    /// Bounds, never a deep point compare; this runs at every completion.
+    private static func sentPrefixStands(in current: PKDrawing, sent: PKDrawing) -> Bool {
+        let sentCount = sent.strokes.count
+        guard current.strokes.count >= sentCount else { return false }
+        guard let lastSent = sent.strokes.last else { return true }
+        return current.strokes[sentCount - 1].renderBounds == lastSent.renderBounds
     }
 }

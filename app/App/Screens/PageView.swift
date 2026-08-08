@@ -15,6 +15,9 @@ struct PageView: View {
     @State private var interactor: PageInteractor
     @State private var canvasAbsorbed = false
     @State private var developStep = 0
+    /// The darkroom's reveal pacing (audit L-36) — cancelled on disappear so
+    /// a torn-down page never animates a develop step into the void.
+    @State private var developTask: Task<Void, Never>?
     @State private var restSettled = false
     @State private var restSettleTask: Task<Void, Never>?
     @State private var openerHeight: CGFloat = 0
@@ -178,6 +181,16 @@ struct PageView: View {
         .onChange(of: interactor.status) { _, status in
             react(to: status)
         }
+        // The writer took the page back mid-stream (audit M-3): pen-down
+        // while the Book answers lifts the absorb veil, so no one inks on
+        // 18%-opacity paper. The status stays the exchange's — this signal
+        // is the visual override.
+        .onChange(of: interactor.writerReclaimed) { _, reclaimed in
+            guard reclaimed else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                canvasAbsorbed = false
+            }
+        }
         // The pill unmounts when the past empties; a panel pinned open with
         // no pill left to close it must fold itself.
         .onChange(of: hasPastPages) { _, has in
@@ -188,7 +201,11 @@ struct PageView: View {
         // exchange left running would stream to completion against a dead
         // canvas: moment spent, reply filed nowhere (audit D-4). Cancelling
         // here propagates the disconnect, and the server releases the hold.
-        .onDisappear { interactor.pageWillDisappear() }
+        // The darkroom's reveal script dies with the page too (audit L-36).
+        .onDisappear {
+            developTask?.cancel()
+            interactor.pageWillDisappear()
+        }
         // Jetsam gives no warning; leaving the foreground is the last
         // reliable moment to put the unsent page on disk (audit D-1).
         .onChange(of: scenePhase) { _, phase in
@@ -1008,9 +1025,11 @@ struct PageView: View {
             developStep = 3
             return
         }
-        Task {
+        developTask?.cancel()
+        developTask = Task {
             for (delay, step) in Self.developScript where step < 3 {
                 try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
                 guard developStep < step else { continue }
                 withAnimation(.easeInOut(duration: 1.1)) { developStep = step }
             }

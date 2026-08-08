@@ -67,7 +67,12 @@ struct InkCanvasView: UIViewRepresentable {
 
         context.coordinator.canvas = canvas
         context.coordinator.inkColor = inkColor
-        interactor.attach(canvas: canvas)
+        // Attach rehydrates the draft — or restores a pending revisit — and
+        // both write observable page state, which must not happen inside
+        // this view-update pass (audit L-7). One beat later, outside it.
+        Task { @MainActor in
+            interactor.attach(canvas: canvas)
+        }
         return surface
     }
 
