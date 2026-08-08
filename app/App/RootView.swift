@@ -38,7 +38,8 @@ struct RootView: View {
                         .transition(.opacity)
                 }
             case .remembered:
-                RememberedView(model: model, archive: di.archive).transition(.opacity)
+                RememberedView(model: model, archive: di.archive, analytics: di.analytics)
+                    .transition(.opacity)
             case .memory:
                 MemoryView(model: model).transition(.opacity)
             case .paywall:

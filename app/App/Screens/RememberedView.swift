@@ -1,4 +1,6 @@
 import SwiftUI
+import InkAnalytics
+import InkMoney
 
 /// Per-Book timeline of filled pages, read straight from the PageArchive.
 /// Each card is a real archived exchange: your ink above the Book's reply.
@@ -6,6 +8,7 @@ import SwiftUI
 struct RememberedView: View {
     @Bindable var model: AppModel
     let archive: PageArchive
+    let analytics: Analytics
     @Environment(\.room) private var room
     @State private var query = ""
 
@@ -135,6 +138,9 @@ struct RememberedView: View {
         let ghosted = isGhosted(entry)
         return Button {
             if ghosted {
+                // The funnel counts every road to the paywall, not just the
+                // send gate's (audit: paywall-shown undercount).
+                Task { await analytics.track(.paywallShown(trigger: PaywallTrigger.archive.rawValue)) }
                 model.go(.paywall)
             } else {
                 model.revisit = entry
