@@ -1330,7 +1330,7 @@ export function build(options = {}) {
     return { challenge };
   });
 
-  app.post('/v1/attest', { schema: attestSchema }, async (request, reply) => {
+  app.post('/v1/attest', { schema: attestSchema, bodyLimit: LIMITS.attestBodyLimit }, async (request, reply) => {
     if (!appAttest || !sessionTokens) {
       return reply.code(501).send({ error: 'attestation_unbound' });
     }
@@ -1359,7 +1359,7 @@ export function build(options = {}) {
     return { token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString() };
   });
 
-  app.post('/v1/attest/refresh', { schema: assertSchema }, async (request, reply) => {
+  app.post('/v1/attest/refresh', { schema: assertSchema, bodyLimit: LIMITS.attestBodyLimit }, async (request, reply) => {
     if (!appAttest || !sessionTokens) {
       return reply.code(501).send({ error: 'attestation_unbound' });
     }

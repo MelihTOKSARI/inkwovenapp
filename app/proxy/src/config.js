@@ -112,6 +112,17 @@ export const LIMITS = {
   exchangeBodyLimit: 384 * 1024,
   preuploadBodyLimit: 262_144,
   smallBodyLimit: 4 * 1024,
+  // /v1/attest carries an App Attest attestation object: CBOR wrapping the
+  // full certificate chain, ~5-7KB of base64 in practice. attestSchema caps
+  // the string at 16_384, so the body limit MUST clear that plus the keyID,
+  // the challenge and the JSON around them — under it, fastify 413s on the
+  // raw body and the schema's own ceiling is unreachable. That is exactly
+  // what happened: both attest routes inherited smallBodyLimit (4KB) and
+  // every real device got "Request body is too large" before the handler ran,
+  // so no device could ever mint an identity. Sized with headroom, and still
+  // small enough to matter — these routes run BEFORE identity exists and are
+  // bounded only by attestsPerIPPerMinute.
+  attestBodyLimit: 32 * 1024,
   // JSON body of /v1/report: snapshot + reply text + slack, same arithmetic
   // as the exchange body.
   reportBodyLimit: 384 * 1024,
