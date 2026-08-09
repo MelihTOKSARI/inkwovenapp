@@ -28,7 +28,7 @@
 - [ ] A1 Xcode project, SwiftUI shell (iPad + iPhone targets), CI — **M**
 - [ ] A2 Data model: Notebook, Book, Page, StrokeData, Reply{ink|image|video}, Memory, Entitlement, CreditWallet (SwiftData, CloudKit-ready) — **M**
 - [ ] A3 Analytics SDK + schema (NSM, funnel incl. second-Book + credit events, per-Book engagement, **cost-per-subscriber guardrail with 30%-of-sub alert, p50/p95 time-to-first-stroke**) — **S**
-- [ ] A4 RevenueCat + sandbox products (monthly, annual+trial, credit packs 10/30/100, Bindery SKUs) — **M**
+- [x] ~~A4 RevenueCat + sandbox products (monthly, annual+trial, credit packs 10/30/100, Bindery SKUs)~~ — **superseded 2026-08-10.** Named the dropped annual plan, the retired `credits_10/30/100` ladder and the cut Bindery SKUs. Rewritten as G7–G10; plan in `revenuecat-plan.md`.
 - [ ] A5 Proxy: key custody, remote Book definitions, model routing (text/image/video/moderation), per-user rate limits, **kill-switch flags** — **L**
 - [ ] A6 **Spike: cursive reply render** — go/no-go — **M**
   - AC: 2-sentence reply draws at handwriting pace, variable weight, ≥30fps on iPad Air.
@@ -107,6 +107,18 @@
   - Free-clip model changed: **2 free clips per user lifetime**, server-authoritative, replacing the 1-credit onboarding grant. Global monthly ceiling on free-clip spend.
 - [ ] G6 **The Vials storefront live: `vials_small/medium/large` (3/8/20 at $4.99/$10.99/$24.99)** — see `design/app-store-assets/credits.md` — **M**
 - [x] ~~G5 The Bindery storefront~~ — **cut from v1.** Ships as a try-on room with no SKUs; a shop where nothing can be bought is a 2.1 rejection.
+
+> **RevenueCat, 2026-08-10:** reversed from "after launch" (`subscriptions.md` §12,
+> `deployment.md` §6.4) — Shipaton 2026 requires the SDK to power at least one in-app
+> purchase, and the Grand Prize is judged on post-launch traction, so it must be in v1.
+> Full plan, operator steps and verification pass: `revenuecat-plan.md`.
+
+- [ ] G7 RevenueCat dashboard + App Store Connect wiring: project, iOS app, In-App Purchase key, entitlement `plus`, offering `default` with all five products, webhook, V2 secret key — see `revenuecat-plan.md` §2 — **M**
+- [ ] G8 `RevenueCatPurchaseService: PurchaseServicing` in `.revenueCat` mode; `appUserID` bound to the proxy's attested `userID`; paywall + Vials render from the Offering and purchase the `Package` — **L**
+  - AC: `snapshots()` yields the current snapshot on subscribe; `restore()` still returns Bool; `isEligibleForIntroOffer` stays tri-state; the 54% saving still computes from `StorePrice.amount`.
+- [ ] G9 **Two-path vial grant: client fast path (StoreKit JWS → `/v1/credits/grant`, unchanged) + `POST /v1/rc/webhook` backstop, both idempotent on transaction id — LAUNCH-BLOCKING** — **M**
+  - AC: kill the app mid-delivery, relaunch → credits arrive exactly once. Refund a sandbox purchase → clawback fires. Neither path can double-credit.
+- [ ] G10 One RevenueCat experiment live post-launch (second Offering varying trial length or paywall metadata) — the HAMM entry — **S**
 
 ### Epic J — Moving pictures: the hero feature (LAUNCH-BLOCKING)
 
