@@ -14,18 +14,10 @@ public enum InFictionState: Equatable, Sendable {
     case inkRanDry
     /// The vials are empty and no free clip stands: the shop, not an error.
     case vialsEmpty
-    /// Provider moderation of the writer's own page (audit S-1). The more
-    /// explicit a disclosure, the more likely the provider blocks it before
-    /// the Book can answer — so a block on the ink path routes to the crisis
-    /// card, never to an in-fiction shrug with a retry button. This is the
-    /// one state here that deliberately BREAKS fiction.
-    case crisisSuspect
 }
 
-/// Which exchange surface the failure happened on. Moderation means different
-/// things on each: a blocked INK page is the writer's own words being refused
-/// — crisis-suspect by construction — while a blocked image or clip is
-/// genuinely just a picture that will not be made.
+/// Which exchange surface the failure happened on. Kept because the copy and
+/// the refund promise differ per surface; moderation no longer does.
 public enum DeclineSurface: Sendable {
     case ink
     case image
@@ -35,8 +27,22 @@ public enum DeclineSurface: Sendable {
 public enum DeclineMapper {
     public static func map(_ error: ProxyError, surface: DeclineSurface) -> InFictionState {
         switch error {
+        // A provider block used to route the INK surface to the crisis card
+        // (audit S-1), on the theory that the most explicit disclosures are
+        // the ones blocked before the Book can answer. In practice the signal
+        // does not carry that meaning: providers block dark fiction, villains,
+        // peril and the occasional stray page, and none of them arrive with a
+        // self-harm category attached — every provider path collapses to a
+        // bare `moderated`. So the escalation fired mostly on writers who were
+        // simply writing, and a false crisis card is its own harm: the fiction
+        // breaks, the page is interrupted, and a reader is handed a helpline
+        // for a villain's monologue.
+        //
+        // Crisis detection stays where it can actually be reasoned about: the
+        // reply model's `[[CRISIS]]` sentinel and the proxy's own deterministic
+        // screen, both of which see the words. The client invents nothing.
         case .moderated:
-            surface == .ink ? .crisisSuspect : .pageDeclines
+            .pageDeclines
         case .rateLimited(let retryAfter):
             .inkMustRest(seconds: retryAfter)
         case .offline:

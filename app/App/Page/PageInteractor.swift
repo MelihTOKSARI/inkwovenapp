@@ -888,6 +888,16 @@ final class PageInteractor {
                 // before the navigation to the crisis screen tears the view
                 // down. Returning to the Book finds the page as written.
                 rollbackSend()
+                // The page the writer comes back to must still be able to
+                // speak. `beginExchange` armed the dedupe with this page's
+                // digest, and the crisis branch is the one resolution that
+                // deliberately LEAVES the ink standing — so without this the
+                // returning writer faced their own unsent words on a page that
+                // silently refused to send them, with no retry button anywhere
+                // in the crisis room to clear it. The exchange was never billed
+                // and never filed; saying it again is a new utterance, exactly
+                // as it is after an absorbed page or an explicit `retry()`.
+                previousDigest = nil
                 saveDraftNow()
             } else {
                 rollbackSend()
@@ -1132,10 +1142,6 @@ final class PageInteractor {
             "The vials are empty, and your gifted moments are spent. Nothing was charged."
         case .inkRanDry:
             "The picture would not settle. Your vial has been returned."
-        case .crisisSuspect:
-            // Unreachable on the video surface — the mapper reserves this for
-            // ink — but the copy stays honest if that ever changes.
-            "The page will not picture this one. Your vial is untouched."
         }
     }
 
@@ -1173,19 +1179,8 @@ final class PageInteractor {
         // disagreement rather than an empty purse — decline in fiction and let
         // the reader try again, never send them to a shop they don't need.
         case .vialsEmpty: .declined("inkRanDry")
-        // Provider moderation of the writer's own page (audit S-1): the most
-        // explicit disclosures are exactly the ones the provider blocks before
-        // the Book can answer, so this routes to the crisis card — real
-        // resources, no retry button — never to "the spirit is distant".
-        case .crisisSuspect: .crisis(Self.moderatedCrisisMessage)
         }
     }
-
-    /// Shown when a provider block routes to the crisis card. CrisisView
-    /// carries its own full copy; this string is the status's payload, kept
-    /// for parity with a server-sent crisis.
-    private static let moderatedCrisisMessage =
-        "Let’s set the story down for a moment. Please reach out to a real person who can be with you in this."
 
     /// `.exchangeComplete`: archive the strokes to the page record, then
     /// REMOVE them from the live canvas — absorption ends in removal, never

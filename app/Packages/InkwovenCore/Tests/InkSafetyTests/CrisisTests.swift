@@ -69,12 +69,14 @@ struct CrisisTests {
 
 @Suite("In-fiction decline mapping (tasks C6/F2)")
 struct DeclineMapperTests {
-    @Test("moderated ink is crisis-suspect; a moderated picture just declines (audit S-1)")
+    @Test("a provider block is a soft decline on every surface — never an invented crisis")
     func moderationSoftDeclines() {
-        // The most explicit self-harm disclosures are exactly the ones the
-        // provider blocks before the Book can answer — on the ink path that
-        // must surface the crisis card, never a shrug with a retry button.
-        #expect(DeclineMapper.map(.moderated, surface: .ink) == .crisisSuspect)
+        // The ink path used to escalate to the crisis card (audit S-1). A bare
+        // `moderated` carries no self-harm category from any provider, so that
+        // escalation fired on dark fiction far more often than on disclosure,
+        // and a false crisis card breaks the page for a writer who was writing.
+        // Crisis detection belongs to the sentinel and the proxy's own screen.
+        #expect(DeclineMapper.map(.moderated, surface: .ink) == .pageDeclines)
         #expect(DeclineMapper.map(.moderated, surface: .image) == .pageDeclines)
         #expect(DeclineMapper.map(.moderated, surface: .video) == .pageDeclines)
         #expect(!DeclineMapper.mayAutoRetry(.moderated))
