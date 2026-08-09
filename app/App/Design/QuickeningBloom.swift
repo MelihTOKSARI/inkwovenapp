@@ -25,6 +25,13 @@ struct QuickeningBloom: View {
     var present: Bool
     @Environment(\.reduceInkMotion) private var reduceMotion
 
+    /// Mounted for as long as there is something to show, including the fade
+    /// out — the removal transition holds the view alive until it has finished
+    /// leaving, and nothing ticks on an idle page. This replaces pausing the
+    /// timeline in place: a schedule that has to be un-paused to come back is
+    /// one more thing between the wait and the only thing that fills it.
+    @State private var showing = false
+
     /// The three lobes. Periods are mutually indivisible (1.1 / 1.7 / 2.6), so
     /// the composite breath drifts instead of ticking — the ear for this is
     /// the same one that hears a metronome behind a bad loading animation.
@@ -32,10 +39,15 @@ struct QuickeningBloom: View {
     /// 1s crossing, so the bloom reads as a separate living thing rather than
     /// the interface keeping time with itself.
     private static let lobes: [Lobe] = [
-        Lobe(scale: 1.00, rotation: .degrees(0), period: 1.10, swell: 0.055, opacity: 1.00),
-        Lobe(scale: 0.82, rotation: .degrees(137), period: 1.70, swell: 0.075, opacity: 0.70),
-        Lobe(scale: 1.18, rotation: .degrees(251), period: 2.60, swell: 0.040, opacity: 0.45),
+        Lobe(scale: 1.00, rotation: .degrees(0), period: 1.10, swell: 0.070, density: 1.00),
+        Lobe(scale: 0.82, rotation: .degrees(137), period: 1.70, swell: 0.090, density: 0.72),
+        Lobe(scale: 1.18, rotation: .degrees(251), period: 2.60, swell: 0.055, density: 0.46),
     ]
+
+    /// The frozen instant the still bloom is drawn at, chosen because the three
+    /// lobes are at visibly different points of their beat there — a still
+    /// drawn at t=0 has every lobe at the same phase and reads as a stencil.
+    private static let stillMoment: Double = 0.5
 
     struct Lobe {
         let scale: CGFloat
@@ -44,78 +56,110 @@ struct QuickeningBloom: View {
         let period: Double
         /// How far the lobe swells, as a fraction of its own size.
         let swell: CGFloat
-        let opacity: Double
+        /// How much ink this lobe carries, against the darkest one.
+        let density: Double
     }
 
     var body: some View {
-        // Ambient motion, and ambient motion is the one thing that stops
-        // entirely under Reduce Motion (see `InkMotion.ambient`) — a slower
-        // pulse is still a pulse. Nothing renders at all.
-        if !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !present)) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                Canvas { context, size in
-                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                    // The bloom is drawn well beyond its visible extent and
-                    // then blurred past legibility — the softness has to come
-                    // from real overspill, not from a faded edge, or it reads
-                    // as a shape with a border.
-                    let base = min(size.width, size.height) * 0.34
+        ZStack {
+            if showing {
+                bloom.transition(.opacity)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear { show(present) }
+        .onChange(of: present) { _, isPresent in show(isPresent) }
+    }
 
-                    context.addFilter(.blur(radius: base * 0.30))
-                    context.blendMode = .multiply
+    /// The page owns the fade so the bloom is gone before the answer arrives in
+    /// the same space.
+    private func show(_ wanted: Bool) {
+        guard showing != wanted else { return }
+        withAnimation(wanted ? .easeIn(duration: 0.55) : .easeOut(duration: 0.4)) {
+            showing = wanted
+        }
+    }
 
-                    for lobe in Self.lobes {
-                        let beat = Self.heartbeat(t / lobe.period)
-                        let radius = base * lobe.scale * (1 + lobe.swell * beat)
-                        // A slow wander, tied to the slowest lobe: the bloom
-                        // is never quite where it was, which is what keeps a
-                        // long wait from reading as a frozen stain.
-                        let drift = CGSize(
-                            width: base * 0.05 * sin(t / 7.3 + lobe.period),
-                            height: base * 0.04 * cos(t / 9.1 + lobe.period)
-                        )
-                        var path = InkBloom.path(
-                            in: CGRect(
-                                x: center.x - radius + drift.width,
-                                y: center.y - radius + drift.height,
-                                width: radius * 2,
-                                height: radius * 2
-                            )
-                        )
-                        path = path.applying(
-                            CGAffineTransform(translationX: center.x, y: center.y)
-                                .rotated(by: lobe.rotation.radians)
-                                .translatedBy(x: -center.x, y: -center.y)
-                        )
-                        // Ink in water, not a lit shape: densest off-centre so
-                        // there is no bullseye for the eye to lock onto, and
-                        // gone to nothing well inside the path's own edge.
-                        context.fill(
-                            path,
-                            with: .radialGradient(
-                                Gradient(stops: [
-                                    .init(color: Ink.ink.opacity(0.052 * lobe.opacity), location: 0.00),
-                                    .init(color: Ink.ink.opacity(0.038 * lobe.opacity), location: 0.42),
-                                    .init(color: Ink.ink.opacity(0.012 * lobe.opacity), location: 0.74),
-                                    .init(color: .clear, location: 1.00),
-                                ]),
-                                center: CGPoint(
-                                    x: center.x - radius * 0.16,
-                                    y: center.y - radius * 0.22
-                                ),
-                                startRadius: 0,
-                                endRadius: radius * 1.05
-                            )
-                        )
-                    }
-                }
-                .allowsHitTesting(false)
-                // The page owns the fade so the bloom can be gone before the
-                // answer arrives in the same space.
-                .opacity(present ? 1 : 0)
-                .animation(.easeInOut(duration: 0.9), value: present)
-                .accessibilityHidden(true)
+    @ViewBuilder
+    private var bloom: some View {
+        // Reduce Motion stops the *motion*, not the presence. Taking the whole
+        // bloom away left those readers with the dead page this exists to
+        // answer — so the same ink sits there, still, and fades in and out.
+        if reduceMotion {
+            stain(at: Self.stillMoment)
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                stain(at: timeline.date.timeIntervalSinceReferenceDate)
+            }
+        }
+    }
+
+    private func stain(at t: Double) -> some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            // The bloom is drawn well beyond its visible extent and then
+            // blurred past legibility — the softness has to come from real
+            // overspill, not from a faded edge, or it reads as a shape with a
+            // border.
+            let base = min(size.width, size.height) * 0.31
+
+            context.addFilter(.blur(radius: base * 0.34))
+            context.blendMode = .multiply
+
+            for lobe in Self.lobes {
+                let beat = Self.heartbeat(t / lobe.period)
+                let radius = base * lobe.scale * (1 + lobe.swell * beat)
+                // Density is what carries the pulse. A radius that swells a few
+                // percent behind a 30-odd point blur moves an edge nobody can
+                // find; ink that gets darker and lighter is the thing you see
+                // out of the corner of your eye, which is the only way this is
+                // ever seen.
+                let charge = 1 + 0.50 * beat
+                // A slow wander: the bloom is never quite where it was, which
+                // is what keeps a long wait from reading as a frozen stain.
+                let drift = CGSize(
+                    width: base * 0.080 * sin(t / 4.7 + lobe.period),
+                    height: base * 0.065 * cos(t / 6.3 + lobe.period)
+                )
+                var path = InkBloom.path(
+                    in: CGRect(
+                        x: center.x - radius + drift.width,
+                        y: center.y - radius + drift.height,
+                        width: radius * 2,
+                        height: radius * 2
+                    )
+                )
+                path = path.applying(
+                    CGAffineTransform(translationX: center.x, y: center.y)
+                        .rotated(by: lobe.rotation.radians)
+                        .translatedBy(x: -center.x, y: -center.y)
+                )
+                // Ink in water, not a lit shape: densest off-centre so there is
+                // no bullseye for the eye to lock onto, and gone to nothing well
+                // inside the path's own edge. The three lobes multiply into each
+                // other, so the core settles near 17% ink at rest — a watermark
+                // you can feel on the paper. The first pass sat at 5%, which is
+                // less contrast than the paper's own vignette carries across the
+                // same span: it was drawing the whole time, into nothing.
+                let ink = lobe.density * charge
+                context.fill(
+                    path,
+                    with: .radialGradient(
+                        Gradient(stops: [
+                            .init(color: Ink.ink.opacity(0.088 * ink), location: 0.00),
+                            .init(color: Ink.ink.opacity(0.068 * ink), location: 0.42),
+                            .init(color: Ink.ink.opacity(0.024 * ink), location: 0.74),
+                            .init(color: .clear, location: 1.00),
+                        ]),
+                        center: CGPoint(
+                            x: center.x - radius * 0.16,
+                            y: center.y - radius * 0.22
+                        ),
+                        startRadius: 0,
+                        endRadius: radius * 1.05
+                    )
+                )
             }
         }
     }
