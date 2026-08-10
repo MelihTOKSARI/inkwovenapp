@@ -84,9 +84,38 @@ enum LiveCommerce {
         configFetch = { try await proxy.gateConfig() }
     }
 
-    static let purchases = StoreKitEntitlementStore(
-        delivery: LazyVialDelivery(), attestor: LazyPlusAttestor()
-    )
+    /// Which service actually takes the money.
+    ///
+    /// One switch, because the two halves must never disagree: whichever service
+    /// runs purchases is also the one allowed to finish StoreKit transactions, and
+    /// RevenueCat's mode is global rather than per-product. `AppDI.live()` reads
+    /// this to decide how to configure the SDK.
+    ///
+    /// **Still `.storeKit`, deliberately.** Flipping it needs two things that do
+    /// not exist yet: the products configured in the RevenueCat dashboard
+    /// (`revenuecat-plan.md` §2 B8–B10), and `POST /v1/rc/webhook` on the proxy
+    /// (§3 step 5). Without the webhook a vial purchase whose delivery fails has no
+    /// second chance — RevenueCat finishes the transaction once ITS backend has it,
+    /// so StoreKit will not redeliver, and the safety net the current path relies on
+    /// is simply gone. Meanwhile RevenueCat still sees every purchase: it runs in
+    /// `.myApp` mode and `RevenueCatPurchaseRecorder` reports each one.
+    enum Backend {
+        case storeKit
+        case revenueCat
+    }
+
+    static let backend: Backend = .storeKit
+
+    static let purchases: any PurchaseServicing = switch backend {
+    case .storeKit:
+        StoreKitEntitlementStore(
+            delivery: LazyVialDelivery(),
+            attestor: LazyPlusAttestor(),
+            recorder: RevenueCatPurchaseRecorder()
+        )
+    case .revenueCat:
+        RevenueCatPurchaseService(delivery: LazyVialDelivery(), attestor: LazyPlusAttestor())
+    }
     static let usage = DailyUsageStore()
     static let gateConfig = GateConfigStore()
     static let page = PageEntitlements(

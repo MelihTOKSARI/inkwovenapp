@@ -7,6 +7,16 @@ options:
 packages:
   InkwovenCore:
     path: Packages/InkwovenCore
+  # The SPM-optimised mirror, which is what RevenueCat's install guide points at
+  # — the main purchases-ios repo carries test fixtures and snapshot images that
+  # make every clean checkout heavier for nothing. Tags are identical.
+  #
+  # Only the `RevenueCat` product is linked. `RevenueCatUI` lives in the same
+  # package and is deliberately left out: the paywall is a hand-drawn room, and
+  # the one thing that surface must never grow is standard chrome.
+  RevenueCat:
+    url: https://github.com/RevenueCat/purchases-ios-spm.git
+    from: 5.83.1
 targets:
   Inkwoven:
     type: application
@@ -23,6 +33,10 @@ targets:
     dependencies:
       - package: InkwovenCore
         products: [InkCore, InkData, InkNet, InkRender, InkMoney, InkSafety, InkAnalytics]
+      # App target only. InkMoney stays SDK-free by design (Products.swift) —
+      # the domain layer must not learn what a storefront is.
+      - package: RevenueCat
+        products: [RevenueCat]
     # App Attest (audit T3). Without this entitlement `attestKey` fails on
     # every device, so the proxy can never mint a real identity and every
     # caller stays on the anonymous fallback — which `appattest` mode rejects.

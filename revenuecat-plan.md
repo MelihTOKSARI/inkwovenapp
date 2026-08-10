@@ -221,6 +221,17 @@ dashboard rather than trusting either page.
 Nine steps. Steps 1–4 are the SDK swap; 5–7 make the consumable path safe; 8–9 are the
 Shipaton-specific upside. Each is independently shippable.
 
+> **Status, 2026-08-10.** Steps 1–3 are **done and running**: purchases-ios 5.83.1 is
+> linked, `RevenueCatPurchaseService` is written and compiles, and the SDK configures at
+> launch against project `755b3ded` / app `app45d753ea06`, logs the customer in under the
+> proxy's own user id, and is answered by RevenueCat's backend. Verified on an iPad Pro 13"
+> simulator: no crash, identity accepted, and the only error is the expected
+> *"no App Store products registered in the RevenueCat dashboard"* — which §2 B8–B10 fixes.
+>
+> `LiveCommerce.backend` is still **`.storeKit`**, so RevenueCat runs in `.myApp` mode and
+> merely records. **Step 4 (paywall from the Offering) and step 5 (the webhook) are not
+> done, and the switch must not be flipped before both are** — see step 5 for why.
+
 ### Step 1 — Add the SDK
 
 `app/project.yml`, as a sibling of the existing local package:

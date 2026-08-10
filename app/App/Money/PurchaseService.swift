@@ -108,12 +108,22 @@ actor StoreKitEntitlementStore: PurchaseServicing {
     /// quota meters this identity as Plus (audit M-2). Best-effort: a failure
     /// changes nothing here — the next refresh re-proves.
     private let attestor: (any PlusAttesting)?
+    /// Tells RevenueCat about a purchase this store made itself, so the dashboard,
+    /// the charts and the webhooks see it while RevenueCat runs in `.myApp` mode.
+    /// Nil in tests and previews; a nil recorder changes nothing about what the
+    /// user receives.
+    private let recorder: (any PurchaseRecording)?
 
     private static let subscriptions: Set<String> = [ProductID.plusWeekly, ProductID.plusMonthly]
 
-    init(delivery: (any VialGrantDelivering)? = nil, attestor: (any PlusAttesting)? = nil) {
+    init(
+        delivery: (any VialGrantDelivering)? = nil,
+        attestor: (any PlusAttesting)? = nil,
+        recorder: (any PurchaseRecording)? = nil
+    ) {
         self.delivery = delivery
         self.attestor = attestor
+        self.recorder = recorder
     }
 
     deinit { updatesTask?.cancel() }
@@ -214,7 +224,12 @@ actor StoreKitEntitlementStore: PurchaseServicing {
         guard let product = try await product(for: productID) else {
             throw CommerceError.productUnavailable(productID)
         }
-        switch try await product.purchase() {
+        let result = try await product.purchase()
+        // Reported before delivery is even attempted: RevenueCat's books should
+        // record what Apple charged for, which is true whether or not the wallet
+        // credit that follows succeeds.
+        if let recorder { await recorder.record(result) }
+        switch result {
         case .success(let verification):
             guard case .verified(let transaction) = verification else {
                 // Do not finish it: an unverified transaction stays in the

@@ -3,6 +3,7 @@ import InkCore
 import InkNet
 import InkMoney
 import InkAnalytics
+import RevenueCat
 import UserNotifications
 
 /// Composition root. All cross-package boundaries are protocols; the live
@@ -63,6 +64,9 @@ final class AppDI {
         // in appattest mode it is not.
         let auth = AppAttestIdentity(endpoints: endpoints, fallback: AnonymousTokenProvider())
         let proxy = ProxyClient(endpoints: endpoints, auth: auth)
+        // Before anything can touch `LiveCommerce.purchases`, which is a lazily
+        // initialised static that both AppModel and the send gate resolve through.
+        configureRevenueCat(auth: auth)
         // The vials are bought through StoreKit but spent from the server-side
         // wallet, so the purchase store needs a way to reach the proxy.
         #if DEBUG
@@ -83,7 +87,6 @@ final class AppDI {
         // the sheet up leaves the journal's plaintext sitting in tmp. In a
         // task so it never taxes the first frame.
         Task { PageExporter.purge() }
-        // TODO(A3): bind the real SDK adapter here for both configurations.
         #if DEBUG
         let analytics = Analytics(sink: ConsoleAnalyticsSink())
         #else
@@ -92,6 +95,74 @@ final class AppDI {
         return AppDI(
             proxy: proxy, analytics: analytics, keeperAuth: LiveKeeperAuth(), wallet: wallet
         )
+    }
+
+    /// The public, app-specific SDK key from RevenueCat (Platforms → Inkwoven).
+    ///
+    /// Public by design and safe in the binary: it can read offerings and post
+    /// purchases for the customer using it, and nothing else. The `sk_` secret key
+    /// is the proxy's alone and must never appear in this target — the reverse is
+    /// equally true, the server has no business holding this one.
+    private static let revenueCatAPIKey = "appl_BmDuZDoiugguNdjeHMjZbxMaBNU"
+
+    /// Binds RevenueCat, in the mode `LiveCommerce.backend` implies.
+    ///
+    /// While the backend is `.storeKit`, RevenueCat is configured `.myApp`: it
+    /// records purchases and owns none of them. That distinction is not cosmetic —
+    /// in the default `.revenueCat` mode the SDK subscribes to
+    /// `StoreKit.Transaction.updates` and finishes transactions it did not start,
+    /// including the consumables `StoreKitEntitlementStore` deliberately leaves
+    /// unfinished until the proxy has credited them. Configuring the wrong mode
+    /// here silently removes the redelivery net that stops a user paying for vials
+    /// they never receive.
+    private static func configureRevenueCat(auth: AppAttestIdentity) {
+        #if DEBUG
+        Purchases.logLevel = .info
+        #else
+        Purchases.logLevel = .warn
+        #endif
+        let builder = Configuration.builder(withAPIKey: revenueCatAPIKey)
+        switch LiveCommerce.backend {
+        case .storeKit:
+            builder.with(purchasesAreCompletedBy: .myApp, storeKitVersion: .storeKit2)
+        case .revenueCat:
+            builder.with(purchasesAreCompletedBy: .revenueCat, storeKitVersion: .storeKit2)
+        }
+        Purchases.configure(with: builder.build())
+
+        // Identity is claimed AFTER configure rather than passed into it, because
+        // the proxy mints it over the network and the first frame must not wait on
+        // a handshake. RevenueCat starts on an anonymous id and aliases it to this
+        // one; the alias is exactly what makes a purchase made in the first seconds
+        // still belong to the right customer.
+        //
+        // The id must equal the proxy's own userID or a RevenueCat webhook cannot
+        // find the wallet it is meant to credit.
+        Task {
+            guard let token = try? await auth.token() else { return }
+            _ = try? await Purchases.shared.logIn(proxyUserID(from: token))
+        }
+    }
+
+    /// The proxy's identity for this install, read from the token it issued.
+    ///
+    /// In `appattest` mode the token is a signed JWT whose `sub` is the server-minted
+    /// userID; in the anonymous fallback the token *is* the userID (`proxy/src/attest.js`).
+    /// Reading the claim without verifying it is correct here and only here: this
+    /// value is used to name a RevenueCat customer, never to authorise anything.
+    /// The proxy verifies the same token on every request it actually matters for.
+    static func proxyUserID(from token: String) -> String {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3 else { return token }
+        var base64 = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
+        guard let data = Data(base64Encoded: base64),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = claims["sub"] as? String, !subject.isEmpty
+        else { return token }
+        return subject
     }
 
     /// Deployed proxy (keys live there as fly secrets). The `INKWOVEN_PROXY_URL`
