@@ -93,11 +93,17 @@ Priced so the **cheapest tier clears 55%+ margin** and the ladder stays profitab
 you later switch to pro-with-audio — because the tier decision and the price decision get
 made months apart, by which time the prices are permanent.
 
+> **Regraded 2026-08-10.** Prices are unchanged and final; what each pack *buys* moved
+> 3/8/20 → **4/11/28** with the 5-second PixVerse route (`video-in-plus.md` §8). The
+> product IDs are named by size precisely so this was free to do. The margin tables
+> below still describe the 3/8/20 grades on the Kling route — `video-in-plus.md` §5–6
+> carries the current arithmetic; these are kept for the reasoning, not the numbers.
+
 | Product ID | Credits | Price | Net @ 15% | Per credit |
 |---|---|---|---|---|
-| `vials_small` | 3 | **$4.99** | $4.24 | $1.414 |
-| `vials_medium` | 8 | **$10.99** | $9.34 | $1.168 |
-| `vials_large` | 20 | **$24.99** | $21.24 | $1.062 |
+| `vials_small` | 4 | **$4.99** | $4.24 | $1.060 |
+| `vials_medium` | 11 | **$10.99** | $9.34 | $0.849 |
+| `vials_large` | 28 | **$24.99** | $21.24 | $0.759 |
 
 ### Margin by video tier (failure absorbed)
 
@@ -132,9 +138,9 @@ to solve:
 
 | Product | Display name | Description |
 |---|---|---|
-| `vials_small` | `Three Vials` | `Three moving pictures, sealed in wax.` |
-| `vials_medium` | `Eight Vials` | `Eight moving pictures, sealed in wax.` |
-| `vials_large` | `Twenty Vials` | `Twenty moving pictures, and the best rate.` |
+| `vials_small` | `Four Vials` | `Four moving pictures, sealed in wax.` |
+| `vials_medium` | `Eleven Vials` | `Eleven moving pictures, sealed in wax.` |
+| `vials_large` | `Twenty-Eight Vials` | `Twenty-eight moving pictures, and the best rate.` |
 
 ---
 

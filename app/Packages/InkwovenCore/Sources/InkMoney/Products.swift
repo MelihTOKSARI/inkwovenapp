@@ -23,11 +23,16 @@ public enum ProductID {
     /// How many clips a pack carries. This is the CLIENT's copy, used to label
     /// the shop; the wallet is credited by the server from its own map, so a
     /// tampered client can inflate a label and nothing else.
+    ///
+    /// Regraded 3/8/20 → 4/11/28 on 2026-08-10 with the move to the 5-second
+    /// PixVerse route (`video-in-plus.md` §8). Sized on a $0.249 clip; the
+    /// server map in `proxy/src/server.js` is the one that actually credits and
+    /// must move in the same commit.
     public static func creditAmount(for productID: String) -> Int? {
         switch productID {
-        case vialsSmall: 3
-        case vialsMedium: 8
-        case vialsLarge: 20
+        case vialsSmall: 4
+        case vialsMedium: 11
+        case vialsLarge: 28
         default: nil
         }
     }

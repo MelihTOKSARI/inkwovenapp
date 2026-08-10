@@ -32,7 +32,12 @@ import {
 
 // What each consumable credits, decided HERE — the client names a product,
 // never an amount (design/app-store-assets/credits.md §3).
-const VIAL_GRANTS = { vials_small: 3, vials_medium: 8, vials_large: 20 };
+//
+// Regraded 3/8/20 → 4/11/28 on 2026-08-10 (video-in-plus.md §8). The grades are
+// sized on a $0.249 five-second clip, which assumes the PixVerse repin has
+// shipped; on the outgoing Kling route ($0.454) they still clear 57/47/40%, so
+// this is safe to run ahead of the repin but thinner than the model intends.
+const VIAL_GRANTS = { vials_small: 4, vials_medium: 11, vials_large: 28 };
 
 // The subscriptions /v1/entitlement accepts as proof of Plus. Must match the
 // SKUs in app/Inkwoven.storekit and InkMoney/Products.swift.

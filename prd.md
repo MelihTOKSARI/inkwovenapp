@@ -12,8 +12,8 @@
 | Tier | Price | What's included |
 |---|---|---|
 | Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
-| Inkwoven Plus | **$4.99/wk (3-day trial) or $9.99/mo** | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
-| **Moving-picture credits (the Vials)** | 3 / 8 / 20 at $4.99 / $10.99 / $24.99 | **LAUNCH-BLOCKING — the hero feature.** Consumable; never bundled unlimited (real unit cost ~$0.46/clip delivered). **2 free clips per user, ever**, so everyone reaches the hero moment; global monthly spend ceiling enforced server-side. |
+| Inkwoven Plus | **$4.99/wk (3-day trial) or $12.99/mo** | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| **Moving-picture credits (the Vials)** | 4 / 11 / 28 at $4.99 / $10.99 / $24.99 | **LAUNCH-BLOCKING — the hero feature.** Consumable; never bundled unlimited (real unit cost ~$0.46/clip delivered). **2 free clips per user, ever**, so everyone reaches the hero moment; global monthly spend ceiling enforced server-side. |
 | Content IAP (the Bindery) | — | **Cut from v1.** Ships as a try-on room with no SKUs; a storefront where nothing can be bought is a 2.1 rejection. |
 
 - **Paywall trigger:** 6th magic moment of a day, reopening a >30-day page, or invoking memory ("the notebook wants to remember this…") — always after a value moment, never at onboarding.
@@ -108,7 +108,7 @@
 **iPhone companion:**
 - Read-only Remembered Pages + full Oracle (finger or typed sigil — the one sanctioned non-Pencil surface); same binary, adaptive layout.
 
-**Analytics:** one SDK; NSM + funnel (install → first stroke → first answered page → second Book → D1 → paywall → purchase) + per-Book engagement + credit funnel + **unit-economics guardrail: model cost per subscriber per month, alert when p95 user exceeds 30% of $9.99** + p50/p95 time-to-first-stroke.
+**Analytics:** one SDK; NSM + funnel (install → first stroke → first answered page → second Book → D1 → paywall → purchase) + per-Book engagement + credit funnel + **unit-economics guardrail: model cost per subscriber per month, alert when p95 user exceeds 25% of net ($2.76/mo, $1.06/wk)** + p50/p95 time-to-first-stroke.
 
 ## 5. Out of Scope (MVP)
 

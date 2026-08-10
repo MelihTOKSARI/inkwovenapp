@@ -94,10 +94,17 @@
 ### Epic G — Monetization (D4)
 
 > **Pricing change, 2026-08-01:** v1 sells weekly ($4.99, 3-day free trial) + monthly
-> ($9.99, the value plan — 54% less than weekly annualised); annual dropped. Product IDs
+> (the value plan, cheaper than weekly annualised); annual dropped. Product IDs
 > renamed to `plus_weekly` / `plus_monthly` while the rename was still free (nothing live
 > in ASC). Image soft cap 20 → 8, from the flux-2 cost model — rationale and unit
 > economics in `design/app-store-assets/subscriptions.md`.
+>
+> **Prices settled, 2026-08-10 — final for ASC entry:** `plus_weekly` **$4.99/wk** with a
+> 3-day free trial (unchanged), `plus_monthly` **$9.99 → $12.99**, vial prices unchanged at
+> **$4.99 / $10.99 / $24.99** but regraded **3/8/20 → 4/11/28**. `video-in-plus.md` §6 is
+> the arithmetic; $9.99 loses money on the heavy-book full-limit case once Plus carries a
+> video allowance. Landed in `Products.swift`, `proxy/src/server.js` and
+> `app/Inkwoven.storekit`. Everything else in `video-in-plus.md` is still a proposal.
 
 - [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (8/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
   - AC: free user's 6th moment → paywall before any model call. Plus user's 9th image of the day → "the ink must rest" cooldown path, no error state, event logged.
@@ -105,7 +112,7 @@
 - [ ] G3 Entitlement sync + edge cases (refund, expiry, offline) — **M**
 - [ ] G4 **Credit wallet: buy/spend/balance/refund-on-failure — LAUNCH-BLOCKING (funds Epic J)** — **M**
   - Free-clip model changed: **2 free clips per user lifetime**, server-authoritative, replacing the 1-credit onboarding grant. Global monthly ceiling on free-clip spend.
-- [ ] G6 **The Vials storefront live: `vials_small/medium/large` (3/8/20 at $4.99/$10.99/$24.99)** — see `design/app-store-assets/credits.md` — **M**
+- [ ] G6 **The Vials storefront live: `vials_small/medium/large` (4/11/28 at $4.99/$10.99/$24.99)** — see `design/app-store-assets/credits.md` — **M**
 - [x] ~~G5 The Bindery storefront~~ — **cut from v1.** Ships as a try-on room with no SKUs; a shop where nothing can be bought is a 2.1 rejection.
 
 > **RevenueCat, 2026-08-10:** reversed from "after launch" (`subscriptions.md` §12,

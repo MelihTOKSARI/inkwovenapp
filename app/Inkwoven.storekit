@@ -10,13 +10,13 @@
       "internalID" : "6748302010",
       "localizations" : [
         {
-          "description" : "Three moving pictures, sealed in wax.",
-          "displayName" : "Three Vials",
+          "description" : "Four moving pictures, sealed in wax.",
+          "displayName" : "Four Vials",
           "locale" : "en_US"
         }
       ],
       "productID" : "vials_small",
-      "referenceName" : "Vials Small (3)",
+      "referenceName" : "Vials Small (4)",
       "type" : "Consumable"
     },
     {
@@ -25,13 +25,13 @@
       "internalID" : "6748302011",
       "localizations" : [
         {
-          "description" : "Eight moving pictures, sealed in wax.",
-          "displayName" : "Eight Vials",
+          "description" : "Eleven moving pictures, sealed in wax.",
+          "displayName" : "Eleven Vials",
           "locale" : "en_US"
         }
       ],
       "productID" : "vials_medium",
-      "referenceName" : "Vials Medium (8)",
+      "referenceName" : "Vials Medium (11)",
       "type" : "Consumable"
     },
     {
@@ -40,13 +40,13 @@
       "internalID" : "6748302012",
       "localizations" : [
         {
-          "description" : "Twenty moving pictures, and the best rate.",
-          "displayName" : "Twenty Vials",
+          "description" : "Twenty-eight moving pictures, and the best rate.",
+          "displayName" : "Twenty-Eight Vials",
           "locale" : "en_US"
         }
       ],
       "productID" : "vials_large",
-      "referenceName" : "Vials Large (20)",
+      "referenceName" : "Vials Large (28)",
       "type" : "Consumable"
     }
   ],
@@ -102,7 +102,7 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "9.99",
+          "displayPrice" : "12.99",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "6748302001",
