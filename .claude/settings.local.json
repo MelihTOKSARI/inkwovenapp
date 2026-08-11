@@ -11,7 +11,9 @@
       "Bash(xcodebuild build *)",
       "Bash(xcrun simctl *)",
       "Bash(xcodegen generate *)",
-      "Bash(xcodebuild -project Inkwoven.xcodeproj -scheme Inkwoven -configuration Debug -destination 'id=0E88A7DA-AD72-4653-8DAA-B87E7AAF1AE8' build)"
+      "Bash(xcodebuild -project Inkwoven.xcodeproj -scheme Inkwoven -configuration Debug -destination 'id=0E88A7DA-AD72-4653-8DAA-B87E7AAF1AE8' build)",
+      "mcp__plugin_app-factory_claude-design__list_files",
+      "mcp__plugin_app-factory_claude-design__read_file"
     ]
   }
 }

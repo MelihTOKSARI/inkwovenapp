@@ -17,6 +17,10 @@ final class PageHarnessUITests: XCTestCase {
             "-ink.seenOnboarding", "YES", "-ink.reduceMotion", "YES",
             "-ink.pencilSeen", "YES",
         ]
+        // The header's promise, made real: the app under test talks to the
+        // hand-started local proxy, never to production — a run on a machine
+        // with no outbound network stays green.
+        app.launchEnvironment["INKWOVEN_PROXY_URL"] = "http://127.0.0.1:8787"
         app.launch()
 
         // Shelf → the Oracle (first tap peeks, second opens).

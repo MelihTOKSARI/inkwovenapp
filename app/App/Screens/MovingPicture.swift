@@ -187,13 +187,19 @@ struct KeeperClipConsent: View {
 /// not a spinner: the plate darkens and clears the way the darkroom does.
 struct MovingPictureDeveloping: View {
     let book: Book
+    /// Law IV: the moving picture's share of the page's measure — the page
+    /// hands it down so words-and-motion and motion-alone size differently.
+    var width: CGFloat = 420
     @Environment(\.reduceInkMotion) private var reduceMotion
     @State private var step = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            DevelopFrame(book: book, step: step, isMoving: false, imageURL: nil)
-                .frame(maxWidth: 420)
+        VStack(alignment: .center, spacing: 10) {
+            // isMoving: the plate that is learning to move already carries
+            // the living treatment — the slow drift and the ember badge —
+            // so the modality reads before the clip lands.
+            DevelopFrame(book: book, step: step, isMoving: true, imageURL: nil)
+                .frame(width: width)
             Text("the picture is learning to move…")
                 .font(InkFont.bodyItalic(13))
                 .foregroundStyle(Ink.inkFaded)
@@ -223,6 +229,8 @@ struct MovingPictureDeveloping: View {
 struct MovingPictureFrame: View {
     let url: URL
     let book: Book
+    /// Law IV: the moving picture's share of the page's measure.
+    var width: CGFloat = 420
     let onOpen: () -> Void
 
     @Environment(\.reduceInkMotion) private var reduceMotion
@@ -231,7 +239,7 @@ struct MovingPictureFrame: View {
     @State private var clipFailed = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .center, spacing: 10) {
             Button(action: onOpen) {
                 ClipLoopView(url: url, onFailure: { clipFailed = true }, sealed: book.locked)
                     .aspectRatio(16 / 9, contentMode: .fit)
@@ -245,6 +253,23 @@ struct MovingPictureFrame: View {
                             .inset(by: 6)
                             .strokeBorder(Ink.candle.opacity(0.15), lineWidth: 2)
                     )
+                    // The living mark a moving picture wears while it stands
+                    // (the design's badge — same ember as the develop plate's).
+                    .overlay(alignment: .topLeading) {
+                        if !clipFailed {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Ink.dangerEmber)
+                                    .frame(width: 6, height: 6)
+                                    .shadow(color: Ink.dangerEmber, radius: 3)
+                                SmallCapsLabel(text: "living", size: 10, tracking: 1.4, color: Ink.parchment)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color(hex: 0x0D0906, opacity: 0.55)))
+                            .padding(10)
+                        }
+                    }
                     .shadow(color: .black.opacity(0.5), radius: 15, y: 10)
                     .contentShape(Rectangle())
             }
@@ -263,7 +288,7 @@ struct MovingPictureFrame: View {
                     .foregroundStyle(Ink.inkFaded)
             }
         }
-        .frame(maxWidth: 420, alignment: .leading)
+        .frame(width: width)
         .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
     }
 }

@@ -27,10 +27,10 @@ struct DevelopFrame: View {
                 .blur(radius: blur)
                 .brightness(brightness)
                 .saturation(saturation)
-                .inkAnimation(.easeInOut(duration: 1.1), value: step, reduce: reduceMotion)
+                .inkAnimation(.easeInOut(duration: InkMotion.Script.develop / 3), value: step, reduce: reduceMotion)
 
             Color(hex: 0x0D0906).opacity(veil)
-                .inkAnimation(.easeInOut(duration: 1.1), value: step, reduce: reduceMotion)
+                .inkAnimation(.easeInOut(duration: InkMotion.Script.develop / 3), value: step, reduce: reduceMotion)
 
             if isMoving {
                 HStack(spacing: 6) {

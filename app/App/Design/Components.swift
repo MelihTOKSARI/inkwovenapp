@@ -53,32 +53,69 @@ enum InkMotion {
     /// read by everything that crosses the paper — the canvas ink, the ink
     /// reply, the developed picture, the moving picture.
     ///
-    /// Timings hang off the 2s rest beat: the send commits at 2s, the ink
-    /// takes half of that to go under, and the answer takes the same half to
-    /// come back up. Nothing in the room moves at a duration that isn't a
-    /// part of that beat.
+    /// The numbers are the contract in CLAUDE.md ("Inkwoven Ink Behaviour"):
+    /// the absorb runs 1500ms to blur 7 and 7pt of sink, on one shared
+    /// curve. Under Reduce Motion every beat folds to about a third and
+    /// nothing skips.
     enum Surface {
         /// How long the ink takes to go under, and the answer to come up.
-        /// Half the rest window, so the page keeps one tempo throughout.
-        static let travel: Double = 1.0
-        /// Reduce Motion keeps the arrival, drops the journey.
-        static let calmTravel: Double = 0.3
+        static let travel: Double = 1.5
+        /// Reduce Motion keeps the arrival, drops most of the journey:
+        /// the contract's fold (×0.35).
+        static let calmTravel: Double = 0.525
         /// How far a thing drifts as it crosses the paper. Down for ink
         /// going under, up for an answer surfacing — same distance, so the
         /// two read as the same depth of page.
-        static let depth: CGFloat = 8
+        static let depth: CGFloat = 7
         /// Out-of-focus at the moment of crossing: paper is not glass.
-        static let haze: CGFloat = 2.5
+        static let haze: CGFloat = 7
 
-        /// Going under: the page drinking. Slow to start, gone by the end.
+        /// Going under: the page drinking. Slow to start, gone by the end —
+        /// the contract's cubic-bezier(.55,.06,.68,.19).
         static func sink(reduce: Bool) -> Animation {
-            .easeIn(duration: reduce ? calmTravel : travel)
+            .timingCurve(0.55, 0.06, 0.68, 0.19, duration: reduce ? calmTravel : travel)
         }
 
         /// Coming up: the answer surfacing. The exact inverse — same
         /// distance, same haze, the curve mirrored.
         static func rise(reduce: Bool) -> Animation {
-            .easeOut(duration: reduce ? calmTravel : travel)
+            .timingCurve(0.32, 0.81, 0.45, 0.94, duration: reduce ? calmTravel : travel)
+        }
+    }
+
+    // MARK: - The hand (the write-out contract)
+
+    /// The reply's pace on the page — the CLAUDE.md contract for law II
+    /// (answers write themselves) and the per-glyph scatter of law I.
+    enum Script {
+        /// One glyph, at the hand's base pace.
+        static let glyph: Double = 0.034
+        /// The pen breathes after a full stop, dash, question, exclamation
+        /// or semicolon…
+        static let stopPause: Double = 0.300
+        /// …and half-breathes after a comma.
+        static let commaPause: Double = 0.150
+        /// The widest a glyph's absorb may lag the first — the scatter.
+        static let scatterMax: Double = 0.420
+        /// A picture develops over this, veil to clear.
+        static let develop: Double = 2.2
+
+        /// The contract's reduced-motion fold: every time folds to about a
+        /// third, floored where a beat would stop reading as one. Nothing
+        /// skips.
+        static func folded(_ seconds: Double, reduce: Bool) -> Double {
+            reduce ? max(0.09, seconds * 0.35) : seconds
+        }
+
+        /// Per-glyph jitter so the hand never sounds like a metronome —
+        /// same spread the design rehearses (±11ms, deterministic).
+        static func jitter(_ index: Int) -> Double {
+            Double((index * 97) % 23 - 11) / 1000
+        }
+
+        /// The scatter delay for a glyph (or word) going under.
+        static func scatter(_ index: Int, reduce: Bool) -> Double {
+            folded(Double((index * 137) % 420) / 1000, reduce: reduce)
         }
     }
 }

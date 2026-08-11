@@ -47,6 +47,15 @@ struct PageView: View {
     /// The reply pane's own viewport height. The standing exchange fills it,
     /// so the past always starts above the fold.
     @State private var paneViewport: CGFloat = 0
+    /// The reply pane's width — the measure the media frames size against
+    /// (law IV: a picture alone may swell to fill the page; words never do).
+    @State private var paneWidth: CGFloat = 620
+    /// The pen that performs the Book's answer — law II's write-out.
+    @State private var writeOut = InkWriteOut()
+    /// A picture standing alone has taken the whole measure, and the task
+    /// that holds the beat before it does.
+    @State private var pictureSwelled = false
+    @State private var swellTask: Task<Void, Never>?
     /// VoiceOver lands on the hand card's title when it rises (A-3).
     @AccessibilityFocusState private var handCardFocused: Bool
     @Environment(\.room) private var room
@@ -85,7 +94,12 @@ struct PageView: View {
                     .frame(width: geo.size.width, height: geo.size.height)
 
                 VStack(alignment: .leading, spacing: 0) {
+                    // Held to the proposed width: in portrait the tray runs
+                    // past the page edge, and an unbounded header widens the
+                    // whole stack — which silently drags the centered island
+                    // off the page's true centre (law III).
                     header
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if spread {
                         HStack(alignment: .top, spacing: 0) {
                             writingPage
@@ -98,38 +112,47 @@ struct PageView: View {
                         }
                         .frame(maxHeight: .infinity)
                     } else {
-                        // One page, all of it writable: the island at the
-                        // CENTER holds only the standing exchange, sized to
-                        // it — the diary shows one exchange at a time; the
-                        // past waits above the fold, one scroll up. The pill
-                        // open turns the island into a full reading panel.
-                        // While the writer's hand moves, the island absorbs
-                        // out of the way and takes no touches.
                         writingPage
-                            .overlay(alignment: .center) {
-                                let cap = geo.size.height * 0.62
-                                rightPage
-                                    .frame(maxWidth: 620)
-                                    .frame(height: showEarlier ? cap : min(exchangeHeight, cap))
-                                    .opacity(writerHasThePage ? 0 : 1)
-                                    // Invisible must mean gone: opacity keeps
-                                    // the scrollback in the accessibility
-                                    // tree, and VoiceOver would read past
-                                    // replies over a blank page.
-                                    .accessibilityHidden(writerHasThePage)
-                                    .inkAnimation(
-                                        .easeIn(duration: 0.7),
-                                        value: writerHasThePage, reduce: reduceMotion
-                                    )
-                                    .inkAnimation(
-                                        .easeOut(duration: 0.3),
-                                        value: exchangeHeight, reduce: reduceMotion
-                                    )
-                                    .allowsHitTesting(replySideActive && !writerHasThePage)
-                            }
                     }
                 }
                 .padding(EdgeInsets(top: 64, leading: 56, bottom: 40, trailing: 56))
+
+                // One page, all of it writable: the island at the CENTER
+                // holds only the standing exchange, sized to it — the diary
+                // shows one exchange at a time; the past waits above the
+                // fold, one scroll up. The pill open turns the island into a
+                // full reading panel. While the writer's hand moves, the
+                // island absorbs out of the way and takes no touches. A
+                // picture standing alone may take the whole page (law IV) —
+                // the island's measure opens for it.
+                //
+                // Pinned to the GEOMETRY, not the writing column: in
+                // portrait the opener and the tray overrun the page's
+                // trailing edge, and an island centred against that
+                // overflowing column lands off the page's true centre
+                // (law III — the answer takes the centre of its page).
+                if !spread {
+                    let cap = geo.size.height * (pictureSwelled ? 0.86 : 0.62)
+                    rightPage
+                        .frame(maxWidth: pictureSwelled ? .infinity : 620)
+                        .frame(height: showEarlier ? cap : min(exchangeHeight, cap))
+                        .opacity(writerHasThePage ? 0 : 1)
+                        // Invisible must mean gone: opacity keeps the
+                        // scrollback in the accessibility tree, and
+                        // VoiceOver would read past replies over a blank
+                        // page.
+                        .accessibilityHidden(writerHasThePage)
+                        .inkAnimation(
+                            .easeIn(duration: 0.7),
+                            value: writerHasThePage, reduce: reduceMotion
+                        )
+                        .inkAnimation(
+                            .easeOut(duration: 0.3),
+                            value: exchangeHeight, reduce: reduceMotion
+                        )
+                        .allowsHitTesting(replySideActive && !writerHasThePage)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
 
                 backPill
                 rememberedRibbon
@@ -186,6 +209,24 @@ struct PageView: View {
         .onChange(of: interactor.status) { _, status in
             react(to: status)
         }
+        // The stream feeds the pen, never the page directly (law II): live
+        // deltas advance the write-out at the hand's pace; a buffer that
+        // changes outside an exchange — a revisit, a restore — stands at
+        // once, because that performance already happened.
+        .onChange(of: interactor.streamedText) { _, text in
+            switch interactor.status {
+            case .sending, .answering:
+                // Live exchange — even the first chunk, which can land
+                // while the status still reads `.sending`, goes to the pen.
+                writeOut.sync(text: text, complete: false, reduce: reduceMotion)
+            default:
+                if writeOut.writing {
+                    writeOut.sync(text: text, complete: true, reduce: reduceMotion)
+                } else {
+                    writeOut.restore(text)
+                }
+            }
+        }
         // The writer took the page back mid-stream (audit M-3): pen-down
         // while the Book answers lifts the absorb veil, so no one inks on
         // 18%-opacity paper. The status stays the exchange's — this signal
@@ -201,7 +242,12 @@ struct PageView: View {
         .onChange(of: hasPastPages) { _, has in
             if !has { showEarlier = false }
         }
-        .onAppear { consumeRevisit() }
+        .onAppear {
+            consumeRevisit()
+            // Whatever already stands (a restored page, a revisit) was
+            // performed in its own time — it never re-performs.
+            writeOut.restore(interactor.streamedText)
+        }
         // Leaving the page tears the view — and this interactor — down. An
         // exchange left running would stream to completion against a dead
         // canvas: moment spent, reply filed nowhere (audit D-4). Cancelling
@@ -209,6 +255,7 @@ struct PageView: View {
         // The darkroom's reveal script dies with the page too (audit L-36).
         .onDisappear {
             developTask?.cancel()
+            swellTask?.cancel()
             interactor.pageWillDisappear()
         }
         // Jetsam gives no warning; leaving the foreground is the last
@@ -600,12 +647,12 @@ struct PageView: View {
         }
     }
 
-    /// The reply appears the way the ink disappeared — whole, rising out of
-    /// the page — never streaming in token by token. While the Book is still
-    /// answering, the buffered text stays below the surface; the moment the
-    /// exchange completes, the full reply surfaces in one breath.
+    /// The buffer the pen draws from. Law II (CLAUDE.md): the answer is
+    /// never placed — the write-out performs this glyph by glyph, a nib at
+    /// the head, and what has not yet been written lays out clear so the
+    /// lines are settled before their ink arrives.
     private var displayedReply: String {
-        interactor.status == .answering ? "" : interactor.streamedText
+        interactor.streamedText
     }
 
     /// While the pen or the keys are moving, the single page belongs to the
@@ -622,6 +669,8 @@ struct PageView: View {
     /// too rather than stirring under a moving nib.
     private var pageIsQuickening: Bool {
         guard !interactor.writerReclaimed else { return false }
+        // The moment the answer's first words stand, the centre is theirs.
+        guard writeOut.laidText.isEmpty else { return false }
         switch interactor.status {
         case .sending, .answering: return true
         default: return false
@@ -848,7 +897,7 @@ struct PageView: View {
         let earlier = showEarlier ? earlierPages : []
         return ScrollViewReader { pane in
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .center, spacing: 0) {
                     if !earlier.isEmpty || !thread.isEmpty {
                         // Earlier visits stand above the session; both are
                         // chronological, so one thread reads straight through.
@@ -860,28 +909,30 @@ struct PageView: View {
                     }
                     currentExchange
                         // Pill closed: the standing exchange fills the whole
-                        // viewport, so the past always begins above the fold
-                        // — the page shows one exchange; the scroll keeps
-                        // the rest. Pill open: the fill stands down so the
-                        // past lays out naturally against the exchange and
-                        // the panel opens ONTO history, never onto blank.
+                        // viewport and takes its CENTRE (law III — whole
+                        // screen or half, the same centre), so the past
+                        // always begins above the fold. Pill open: the fill
+                        // stands down so the past lays out naturally against
+                        // the exchange and the panel opens ONTO history,
+                        // never onto blank.
                         .frame(
                             minHeight: paneViewport > 0 && !showEarlier ? paneViewport : nil,
-                            alignment: .topLeading
+                            alignment: .center
                         )
                     Color.clear
                         .frame(height: 0)
                         .id(Self.paneFoot)
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
             // The pane opens on the standing exchange — the past is all
             // there, one scroll up, but the page always faces its present.
             .defaultScrollAnchor(.bottom)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { height in
-                if abs(paneViewport - height) > 0.5 { paneViewport = height }
+            .onGeometryChange(for: CGSize.self) { proxy in
+                proxy.size
+            } action: { size in
+                if abs(paneViewport - size.height) > 0.5 { paneViewport = size.height }
+                if abs(paneWidth - size.width) > 0.5 { paneWidth = size.width }
             }
             // A fresh exchange brings the pane home to the foot, wherever
             // the reader had wandered in the past.
@@ -902,38 +953,58 @@ struct PageView: View {
     /// the paper. Visual only — the exchange stays archived, and returns
     /// as scrollback the moment the next send commits.
     private var currentExchange: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !displayedReply.isEmpty {
+        VStack(alignment: .center, spacing: 0) {
+            if !writeOut.laidText.isEmpty {
+                // The write-out IS the arrival (law II) — no rising
+                // transition stands in for a pen.
                 reply
                     .padding(.top, 30)
-                    .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
+                    .transition(.opacity)
                     // Long-press to report — only once the exchange has
                     // completed and archived; nothing mid-stream.
                     .modifier(ReportableReply(entry: reportableEntry) { entry in
                         model.reportTarget = entry
                     })
             }
-            // The server decides modality: the frame appears when an
-            // image slot opens (darkroom running), stays for the finished
-            // picture, and quietly withdraws if the develop failed.
-            if interactor.developing
-                && (interactor.imageURL != nil || interactor.status == .answering) {
-                developSection
+            Group {
+                // The server decides modality: the frame appears when an
+                // image slot opens (darkroom running), stays for the finished
+                // picture, and quietly withdraws if the develop failed.
+                if interactor.developing
+                    && (interactor.imageURL != nil || interactor.status == .answering) {
+                    developSection
+                        .padding(.top, 30)
+                }
+
+                movingPictureSection
+                    .padding(.top, 22)
+
+                // At the FOOT, after the reply: the pane anchors to its
+                // bottom, and a card above a tall stale reply would scroll
+                // out of sight — the one thing the writer must see would be
+                // the one thing hidden. Cooldown and decline land where the
+                // eye already is.
+                errorNote
+                    .frame(maxWidth: 440, alignment: .leading)
                     .padding(.top, 30)
             }
-
-            movingPictureSection
-                .padding(.top, 22)
-
-            // At the FOOT, after the reply: the pane anchors to its bottom,
-            // and a card above a tall stale reply would scroll out of sight
-            // — the one thing the writer must see would be the one thing
-            // hidden. Cooldown and decline land where the eye already is.
-            errorNote
-                .frame(maxWidth: 440, alignment: .leading)
-                .padding(.top, 30)
+            // The sink, frame-side: the writer took the page back at
+            // pen-down, so the standing frames go under exactly the way
+            // their ink does — same distance, same haze, same curve, off
+            // the one shared token. (The reply's words scatter under on
+            // their own, inside `InkScriptText`.) Reduce Motion keeps the
+            // arrival and drops the journey.
+            .opacity(writerHasThePage ? 0 : 1)
+            .blur(radius: writerHasThePage && !reduceMotion ? InkMotion.Surface.haze : 0)
+            .offset(y: writerHasThePage && !reduceMotion ? InkMotion.Surface.depth : 0)
+            .animation(
+                writerHasThePage
+                    ? InkMotion.Surface.sink(reduce: reduceMotion)
+                    : InkMotion.Surface.rise(reduce: reduceMotion),
+                value: writerHasThePage
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .center)
         // What the standing exchange naturally takes — the centered island
         // sizes itself to this alone, never to the scrollback above it.
         // Written only on real change: an animated frame reports every
@@ -943,40 +1014,30 @@ struct PageView: View {
         } action: { height in
             if abs(exchangeHeight - height) > 0.5 { exchangeHeight = height }
         }
-        // The sink, reply-side: the writer took the page back at pen-down, so
-        // the standing answer goes under exactly the way their ink does —
-        // same distance, same haze, same curve, off the one shared token.
-        // Reduce Motion keeps the arrival and drops the journey.
-        .opacity(writerHasThePage ? 0 : 1)
-        .blur(radius: writerHasThePage && !reduceMotion ? InkMotion.Surface.haze : 0)
-        .offset(y: writerHasThePage && !reduceMotion ? InkMotion.Surface.depth : 0)
-        .animation(InkMotion.Surface.sink(reduce: reduceMotion), value: writerHasThePage)
         .accessibilityHidden(writerHasThePage)
-        // And the rise: the ink went under over `Surface.travel`, the answer
-        // comes up over the same, through the same depth of paper. One
-        // gesture, run backwards.
-        .animation(InkMotion.Surface.rise(reduce: reduceMotion), value: displayedReply.isEmpty)
     }
 
     private var reply: some View {
-        HStack(alignment: .top, spacing: 20) {
-            LinearGradient(
-                colors: [Ink.ink.opacity(0.05), Ink.ink.opacity(0.22), Ink.ink.opacity(0.05)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .frame(width: 2)
-
-            // No `.accessibilityLabel` here on purpose: the reply text IS the
-            // element's label, and that is what both VoiceOver and the
-            // reply-pane UITest read.
-            Text(displayedReply)
-                .font(book.handFont(24))
-                .foregroundStyle(book.ink)
-                .lineSpacing(7)
-                .frame(maxWidth: 720, alignment: .leading)
-                .accessibilityIdentifier("reply-pane")
-        }
+        // The Book's hand takes the centre of its page (law III): one
+        // centred measure, written glyph by glyph with the nib at the head,
+        // absorbed word by word on the scatter when the writer reclaims the
+        // page. The full text is the element's label — that is what both
+        // VoiceOver and the reply-pane UITest read.
+        InkScriptText(
+            text: writeOut.laidText,
+            revealed: writeOut.revealed,
+            writing: writeOut.writing,
+            absorbing: writerHasThePage,
+            hand: book.handFont(24),
+            ink: book.ink,
+            glyphSize: 24
+        )
+        .frame(maxWidth: 620)
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(writeOut.laidText)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityIdentifier("reply-pane")
     }
 
     // MARK: - Moving pictures (Epic J)
@@ -998,9 +1059,11 @@ struct PageView: View {
                 onOpenVials: openVials
             )
         case .generating:
-            MovingPictureDeveloping(book: book)
+            MovingPictureDeveloping(book: book, width: clipFrameWidth)
         case .delivered(let url):
-            MovingPictureFrame(url: url, book: book) { immersiveClip = ImmersiveClip(url: url) }
+            MovingPictureFrame(url: url, book: book, width: clipFrameWidth) {
+                immersiveClip = ImmersiveClip(url: url)
+            }
         case .failed(let line):
             // The refund promise is part of the copy — the reader is told, in
             // the same breath, that nothing was spent.
@@ -1049,29 +1112,67 @@ struct PageView: View {
 
     // MARK: - Develop frame (Artist)
 
+    /// The measure media hangs off — the pane's real width (law IV sizes
+    /// are fractions of the page the answer stands on).
+    private var mediaMeasure: CGFloat { max(320, paneWidth) }
+
+    /// Whether words share this exchange — a picture beside words keeps a
+    /// modest size; a picture alone opens larger, and may swell.
+    private var hasStandingWords: Bool { !writeOut.laidText.isEmpty }
+
+    /// Law IV, the still picture: 46% of the measure beside words, 70%
+    /// alone — and the whole page once it has swelled.
+    private var stillFrameWidth: CGFloat {
+        pictureSwelled
+            ? mediaMeasure
+            : min(mediaMeasure, 620) * (hasStandingWords ? 0.46 : 0.70)
+    }
+
+    /// Law IV, the moving picture: 56% of the measure beside words, 80%
+    /// alone.
+    private var clipFrameWidth: CGFloat {
+        min(mediaMeasure, 620) * (hasStandingWords ? 0.56 : 0.80)
+    }
+
     private var developSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .center, spacing: 12) {
             // isMoving is false because this is the STILL develop (the Artist's
             // picture). A moving picture is a separate, user-triggered request
             // and renders in `movingPictureSection` — nothing here ever spends
             // a vial.
             DevelopFrame(book: book, step: developStep, isMoving: false, imageURL: interactor.imageURL)
-                .frame(maxWidth: 420)
+                .frame(width: stillFrameWidth)
             Text("developed from your page")
                 .font(InkFont.bodyItalic(13))
                 .foregroundStyle(Ink.inkFaded)
-                .frame(maxWidth: 420, alignment: .leading)
+                .opacity(pictureSwelled ? 0 : 1)
+                .frame(width: stillFrameWidth, alignment: .center)
         }
+        .inkAnimation(
+            .timingCurve(0.6, 0.05, 0.2, 1, duration: 0.95),
+            value: stillFrameWidth, reduce: reduceMotion
+        )
         .onAppear { runDevelop() }
         .onChange(of: interactor.imageURL) { _, url in
             guard url != nil else { return }
-            withAnimation(.easeInOut(duration: reduceMotion ? 0.3 : 1.1)) { developStep = 3 }
+            withAnimation(.easeInOut(duration: developBeat)) { developStep = 3 }
+            scheduleSwell()
+        }
+        .onChange(of: developStep) { _, _ in
+            scheduleSwell()
         }
     }
 
+    /// One stage of the darkroom reveal — a third of the contract's 2200ms,
+    /// folded (never skipped) under Reduce Motion.
+    private var developBeat: Double {
+        InkMotion.Script.folded(InkMotion.Script.develop / 3, reduce: reduceMotion)
+    }
+
     /// Darkroom reveal pacing while fal paints: (seconds to wait, develop
-    /// step to reach). Step 3 never comes from here — see runDevelop.
-    private static let developScript: [(delay: Double, step: Int)] = [(0.9, 1), (1.0, 2), (1.2, 3)]
+    /// step to reach). Three beats of develop/3 so the scripted reveal spans
+    /// the contract's 2200ms. Step 3 never comes from here — see runDevelop.
+    private static let developScript: [(delay: Double, step: Int)] = [(0.73, 1), (0.74, 2), (0.73, 3)]
 
     /// The darkroom drifts to step 2 on its own while fal paints; the full
     /// reveal (step 3) is gated on the real picture arriving.
@@ -1091,8 +1192,28 @@ struct PageView: View {
                 try? await Task.sleep(for: .seconds(delay))
                 guard !Task.isCancelled else { return }
                 guard developStep < step else { continue }
-                withAnimation(.easeInOut(duration: 1.1)) { developStep = step }
+                withAnimation(.easeInOut(duration: developBeat)) { developStep = step }
             }
+        }
+    }
+
+    /// Law IV's swell: a picture standing ALONE, fully developed, holds a
+    /// beat and then takes the whole page. Words never trigger this — and a
+    /// panel opened onto history keeps its reading size.
+    private func scheduleSwell() {
+        guard developStep == 3, interactor.imageURL != nil,
+              !hasStandingWords, !pictureSwelled, !showEarlier,
+              swellTask == nil else { return }
+        swellTask = Task {
+            try? await Task.sleep(for: .seconds(InkMotion.Script.folded(2.3, reduce: reduceMotion)))
+            guard !Task.isCancelled else { return }
+            withAnimation(.timingCurve(
+                0.6, 0.05, 0.2, 1,
+                duration: InkMotion.Script.folded(0.95, reduce: reduceMotion)
+            )) {
+                pictureSwelled = true
+            }
+            swellTask = nil
         }
     }
 
@@ -1112,8 +1233,13 @@ struct PageView: View {
             // The deadline passed and the page went without the writer
             // touching anything — this tap is the only way they can know.
             Feel.shared.play(.sendCommitted)
-            // A fresh exchange gets a fresh darkroom.
+            // A fresh exchange gets a fresh darkroom, a fresh pen, and a
+            // picture back at its own size.
             developStep = 0
+            writeOut.begin()
+            swellTask?.cancel()
+            swellTask = nil
+            pictureSwelled = false
             sentThisVisit = true
             withAnimation(InkMotion.Surface.sink(reduce: reduceMotion)) {
                 canvasAbsorbed = true
@@ -1129,6 +1255,13 @@ struct PageView: View {
             // Only an exchange sent this visit pulses — `.answered` also
             // lands from revisits and restores, which must stay silent.
             if sentThisVisit { Feel.shared.play(.replyArrived) }
+            // The stream has closed: the pen may run to the very end. A
+            // reply that was never mid-write stands at once (restores).
+            if writeOut.writing {
+                writeOut.sync(text: interactor.streamedText, complete: true, reduce: reduceMotion)
+            } else {
+                writeOut.restore(interactor.streamedText)
+            }
             // The interactor has archived and removed the strokes; lift the
             // veil so the canvas is ready to write on. Usually invisible —
             // the page is empty by now — but a tail written while the Book
@@ -1149,6 +1282,11 @@ struct PageView: View {
         case .declined, .cooldown:
             // A quiet no — deliberately softer than an error.
             Feel.shared.play(.refusal)
+            // A pen caught mid-word by the refusal still finishes what it
+            // was given; it never freezes half a glyph up.
+            if writeOut.writing {
+                writeOut.sync(text: interactor.streamedText, complete: true, reduce: reduceMotion)
+            }
             // Failed send: the ink must come back at FULL strength — an error
             // may never leave the page ghosted. It surfaces the way anything
             // else does, which is also the honest reading: the page tried to

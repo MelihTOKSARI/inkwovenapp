@@ -30,7 +30,7 @@
 - [ ] A3 Analytics SDK + schema (NSM, funnel incl. second-Book + credit events, per-Book engagement, **cost-per-subscriber guardrail with 30%-of-sub alert, p50/p95 time-to-first-stroke**) — **S**
 - [x] ~~A4 RevenueCat + sandbox products (monthly, annual+trial, credit packs 10/30/100, Bindery SKUs)~~ — **superseded 2026-08-10.** Named the dropped annual plan, the retired `credits_10/30/100` ladder and the cut Bindery SKUs. Rewritten as G7–G10; plan in `revenuecat-plan.md`.
 - [ ] A5 Proxy: key custody, remote Book definitions, model routing (text/image/video/moderation), per-user rate limits, **kill-switch flags** — **L**
-- [ ] A6 **Spike: cursive reply render** — go/no-go — **M**
+- [x] A6 **Spike: cursive reply render** — go/no-go — **M** *(go — shipped 2026-08-12 as the glyph write-out: per-glyph reveal in the Book's hand at the CLAUDE.md contract's pace, nib at the head, wet trail; the stroke-path engine in InkRender stays available for a later variable-weight pass)*
   - AC: 2-sentence reply draws at handwriting pace, variable weight, ≥30fps on iPad Air.
 - [ ] A7 **Spike: image development render** — go/no-go — **S**
 - [x] ~~A8 Spike: moving picture~~ — **superseded by Epic J. No longer a go/no-go spike: video ships or the launch doesn't.**
