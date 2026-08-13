@@ -126,7 +126,10 @@ struct PaywallView: View {
         .padding(EdgeInsets(top: 44, leading: 46, bottom: 36, trailing: 46))
         // The launch fetch can have failed (offline launch, IAP records still
         // propagating) — re-ask the storefront every time the paywall opens.
-        .task { await model.refreshStore() }
+        .task {
+            await model.refreshStore()
+            await model.notePaywallShown()
+        }
         .background(
             RadialGradient(
                 stops: [

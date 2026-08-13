@@ -106,6 +106,63 @@ actor RevenueCatPurchaseService: PurchaseServicing {
             }
         }
         await refresh()
+        await redeliverUnclaimedVials()
+    }
+
+    /// Re-offers every consumable StoreKit has ever seen that this install has no
+    /// record of delivering.
+    ///
+    /// This is the replacement for the guarantee the StoreKit path got for free.
+    /// There, a consumable was left UNFINISHED until the proxy credited it, and
+    /// StoreKit redelivered it on the next launch. RevenueCat finishes a
+    /// consumable once ITS backend has recorded the purchase — which is not the
+    /// moment our wallet is credited — so that net is gone and this one takes its
+    /// place: sweep `Transaction.all` at launch and re-post anything unclaimed.
+    ///
+    /// Safe to run blind. The proxy keys idempotency on the transaction id
+    /// (`stores.idempotent(userID, "grant:<id>")`), so a receipt that was already
+    /// credited is a no-op rather than a double grant. The local ledger below is
+    /// only there to keep a long purchase history from re-posting every launch.
+    private func redeliverUnclaimedVials() async {
+        guard let delivery else { return }
+        for await result in StoreKit.Transaction.all {
+            guard case .verified(let transaction) = result,
+                  ProductID.consumables.contains(transaction.productID),
+                  transaction.revocationDate == nil else { continue }
+            let id = String(transaction.id)
+            guard !claimed.contains(id) else { continue }
+            do {
+                try await delivery.deliver(VialGrant(
+                    productID: transaction.productID,
+                    transactionID: id,
+                    jws: result.jwsRepresentation
+                ))
+                markClaimed(id)
+                for continuation in grantObservers.values { continuation.yield(()) }
+            } catch let error as ProxyError where Self.deliveryError(for: error) == .deliveryRejected {
+                // Terminal: revoked, already redeemed by another identity, or
+                // invalid. Retrying can never succeed, so stop offering it —
+                // otherwise it is re-sent on every launch, forever (audit M-4).
+                markClaimed(id)
+            } catch {
+                // Transient. Leave it unclaimed and try again next launch.
+            }
+        }
+    }
+
+    /// Transaction ids this install has seen the wallet accept. Not an
+    /// entitlement and not a balance — losing it costs one redundant, idempotent
+    /// round trip per purchase, never a credit.
+    private static let claimedKey = "ink.vials.claimed"
+
+    private var claimed: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.claimedKey) ?? [])
+    }
+
+    private func markClaimed(_ id: String) {
+        var next = claimed
+        next.insert(id)
+        UserDefaults.standard.set(Array(next), forKey: Self.claimedKey)
     }
 
     func refresh() async {
@@ -239,9 +296,15 @@ actor RevenueCatPurchaseService: PurchaseServicing {
                 transactionID: String(signed.id),
                 jws: verification.jwsRepresentation
             ))
+            markClaimed(String(signed.id))
             for continuation in grantObservers.values { continuation.yield(()) }
         } catch let error as ProxyError {
-            throw Self.deliveryError(for: error)
+            let outcome = Self.deliveryError(for: error)
+            // A terminal refusal is never coming good, so record it as settled —
+            // the launch sweep must not spend the rest of this install's life
+            // re-offering a receipt the proxy has already refused.
+            if outcome == .deliveryRejected { markClaimed(String(signed.id)) }
+            throw outcome
         } catch {
             throw CommerceError.deliveryPending
         }
@@ -292,9 +355,23 @@ actor RevenueCatPurchaseService: PurchaseServicing {
         }
     }
 
-    /// The Offering as last fetched, for the paywall's impression event and for
-    /// reading experiment metadata. Nil until `start()` has answered.
+    /// The Offering as last fetched, for reading experiment metadata. Nil until
+    /// `start()` has answered.
     func currentOffering() -> Offering? { offering }
+
+    /// Records that the hand-drawn paywall was shown.
+    ///
+    /// Passing the Offering rather than its identifier is what lets the SDK carry
+    /// the placement and targeting context through — the string-only initialiser
+    /// is deprecated for exactly that reason. Without this call an enrolled reader
+    /// counts as "not exposed", and the default filter on an experiment's results
+    /// quietly excludes them.
+    func notePaywallImpression(_ paywallID: String) async {
+        await refreshOfferingsIfEmpty()
+        let params = offering.map { CustomPaywallImpressionParams(paywallId: paywallID, offering: $0) }
+            ?? CustomPaywallImpressionParams(paywallId: paywallID)
+        Purchases.shared.trackCustomPaywallImpression(params)
+    }
 
     // MARK: - Internals
 

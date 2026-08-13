@@ -20,7 +20,9 @@
       "mcp__claude-in-chrome__browser_batch",
       "mcp__claude-in-chrome__computer",
       "mcp__claude-in-chrome__find",
-      "mcp__claude-in-chrome__read_page"
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__tabs_close_mcp",
+      "mcp__claude-in-chrome__tabs_create_mcp"
     ]
   }
 }

@@ -91,20 +91,24 @@ enum LiveCommerce {
     /// RevenueCat's mode is global rather than per-product. `AppDI.live()` reads
     /// this to decide how to configure the SDK.
     ///
-    /// **Still `.storeKit`, deliberately.** Flipping it needs two things that do
-    /// not exist yet: the products configured in the RevenueCat dashboard
-    /// (`revenuecat-plan.md` §2 B8–B10), and `POST /v1/rc/webhook` on the proxy
-    /// (§3 step 5). Without the webhook a vial purchase whose delivery fails has no
-    /// second chance — RevenueCat finishes the transaction once ITS backend has it,
-    /// so StoreKit will not redeliver, and the safety net the current path relies on
-    /// is simply gone. Meanwhile RevenueCat still sees every purchase: it runs in
-    /// `.myApp` mode and `RevenueCatPurchaseRecorder` reports each one.
+    /// **`.revenueCat` since 2026-08-10**, once the dashboard carried all five
+    /// products, the `plus` entitlement and a current offering.
+    ///
+    /// The one guarantee this costs is redelivery. On the StoreKit path a
+    /// consumable stayed UNFINISHED until the proxy credited it, so a failed
+    /// delivery came back on the next launch. RevenueCat finishes a consumable
+    /// once ITS backend has recorded the purchase, which is a different moment —
+    /// so `RevenueCatPurchaseService.redeliverUnclaimedVials()` sweeps
+    /// `Transaction.all` at launch and re-posts anything the wallet never took.
+    /// The proxy is idempotent on the transaction id, so the sweep cannot double
+    /// grant. `POST /v1/rc/webhook` (`revenuecat-plan.md` §3 step 5) is still
+    /// owed as a server-side backstop for a device that never comes back.
     enum Backend {
         case storeKit
         case revenueCat
     }
 
-    static let backend: Backend = .storeKit
+    static let backend: Backend = .revenueCat
 
     static let purchases: any PurchaseServicing = switch backend {
     case .storeKit:

@@ -74,6 +74,18 @@ protocol PurchaseServicing: EntitlementProviding {
     /// the shop can re-read the wallet. Carries no amount: the balance comes
     /// from the proxy, never from adding up what the client thinks it bought.
     func creditGrants() -> AsyncStream<Void>
+    /// A paywall was put in front of the reader, once per presentation.
+    ///
+    /// Only RevenueCat does anything with this, and only for a hand-drawn
+    /// paywall: it is what makes a custom room count as "exposed" in an
+    /// experiment. Without it an enrolled reader is filtered out of the results
+    /// they were enrolled in, which reads as a dead test rather than a missing
+    /// call. Default no-op so the StoreKit path and the harnesses ignore it.
+    func notePaywallImpression(_ paywallID: String) async
+}
+
+extension PurchaseServicing {
+    func notePaywallImpression(_ paywallID: String) async {}
 }
 
 /// Verified-purchase entitlements, StoreKit 2 only.

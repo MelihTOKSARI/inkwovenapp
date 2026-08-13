@@ -221,16 +221,22 @@ dashboard rather than trusting either page.
 Nine steps. Steps 1–4 are the SDK swap; 5–7 make the consumable path safe; 8–9 are the
 Shipaton-specific upside. Each is independently shippable.
 
-> **Status, 2026-08-10.** Steps 1–3 are **done and running**: purchases-ios 5.83.1 is
-> linked, `RevenueCatPurchaseService` is written and compiles, and the SDK configures at
-> launch against project `755b3ded` / app `app45d753ea06`, logs the customer in under the
-> proxy's own user id, and is answered by RevenueCat's backend. Verified on an iPad Pro 13"
-> simulator: no crash, identity accepted, and the only error is the expected
-> *"no App Store products registered in the RevenueCat dashboard"* — which §2 B8–B10 fixes.
+> **Status, 2026-08-14.** Steps 1–4 and 6 are **done and live**: purchases-ios 5.83.1 is
+> linked, `RevenueCatPurchaseService` is bound, and `LiveCommerce.backend` is
+> **`.revenueCat`** — RevenueCat now takes the money. The dashboard carries all five
+> products, the `plus` entitlement and a current offering, so the paywall prices itself
+> from `offerings.current` and every purchase buys a `Package`, carrying offering,
+> placement and experiment attribution. `trackCustomPaywallImpression` fires once per
+> presentation of the binding room.
 >
-> `LiveCommerce.backend` is still **`.storeKit`**, so RevenueCat runs in `.myApp` mode and
-> merely records. **Step 4 (paywall from the Offering) and step 5 (the webhook) are not
-> done, and the switch must not be flipped before both are** — see step 5 for why.
+> Verified by running it on an iPad Pro 13" simulator: the *"no App Store products
+> registered in the RevenueCat dashboard"* error that fired on every earlier launch is
+> gone, and the customer logs in under the proxy's own user id.
+>
+> **Step 5 is half done.** The client half — a launch sweep of `Transaction.all` that
+> re-posts any consumable the wallet never took — is in, and it replaces the
+> unfinished-transaction net that the flip removed. `POST /v1/rc/webhook` is still owed
+> as the server-side backstop for a device that never comes back.
 
 ### Step 1 — Add the SDK
 

@@ -419,6 +419,13 @@ final class AppModel {
             || storePrices[ProductID.plusMonthly] == nil
     }
 
+    /// The binding room opened. Called once per presentation from the room's own
+    /// `.task`, never from `body` — a second call is a second impression, and a
+    /// paywall that reports itself twice halves its own measured conversion.
+    func notePaywallShown() async {
+        await purchases.notePaywallImpression("inkwoven_binding_v1")
+    }
+
     func clearPurchaseNote() {
         setPurchaseState(.idle)
     }
