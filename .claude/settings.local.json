@@ -13,7 +13,14 @@
       "Bash(xcodegen generate *)",
       "Bash(xcodebuild -project Inkwoven.xcodeproj -scheme Inkwoven -configuration Debug -destination 'id=0E88A7DA-AD72-4653-8DAA-B87E7AAF1AE8' build)",
       "mcp__plugin_app-factory_claude-design__list_files",
-      "mcp__plugin_app-factory_claude-design__read_file"
+      "mcp__plugin_app-factory_claude-design__read_file",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__navigate",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__browser_batch",
+      "mcp__claude-in-chrome__computer",
+      "mcp__claude-in-chrome__find",
+      "mcp__claude-in-chrome__read_page"
     ]
   }
 }

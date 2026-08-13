@@ -50,8 +50,6 @@ struct PageView: View {
     /// The reply pane's width — the measure the media frames size against
     /// (law IV: a picture alone may swell to fill the page; words never do).
     @State private var paneWidth: CGFloat = 620
-    /// The pen that performs the Book's answer — law II's write-out.
-    @State private var writeOut = InkWriteOut()
     /// A picture standing alone has taken the whole measure, and the task
     /// that holds the beat before it does.
     @State private var pictureSwelled = false
@@ -209,24 +207,6 @@ struct PageView: View {
         .onChange(of: interactor.status) { _, status in
             react(to: status)
         }
-        // The stream feeds the pen, never the page directly (law II): live
-        // deltas advance the write-out at the hand's pace; a buffer that
-        // changes outside an exchange — a revisit, a restore — stands at
-        // once, because that performance already happened.
-        .onChange(of: interactor.streamedText) { _, text in
-            switch interactor.status {
-            case .sending, .answering:
-                // Live exchange — even the first chunk, which can land
-                // while the status still reads `.sending`, goes to the pen.
-                writeOut.sync(text: text, complete: false, reduce: reduceMotion)
-            default:
-                if writeOut.writing {
-                    writeOut.sync(text: text, complete: true, reduce: reduceMotion)
-                } else {
-                    writeOut.restore(text)
-                }
-            }
-        }
         // The writer took the page back mid-stream (audit M-3): pen-down
         // while the Book answers lifts the absorb veil, so no one inks on
         // 18%-opacity paper. The status stays the exchange's — this signal
@@ -242,12 +222,7 @@ struct PageView: View {
         .onChange(of: hasPastPages) { _, has in
             if !has { showEarlier = false }
         }
-        .onAppear {
-            consumeRevisit()
-            // Whatever already stands (a restored page, a revisit) was
-            // performed in its own time — it never re-performs.
-            writeOut.restore(interactor.streamedText)
-        }
+        .onAppear { consumeRevisit() }
         // Leaving the page tears the view — and this interactor — down. An
         // exchange left running would stream to completion against a dead
         // canvas: moment spent, reply filed nowhere (audit D-4). Cancelling
@@ -647,12 +622,13 @@ struct PageView: View {
         }
     }
 
-    /// The buffer the pen draws from. Law II (CLAUDE.md): the answer is
-    /// never placed — the write-out performs this glyph by glyph, a nib at
-    /// the head, and what has not yet been written lays out clear so the
-    /// lines are settled before their ink arrives.
+    /// The reply appears the way the ink disappeared — whole, rising out of
+    /// the page — NEVER streaming in token by token (law II, CLAUDE.md).
+    /// While the Book is still answering, the buffered text stays below the
+    /// surface; the moment the exchange completes, the full reply surfaces
+    /// in one breath, the absorb run backwards.
     private var displayedReply: String {
-        interactor.streamedText
+        interactor.status == .answering ? "" : interactor.streamedText
     }
 
     /// While the pen or the keys are moving, the single page belongs to the
@@ -669,8 +645,6 @@ struct PageView: View {
     /// too rather than stirring under a moving nib.
     private var pageIsQuickening: Bool {
         guard !interactor.writerReclaimed else { return false }
-        // The moment the answer's first words stand, the centre is theirs.
-        guard writeOut.laidText.isEmpty else { return false }
         switch interactor.status {
         case .sending, .answering: return true
         default: return false
@@ -954,55 +928,35 @@ struct PageView: View {
     /// as scrollback the moment the next send commits.
     private var currentExchange: some View {
         VStack(alignment: .center, spacing: 0) {
-            if !writeOut.laidText.isEmpty {
-                // The write-out IS the arrival (law II) — no rising
-                // transition stands in for a pen.
+            if !displayedReply.isEmpty {
                 reply
                     .padding(.top, 30)
-                    .transition(.opacity)
+                    .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
                     // Long-press to report — only once the exchange has
                     // completed and archived; nothing mid-stream.
                     .modifier(ReportableReply(entry: reportableEntry) { entry in
                         model.reportTarget = entry
                     })
             }
-            Group {
-                // The server decides modality: the frame appears when an
-                // image slot opens (darkroom running), stays for the finished
-                // picture, and quietly withdraws if the develop failed.
-                if interactor.developing
-                    && (interactor.imageURL != nil || interactor.status == .answering) {
-                    developSection
-                        .padding(.top, 30)
-                }
-
-                movingPictureSection
-                    .padding(.top, 22)
-
-                // At the FOOT, after the reply: the pane anchors to its
-                // bottom, and a card above a tall stale reply would scroll
-                // out of sight — the one thing the writer must see would be
-                // the one thing hidden. Cooldown and decline land where the
-                // eye already is.
-                errorNote
-                    .frame(maxWidth: 440, alignment: .leading)
+            // The server decides modality: the frame appears when an
+            // image slot opens (darkroom running), stays for the finished
+            // picture, and quietly withdraws if the develop failed.
+            if interactor.developing
+                && (interactor.imageURL != nil || interactor.status == .answering) {
+                developSection
                     .padding(.top, 30)
             }
-            // The sink, frame-side: the writer took the page back at
-            // pen-down, so the standing frames go under exactly the way
-            // their ink does — same distance, same haze, same curve, off
-            // the one shared token. (The reply's words scatter under on
-            // their own, inside `InkScriptText`.) Reduce Motion keeps the
-            // arrival and drops the journey.
-            .opacity(writerHasThePage ? 0 : 1)
-            .blur(radius: writerHasThePage && !reduceMotion ? InkMotion.Surface.haze : 0)
-            .offset(y: writerHasThePage && !reduceMotion ? InkMotion.Surface.depth : 0)
-            .animation(
-                writerHasThePage
-                    ? InkMotion.Surface.sink(reduce: reduceMotion)
-                    : InkMotion.Surface.rise(reduce: reduceMotion),
-                value: writerHasThePage
-            )
+
+            movingPictureSection
+                .padding(.top, 22)
+
+            // At the FOOT, after the reply: the pane anchors to its bottom,
+            // and a card above a tall stale reply would scroll out of sight
+            // — the one thing the writer must see would be the one thing
+            // hidden. Cooldown and decline land where the eye already is.
+            errorNote
+                .frame(maxWidth: 440, alignment: .leading)
+                .padding(.top, 30)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         // What the standing exchange naturally takes — the centered island
@@ -1014,30 +968,35 @@ struct PageView: View {
         } action: { height in
             if abs(exchangeHeight - height) > 0.5 { exchangeHeight = height }
         }
+        // The sink, reply-side: the writer took the page back at pen-down, so
+        // the standing answer goes under exactly the way their ink does —
+        // same distance, same haze, same curve, off the one shared token.
+        // Reduce Motion keeps the arrival and drops the journey.
+        .opacity(writerHasThePage ? 0 : 1)
+        .blur(radius: writerHasThePage && !reduceMotion ? InkMotion.Surface.haze : 0)
+        .offset(y: writerHasThePage && !reduceMotion ? InkMotion.Surface.depth : 0)
+        .animation(InkMotion.Surface.sink(reduce: reduceMotion), value: writerHasThePage)
         .accessibilityHidden(writerHasThePage)
+        // And the rise: the ink went under over `Surface.travel`, the answer
+        // comes up over the same, through the same depth of paper. One
+        // gesture, run backwards.
+        .animation(InkMotion.Surface.rise(reduce: reduceMotion), value: displayedReply.isEmpty)
     }
 
     private var reply: some View {
-        // The Book's hand takes the centre of its page (law III): one
-        // centred measure, written glyph by glyph with the nib at the head,
-        // absorbed word by word on the scatter when the writer reclaims the
-        // page. The full text is the element's label — that is what both
-        // VoiceOver and the reply-pane UITest read.
-        InkScriptText(
-            text: writeOut.laidText,
-            revealed: writeOut.revealed,
-            writing: writeOut.writing,
-            absorbing: writerHasThePage,
-            hand: book.handFont(24),
-            ink: book.ink,
-            glyphSize: 24
-        )
-        .frame(maxWidth: 620)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(writeOut.laidText)
-        .accessibilityAddTraits(.isStaticText)
-        .accessibilityIdentifier("reply-pane")
+        // The answer surfaces whole — the absorb reversed, never streamed
+        // (law II) — and takes the centre of its page in one centred
+        // measure (law III). No `.accessibilityLabel` on purpose: the reply
+        // text IS the element's label, and that is what both VoiceOver and
+        // the reply-pane UITest read.
+        Text(displayedReply)
+            .font(book.handFont(24))
+            .foregroundStyle(book.ink)
+            .lineSpacing(7)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 620)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("reply-pane")
     }
 
     // MARK: - Moving pictures (Epic J)
@@ -1118,7 +1077,7 @@ struct PageView: View {
 
     /// Whether words share this exchange — a picture beside words keeps a
     /// modest size; a picture alone opens larger, and may swell.
-    private var hasStandingWords: Bool { !writeOut.laidText.isEmpty }
+    private var hasStandingWords: Bool { !displayedReply.isEmpty }
 
     /// Law IV, the still picture: 46% of the measure beside words, 70%
     /// alone — and the whole page once it has swelled.
@@ -1233,10 +1192,9 @@ struct PageView: View {
             // The deadline passed and the page went without the writer
             // touching anything — this tap is the only way they can know.
             Feel.shared.play(.sendCommitted)
-            // A fresh exchange gets a fresh darkroom, a fresh pen, and a
-            // picture back at its own size.
+            // A fresh exchange gets a fresh darkroom, and a picture back
+            // at its own size.
             developStep = 0
-            writeOut.begin()
             swellTask?.cancel()
             swellTask = nil
             pictureSwelled = false
@@ -1255,13 +1213,6 @@ struct PageView: View {
             // Only an exchange sent this visit pulses — `.answered` also
             // lands from revisits and restores, which must stay silent.
             if sentThisVisit { Feel.shared.play(.replyArrived) }
-            // The stream has closed: the pen may run to the very end. A
-            // reply that was never mid-write stands at once (restores).
-            if writeOut.writing {
-                writeOut.sync(text: interactor.streamedText, complete: true, reduce: reduceMotion)
-            } else {
-                writeOut.restore(interactor.streamedText)
-            }
             // The interactor has archived and removed the strokes; lift the
             // veil so the canvas is ready to write on. Usually invisible —
             // the page is empty by now — but a tail written while the Book
@@ -1282,11 +1233,6 @@ struct PageView: View {
         case .declined, .cooldown:
             // A quiet no — deliberately softer than an error.
             Feel.shared.play(.refusal)
-            // A pen caught mid-word by the refusal still finishes what it
-            // was given; it never freezes half a glyph up.
-            if writeOut.writing {
-                writeOut.sync(text: interactor.streamedText, complete: true, reduce: reduceMotion)
-            }
             // Failed send: the ink must come back at FULL strength — an error
             // may never leave the page ghosted. It surfaces the way anything
             // else does, which is also the honest reading: the page tried to

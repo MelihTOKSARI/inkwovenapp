@@ -57,4 +57,4 @@ Contrast pairs verified AA: ink on parchment 10.9:1; parchment on room 12.4:1; c
 - **CrisisCard** — the one deliberately *plain* component: system font, high contrast, no texture. Breaking the fiction is the design.
 
 ## Motion tokens
-Per the approved "Inkwoven Ink Behaviour" spec (the contract lives in CLAUDE.md): absorb 1500ms cubic-bezier(.55,.06,.68,.19) to blur 7 / sink 7, per-glyph scatter ≤420ms · write-out 34ms a glyph (±11ms jitter, +300ms after stops, +150ms after commas), a nib at the head · develop 2200ms veil-to-clear · page-turn 450ms · seal-press 200ms haptic-paired. Reduce Motion: every time folds to ~a third (floor 90ms); nothing skips.
+The contract lives in CLAUDE.md: absorb 1500ms cubic-bezier(.55,.06,.68,.19) to blur 7 / sink 7 · the reply surfaces WHOLE as the absorb reversed (same duration/blur/distance, curve mirrored) — never streamed, never a typewriter · develop 2200ms veil-to-clear · page-turn 450ms · seal-press 200ms haptic-paired. Reduce Motion: every time folds to ~a third (floor 90ms); nothing skips.

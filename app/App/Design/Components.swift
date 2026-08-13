@@ -83,20 +83,12 @@ enum InkMotion {
         }
     }
 
-    // MARK: - The hand (the write-out contract)
+    // MARK: - The darkroom (the develop contract)
 
-    /// The reply's pace on the page — the CLAUDE.md contract for law II
-    /// (answers write themselves) and the per-glyph scatter of law I.
+    /// The remaining CLAUDE.md contract beats that are not the surface
+    /// crossing: the develop, and the reduced-motion fold every timed beat
+    /// obeys.
     enum Script {
-        /// One glyph, at the hand's base pace.
-        static let glyph: Double = 0.034
-        /// The pen breathes after a full stop, dash, question, exclamation
-        /// or semicolon…
-        static let stopPause: Double = 0.300
-        /// …and half-breathes after a comma.
-        static let commaPause: Double = 0.150
-        /// The widest a glyph's absorb may lag the first — the scatter.
-        static let scatterMax: Double = 0.420
         /// A picture develops over this, veil to clear.
         static let develop: Double = 2.2
 
@@ -105,17 +97,6 @@ enum InkMotion {
         /// skips.
         static func folded(_ seconds: Double, reduce: Bool) -> Double {
             reduce ? max(0.09, seconds * 0.35) : seconds
-        }
-
-        /// Per-glyph jitter so the hand never sounds like a metronome —
-        /// same spread the design rehearses (±11ms, deterministic).
-        static func jitter(_ index: Int) -> Double {
-            Double((index * 97) % 23 - 11) / 1000
-        }
-
-        /// The scatter delay for a glyph (or word) going under.
-        static func scatter(_ index: Int, reduce: Bool) -> Double {
-            folded(Double((index * 137) % 420) / 1000, reduce: reduce)
         }
     }
 }
