@@ -76,7 +76,10 @@ struct PageView: View {
         self.di = di
         _interactor = State(initialValue: PageInteractor(
             proxy: di.proxy, analytics: di.analytics, book: model.activeBookID,
-            archive: di.archive, drafts: di.drafts
+            archive: di.archive, drafts: di.drafts,
+            // The bound Book's voice rides every one of its exchanges; nil
+            // for the eight shipped Books, whose prompts live server-side.
+            binding: model.activeBookID == .custom ? model.customBinding?.wireCard : nil
         ))
     }
 
@@ -1224,6 +1227,10 @@ struct PageView: View {
             // The value moment: the first answered page, and only then, earns
             // the notification ask — mirroring how the paywall waits.
             if sentThisVisit {
+                // Arrivals listen for exactly this: a page of the writer's
+                // own, answered. Revisits and restores stay silent above and
+                // stay silent here.
+                model.noteAnswered(book.id)
                 Task {
                     if let granted = await model.promptRitualIfNeeded() {
                         await analytics.track(.notificationPermissionAnswered(granted: granted))

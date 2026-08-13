@@ -19,7 +19,8 @@ struct ExchangeLifecycleTests {
         var failure: ProxyError?
 
         func exchange(
-            payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?
+            payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?,
+            binding: BindingCard?
         ) -> AsyncThrowingStream<ReplyChunk, Error> {
             AsyncThrowingStream { continuation in
                 for chunk in chunks { continuation.yield(chunk) }

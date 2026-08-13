@@ -10,7 +10,8 @@ import InkAnalytics
 /// live conformer; tests script the stream to drive both resolution paths.
 protocol ExchangeProxying: Sendable {
     func exchange(
-        payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?
+        payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?,
+        binding: BindingCard?
     ) -> AsyncThrowingStream<ReplyChunk, Error>
     func preupload(_ payload: SnapshotPayload) async throws -> UploadTicket
     func abort(_ ticket: UploadTicket) async
@@ -98,6 +99,9 @@ final class PageInteractor {
     private let proxy: any ExchangeProxying
     private let analytics: Analytics
     private let book: BookID
+    /// The bound Book's voice, when this page belongs to it (`.custom`);
+    /// nil for every shipped Book. Rides each exchange body.
+    private let binding: BindingCard?
     private let archive: (any PageArchiving)?
     /// Where unsent work survives the view (audit D-1): every rest, keystroke
     /// pause, and scene-phase change writes here; `attach(canvas:)` reads it
@@ -186,7 +190,8 @@ final class PageInteractor {
         archive: (any PageArchiving)? = nil,
         drafts: (any PageDraftStoring)? = nil,
         entitlements: PageEntitlements = LiveCommerce.page,
-        memory: any MemoryProviding = EmptyMemoryProvider()
+        memory: any MemoryProviding = EmptyMemoryProvider(),
+        binding: BindingCard? = nil
     ) {
         self.proxy = proxy
         self.analytics = analytics
@@ -195,6 +200,7 @@ final class PageInteractor {
         self.drafts = drafts
         self.entitlements = entitlements
         self.memory = memory
+        self.binding = binding
     }
 
     func attach(canvas: PKCanvasView) {
@@ -804,7 +810,9 @@ final class PageInteractor {
         }
 
         let stream = CrisisInterceptor.intercept(
-            proxy.exchange(payload: payload, book: book, context: context, ticket: ticket)
+            proxy.exchange(
+                payload: payload, book: book, context: context, ticket: ticket, binding: binding
+            )
         )
         do {
             for try await chunk in stream {

@@ -24,6 +24,8 @@ struct RootView: View {
                 OnboardingView(model: model).transition(.opacity)
             case .shelf:
                 ShelfView(model: model).transition(.opacity)
+            case .binding:
+                BindingView(model: model).transition(.opacity)
             case .page:
                 // Structural gate. AppModel reads the review/UITest launch args
                 // (`-ink.startScreen page -ink.startBook keeper`) in every
@@ -91,6 +93,10 @@ struct RootView: View {
             // (and re-reads authorization — the writer may have visited
             // Settings while away).
             if phase == .active {
+                // A return to the room is a wake: a book may have arrived in
+                // the night. Runs before anything animates — the shelf simply
+                // IS different, which is the whole effect.
+                model.arrivalsOnWake()
                 model.scheduleRitualRearm()
                 // Cap and cooldown knobs are server-tunable; re-read them so a
                 // change ships without a release. Failure keeps the defaults.

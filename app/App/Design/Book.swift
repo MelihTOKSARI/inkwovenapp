@@ -21,6 +21,10 @@ struct Book: Identifiable, Hashable {
     let locked: Bool
     let suggested: Bool
     let resting: Bool
+    /// The unwritten book: same leather, nothing finished — blind-tooled
+    /// panel where the gilt would be, ribbon undyed, ring empty. Only the
+    /// writer's own Book is ever blank, and only until it is bound.
+    let blank: Bool
 
     var accent: Color { Color(hex: accentHex) }
     var paper: Color { Color(hex: paperHex) }
@@ -42,28 +46,28 @@ extension Book {
              whisper: "Once, there was…",
              opener: "The page waited, and leaned in to listen.",
              starterPrompt: "Begin where the road forks at dusk.",
-             develops: false, locked: false, suggested: false, resting: false),
+             develops: false, locked: false, suggested: false, resting: false, blank: false),
         Book(id: .artist, name: "The Artist", monogram: "A",
              accentHex: 0x9C4A3C, paperHex: 0xF1E6CE,
              hand: "Caveat-Regular", handScale: 1.15,
              whisper: "Show me, and I will see it too.",
              opener: "Describe it in a breath — I will mix the dark first.",
              starterPrompt: "A fox reading by candlelight, in the old style.",
-             develops: true, locked: false, suggested: false, resting: false),
+             develops: true, locked: false, suggested: false, resting: false, blank: false),
         Book(id: .gameMaster, name: "The Game Master", monogram: "G",
              accentHex: 0x4A5D3A, paperHex: 0xEFE4C6,
              hand: "Fondamento-Regular", handScale: 1.05,
              whisper: "Roll, and the world answers.",
              opener: "You stand at the mouth of the cave. The torches gutter. What do you do?",
              starterPrompt: "I ready my lantern and step inside.",
-             develops: false, locked: false, suggested: false, resting: false),
+             develops: false, locked: false, suggested: false, resting: false, blank: false),
         Book(id: .oracle, name: "The Oracle", monogram: "O",
              accentHex: 0x5B4370, paperHex: 0xEFE3CB,
              hand: "PinyonScript-Regular", handScale: 1.5,
              whisper: "Ask, and be answered slant.",
              opener: "Ask once. I answer in the old way — sideways, and true.",
              starterPrompt: "Will the harvest hold this year?",
-             develops: false, locked: false, suggested: true, resting: false),
+             develops: false, locked: false, suggested: true, resting: false, blank: false),
         Book(id: .keeper, name: "The Keeper", monogram: "K",
              accentHex: 0x6E3B34, paperHex: 0xEDE1C6,
              hand: "HomemadeApple-Regular", handScale: 1.0,
@@ -73,28 +77,28 @@ extension Book {
              whisper: "Only your hand may open this.",
              opener: "These pages keep behind the seal, and open only to your hand.",
              starterPrompt: "Today I finally told her the truth.",
-             develops: false, locked: true, suggested: false, resting: false),
+             develops: false, locked: true, suggested: false, resting: false, blank: false),
         Book(id: .correspondent, name: "The Correspondent", monogram: "C",
              accentHex: 0x8A6B4F, paperHex: 0xF2E8D1,
              hand: "HerrVonMuellerhoff-Regular", handScale: 2.15,
              whisper: "Write, and someone writes back.",
              opener: "My dear friend — I have been waiting for your letter.",
              starterPrompt: "Forgive the long silence. The winter was hard.",
-             develops: false, locked: false, suggested: false, resting: false),
+             develops: false, locked: false, suggested: false, resting: false, blank: false),
         Book(id: .tutor, name: "The Tutor", monogram: "T",
              accentHex: 0x46607C, paperHex: 0xF0E6CF,
              hand: "PetitFormalScript-Regular", handScale: 1.25,
              whisper: "What shall we learn tonight?",
              opener: "Sit. Ask me anything, and we will take it apart together.",
              starterPrompt: "Why is the sky red at sunset?",
-             develops: false, locked: false, suggested: false, resting: false),
+             develops: false, locked: false, suggested: false, resting: false, blank: false),
         Book(id: .parlor, name: "The Parlor", monogram: "P",
              accentHex: 0x7C4E68, paperHex: 0xF1E7D0,
              hand: "KaushanScript-Regular", handScale: 1.2,
              whisper: "Come in — the game is afoot.",
              opener: "The others are already seated. Shall we begin the round?",
              starterPrompt: "Deal me in. What is the game tonight?",
-             develops: false, locked: false, suggested: false, resting: false),
+             develops: false, locked: false, suggested: false, resting: false, blank: false),
     ]
 
     static func by(id: BookID) -> Book {

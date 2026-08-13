@@ -1,6 +1,7 @@
 import SwiftUI
+import PencilKit
 
-/// Home: the candlelit shelf of eight hands.
+/// Home: the candlelit shelf — however many hands currently stand on it.
 struct ShelfView: View {
     @Bindable var model: AppModel
     @Environment(\.room) private var room
@@ -8,6 +9,24 @@ struct ShelfView: View {
     @State private var glowPulse = false
     /// Drives the vial's breathing glow and the highlight travelling its glass.
     @State private var vialGlow = false
+
+    /// The bound book's title, rendered once from the name's own strokes —
+    /// never per frame; a PKDrawing decode in `body` would run on every
+    /// candle flicker.
+    @State private var customTitleInk: UIImage?
+
+    private func renderCustomTitle() {
+        guard let data = model.customNameInk,
+              let drawing = try? PKDrawing(data: data),
+              !drawing.strokes.isEmpty
+        else {
+            customTitleInk = nil
+            return
+        }
+        customTitleInk = drawing.image(
+            from: drawing.bounds.insetBy(dx: -10, dy: -10), scale: 2
+        )
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -36,6 +55,20 @@ struct ShelfView: View {
                 }
             }
         }
+        .onAppear { renderCustomTitle() }
+        .onChange(of: model.customNameInk) { _, _ in renderCustomTitle() }
+    }
+
+    /// The subtitle counts what actually stands on the ledge. Written out in
+    /// words — a numeral under a wordmark reads as a badge.
+    static func subtitle(count: Int) -> String {
+        let words = [
+            "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        ]
+        let word = count >= 0 && count < words.count ? words[count] : "\(count)"
+        return count == 1
+            ? "a candlelit shelf, one patient hand"
+            : "a candlelit shelf of \(word) hands"
     }
 
     // MARK: - Room dressing
@@ -84,7 +117,10 @@ struct ShelfView: View {
                         .foregroundStyle(
                             LinearGradient(colors: [room.logoFrom, room.logoTo], startPoint: .top, endPoint: .bottom)
                         )
-                    Text("a candlelit shelf of eight hands")
+                    // Counted, not hardcoded: the shelf grows now, and a room
+                    // that miscounts its own books breaks the fiction faster
+                    // than any spinner could.
+                    Text(Self.subtitle(count: model.visibleBooks.count))
                         .font(InkFont.bodyItalic(13))
                         .foregroundStyle(room.logoSub)
                 }
@@ -209,6 +245,7 @@ struct ShelfView: View {
                 ForEach(model.visibleBooks) { book in
                     BookSpineView(
                         book: book,
+                        titleInk: book.id == .custom ? customTitleInk : nil,
                         focused: model.focusedBookID == book.id,
                         tap: {
                             // Peek is a tick; a cover actually coming open is
@@ -266,9 +303,11 @@ struct ShelfView: View {
         // its context menu used to leave the caption naming an invisible
         // spine, still promising "tap again to open".
         if let id = model.focusedBookID, !model.hiddenBooks.contains(id) {
-            let book = Book.by(id: id)
+            // Through the model, never Book.by — the writer's own book has
+            // no preset, and Book.by would caption it as the Oracle.
+            let book = model.book(id)
             HStack(spacing: 11) {
-                Text(book.name)
+                Text(book.blank ? "the unwritten book" : book.name)
                     .font(InkFont.display(17))
                     .foregroundStyle(room.heading)
                 Text("·").foregroundStyle(room.dim.opacity(0.55))
@@ -338,7 +377,9 @@ struct RiddleDiaryLine: View {
         return [
             Line(hand: .ink, text: "Good \(part). This notebook is awake — write, and it writes back."),
             Line(hand: .you, text: "Who are you?"),
-            Line(hand: .ink, text: "Eight hands sharing one shelf. Each answers in its own ink."),
+            // Count-free on purpose: the shelf grows now, and this script is
+            // built once per process.
+            Line(hand: .ink, text: "More hands than one, sharing a shelf. Each answers in its own ink."),
             Line(hand: .you, text: "Tell me a story."),
             Line(hand: .ink, text: "Once, a road forked at dusk… the Storyteller keeps the rest for you."),
             Line(hand: .you, text: "Will you keep my secrets?"),
@@ -476,12 +517,20 @@ struct RiddleDiaryLine: View {
 
 struct BookSpineView: View {
     let book: Book
+    /// The bound book's title in the writer's own strokes; nil everywhere
+    /// else — and the bound book falls back to its hand-font name.
+    var titleInk: UIImage?
     let focused: Bool
     let tap: () -> Void
     let hide: () -> Void
     @Environment(\.room) private var room
     @Environment(\.reduceInkMotion) private var reduceMotion
     @State private var oraclePulse = false
+
+    /// What the spine is called out loud — a blank book has no name yet.
+    private var spokenName: String {
+        book.blank ? "The unwritten book" : book.name
+    }
 
     var body: some View {
         Button(action: tap) {
@@ -521,7 +570,7 @@ struct BookSpineView: View {
         .contextMenu {
             Button("Hide from the shelf", systemImage: "eye.slash", action: hide)
         }
-        .accessibilityLabel("\(book.name). \(book.whisper)")
+        .accessibilityLabel("\(spokenName). \(book.whisper)")
         // The spine says "resting", "locked" and "suggested" in ornament
         // only — a candle bloom, a pulsing lock, a dimmed cover.
         .accessibilityValue(spokenState)
@@ -533,6 +582,7 @@ struct BookSpineView: View {
     /// What the spine's ornament means, said out loud.
     private var spokenState: String {
         var notes: [String] = []
+        if book.blank { notes.append("Blank — open it, and it asks who it should be") }
         if book.locked { notes.append("Locked — only your hand may open it") }
         if book.resting { notes.append("Resting") }
         // No "tonight" (audit L-32): the suggestion is hardcoded and does
@@ -570,23 +620,60 @@ struct BookSpineView: View {
             .clipShape(RoundedRectangle(cornerRadius: 3))
         }
         .overlay {
-            // gilded title, reading up the spine; overlaid so its unrotated
-            // layout width can never widen the spine itself
-            Text(book.name)
-                .font(InkFont.display(19))
-                .kerning(0.8)
-                .foregroundStyle(
-                    LinearGradient(colors: [Ink.goldTitleTop, Ink.candle], startPoint: .leading, endPoint: .trailing)
-                )
-                .shadow(color: .black.opacity(0.3), radius: 0, y: 1)
-                .lineLimit(1)
-                .fixedSize()
-                // Rotated inside a spine capped at 116pt: unrestrained, this
-                // becomes ~59pt of gilt running across its neighbours at the
-                // accessibility sizes. VoiceOver reads the full title from
-                // the button's own label regardless.
-                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-                .rotationEffect(.degrees(-90))
+            if book.blank {
+                // Blind tooling where the gilt would be: the panel is
+                // pressed, but nothing is written in it yet.
+                VStack(spacing: 0) {
+                    Rectangle().fill(.black.opacity(0.22)).frame(height: 1)
+                    Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+                    Spacer().frame(height: 48)
+                    Rectangle().fill(.white.opacity(0.1)).frame(height: 1)
+                    Rectangle().fill(.black.opacity(0.22)).frame(height: 1)
+                }
+                .padding(.horizontal, 14)
+                .frame(maxHeight: .infinity, alignment: .center)
+            } else if book.id == .custom, let titleInk {
+                // The one book on the shelf whose title is not set in our
+                // gilt — it wears the writer's own strokes.
+                Image(uiImage: titleInk)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color(hex: 0xF6E9CD))
+                    .frame(maxWidth: 260, maxHeight: 84)
+                    .rotationEffect(.degrees(-90))
+                    .frame(maxWidth: 96)
+                    .shadow(color: .black.opacity(0.45), radius: 1, y: 1)
+            } else if book.id == .custom {
+                // Bound, but the name was typed: the writer's hand-font in
+                // cream, still never our gilt.
+                Text(book.name)
+                    .font(book.handFont(22))
+                    .foregroundStyle(Color(hex: 0xF6E9CD))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .rotationEffect(.degrees(-90))
+                    .shadow(color: .black.opacity(0.45), radius: 1, y: 1)
+            } else {
+                // gilded title, reading up the spine; overlaid so its
+                // unrotated layout width can never widen the spine itself
+                Text(book.name)
+                    .font(InkFont.display(19))
+                    .kerning(0.8)
+                    .foregroundStyle(
+                        LinearGradient(colors: [Ink.goldTitleTop, Ink.candle], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 0, y: 1)
+                    .lineLimit(1)
+                    .fixedSize()
+                    // Rotated inside a spine capped at 116pt: unrestrained,
+                    // this becomes ~59pt of gilt running across its
+                    // neighbours at the accessibility sizes. VoiceOver reads
+                    // the full title from the button's own label regardless.
+                    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+                    .rotationEffect(.degrees(-90))
+            }
         }
         .overlay(alignment: .top) { ribbon.offset(y: -6) }
         .overlay(alignment: .top) {
@@ -629,7 +716,12 @@ struct BookSpineView: View {
             topLeadingRadius: 0, bottomLeadingRadius: 2,
             bottomTrailingRadius: 2, topTrailingRadius: 0
         )
-        .fill(LinearGradient(colors: [book.accent, .mix(book.accentHex, 0.6, 0x000000)], startPoint: .top, endPoint: .bottom))
+        .fill(
+            book.blank
+                // Undyed: the ribbon takes its colour at the binding.
+                ? AnyShapeStyle(LinearGradient(colors: [Color(hex: 0xE6DCC4), Color(hex: 0xCBBE9F)], startPoint: .top, endPoint: .bottom))
+                : AnyShapeStyle(LinearGradient(colors: [book.accent, .mix(book.accentHex, 0.6, 0x000000)], startPoint: .top, endPoint: .bottom))
+        )
         .frame(width: 11, height: 46)
         .opacity(0.9)
     }
@@ -640,10 +732,11 @@ struct BookSpineView: View {
             .frame(width: 32, height: 32)
             .overlay(
                 Text(book.monogram)
-                    .font(InkFont.display(18))
+                    .font(book.id == .custom ? book.handFont(17) : InkFont.display(18))
                     .foregroundStyle(Ink.goldTitleTop)
             )
-            .opacity(0.9)
+            // An empty ring on the blank book: pressed, waiting for a letter.
+            .opacity(book.blank ? 0.55 : 0.9)
     }
 
     private var whisperBubble: some View {

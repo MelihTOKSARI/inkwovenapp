@@ -7,7 +7,7 @@
 // still supply before App Attest is real.
 import Fastify from 'fastify';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { BOOKS, developPrompt, findBook, publicBook } from './books.js';
+import { BOOKS, customPrompt, developPrompt, findBook, publicBook } from './books.js';
 import { CONFIG, LIMITS, createPricing, createVideoPricing } from './config.js';
 import { createStores } from './stores.js';
 import { createAttestationVerifier, AttestationError } from './attest.js';
@@ -66,6 +66,23 @@ const exchangeSchema = {
       // The typed hand wrote this page: the snapshot is rendered words, not
       // a sketch. Steers the develop pass only — never billing or gating.
       typed: { type: 'boolean' },
+      // The writer's own Book (bookID "custom"): its voice, as bound in the
+      // app. Structured and length-capped — never a free-form prompt — and
+      // composed server-side by customPrompt(). Ignored for every other Book.
+      binding: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          you: { type: ['string', 'null'], maxLength: 80 },
+          me: { type: ['string', 'null'], maxLength: 80 },
+          where: { type: ['string', 'null'], maxLength: 140 },
+          temper: { type: ['string', 'null'], maxLength: 140 },
+          tongue: { type: ['string', 'null'], maxLength: 60 },
+          fact: { type: ['string', 'null'], maxLength: 280 },
+          length: { type: ['string', 'null'], maxLength: 120 },
+          never: { type: ['string', 'null'], maxLength: 200 },
+        },
+      },
       context: {
         type: 'object',
         additionalProperties: false,
@@ -563,7 +580,7 @@ export function build(options = {}) {
     async (request, reply) => {
       const { bookID, ticketID } = request.body ?? {};
 
-      const book = findBook(bookID);
+      let book = findBook(bookID);
       if (!book) return reply.code(404).send({ error: 'unknown_book' });
       if (!book.flags.enabled) {
         // Kill-switch: the client renders this as the Book "resting."
@@ -573,6 +590,14 @@ export function build(options = {}) {
       // nowhere, so the only lever an operator had was taking the whole Book
       // down. Now ink can be rested on its own.
       if (!book.flags.ink) return reply.code(503).send({ error: 'ink_resting' });
+
+      // The bound Book arrives promptless; its voice is composed from the
+      // page's own binding. AFTER the flags checks, so the kill-switch on
+      // CUSTOM_BOOK still rests it — and only the prompt is derived, never
+      // models, flags, or the motion hint.
+      if (book.id === 'custom') {
+        book = { ...book, prompt: customPrompt(request.body?.binding) };
+      }
 
       if (
         !(await withinLimits(

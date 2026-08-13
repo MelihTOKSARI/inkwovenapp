@@ -13,7 +13,8 @@ import InkAnalytics
 struct RepeatExchangeTests {
     struct ScriptedProxy: ExchangeProxying {
         func exchange(
-            payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?
+            payload: SnapshotPayload, book: BookID, context: PageContext, ticket: UploadTicket?,
+            binding: BindingCard?
         ) -> AsyncThrowingStream<ReplyChunk, Error> {
             AsyncThrowingStream { continuation in
                 continuation.yield(.inkDelta("answered"))

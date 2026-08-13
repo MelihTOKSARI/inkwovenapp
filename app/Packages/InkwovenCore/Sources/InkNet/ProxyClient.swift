@@ -51,6 +51,10 @@ struct ExchangeRequestBody: Encodable {
     /// a sketch. Rides the body (not the ticket), so it survives the
     /// speculative-upload path.
     var typed: Bool
+    /// The bound Book's voice (bookID "custom" only). Optional, so every
+    /// other Book's body is byte-identical to what the deployed proxy already
+    /// accepts — `additionalProperties: false` cuts no slack for extras.
+    var binding: BindingCard?
 }
 
 /// A user-triggered request for a moving picture (task J4). The client names
@@ -221,7 +225,8 @@ public final class ProxyClient: Sendable {
         payload: SnapshotPayload,
         book: BookID,
         context: PageContext,
-        ticket: UploadTicket? = nil
+        ticket: UploadTicket? = nil,
+        binding: BindingCard? = nil
     ) -> AsyncThrowingStream<ReplyChunk, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -241,7 +246,8 @@ public final class ProxyClient: Sendable {
                             payload: payload,
                             book: book,
                             context: context,
-                            ticket: attempt == 0 ? ticket : nil
+                            ticket: attempt == 0 ? ticket : nil,
+                            binding: binding
                         )
                         try await runAttempt(request, into: continuation) { committed = true }
                         continuation.finish()
@@ -274,7 +280,8 @@ public final class ProxyClient: Sendable {
         payload: SnapshotPayload,
         book: BookID,
         context: PageContext,
-        ticket: UploadTicket?
+        ticket: UploadTicket?,
+        binding: BindingCard?
     ) async throws -> URLRequest {
         var request = URLRequest(url: endpoints.exchange)
         request.httpMethod = "POST"
@@ -293,7 +300,8 @@ public final class ProxyClient: Sendable {
             snapshotBase64: ticket == nil ? payload.imageData.base64EncodedString() : nil,
             digest: payload.digest,
             ticketID: ticket?.id,
-            typed: payload.typed
+            typed: payload.typed,
+            binding: binding
         )
         request.httpBody = try JSONEncoder().encode(body)
         return request

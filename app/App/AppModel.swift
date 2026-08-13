@@ -30,6 +30,8 @@ enum AppScreen: Hashable {
     case onboarding
     case shelf
     case page
+    /// The binding conversation — the blank book asking who it should be.
+    case binding
     case remembered
     case memory
     case paywall
@@ -116,6 +118,78 @@ final class AppModel {
     // Drawer
     var hiddenBooks: Set<BookID> {
         didSet { defaults.set(hiddenBooks.map(\.rawValue), forKey: "ink.hiddenBooks") }
+    }
+
+    // MARK: - Arrivals (the shelf that grows)
+
+    /// Books that have arrived on the shelf. A fresh notebook starts with
+    /// three; the rest arrive between sessions as the writer uses it. Staged
+    /// ARRIVAL, never a lock: nothing is ever shown closed or priced, and any
+    /// Book can be brought over from the Drawer at any moment.
+    private(set) var arrivedBooks: Set<BookID> {
+        didSet { defaults.set(arrivedBooks.map(\.rawValue), forKey: "ink.arrivedBooks") }
+    }
+    /// Books the writer has completed at least one exchange in — the signal
+    /// that the loop has been learned. Written by the page on `.answered`.
+    private(set) var answeredBooks: Set<BookID> {
+        didSet { defaults.set(answeredBooks.map(\.rawValue), forKey: "ink.answeredBooks") }
+    }
+    /// Total answered pages, ever. Arrivals require writing since the last
+    /// arrival; a raw count is the cheapest durable way to know "since".
+    private(set) var answeredCount: Int {
+        didSet { defaults.set(answeredCount, forKey: "ink.answeredCount") }
+    }
+    /// The day (yyyy-MM-dd) of the last arrival — seeded to install day so
+    /// nothing arrives during the very first session. One book per night.
+    private var lastArrivalDay: String {
+        didSet { defaults.set(lastArrivalDay, forKey: "ink.arrivalDay") }
+    }
+    private var answeredAtLastArrival: Int {
+        didSet { defaults.set(answeredAtLastArrival, forKey: "ink.answeredAtArrival") }
+    }
+
+    /// A fresh shelf: the three Books whose verbs need no setup — ask, draw,
+    /// tell the day. Everything else asks the writer to supply a premise, a
+    /// hero, a problem or an addressee, which is exactly the cliff this
+    /// staging removes.
+    static let firstShelf: Set<BookID> = [.oracle, .artist, .keeper]
+
+    /// The order the rest arrive in. The blank book comes first — it is the
+    /// gift for having learned the loop — but only once two different Books
+    /// have answered the writer; until then the next shipped Book arrives
+    /// instead, so a writer devoted to one Book is never left waiting.
+    static let arrivalOrder: [BookID] = [
+        .custom, .storyteller, .gameMaster, .tutor, .correspondent, .parlor,
+    ]
+
+    // MARK: - The writer's own Book
+
+    /// The binding, once the conversation completes; nil while the blank
+    /// book stands unbound. JSON in defaults — the whole thing is eight
+    /// short strings and a date.
+    private(set) var customBinding: CustomBinding? {
+        didSet {
+            if let binding = customBinding, let data = try? JSONEncoder().encode(binding) {
+                defaults.set(data, forKey: "ink.customBinding")
+            } else {
+                defaults.removeObject(forKey: "ink.customBinding")
+            }
+        }
+    }
+    /// The name's own strokes, when it was written in ink — the spine wears
+    /// them instead of our gilt. Every other answer keeps only its text.
+    private(set) var customNameInk: Data? {
+        didSet { defaults.set(customNameInk, forKey: "ink.customNameInk") }
+    }
+    /// Mid-conversation answers, held so leaving the binding and coming back
+    /// resumes where the page left off. Session-only on purpose: an
+    /// abandoned half-binding should not survive a relaunch as a ghost.
+    var bindingDraft: [BindingAnswer] = []
+
+    struct BindingAnswer: Equatable {
+        var text = ""
+        var drawingData: Data?
+        var skipped = false
     }
     /// Re-dressings: the hand a Book writes in instead of its own. Absent
     /// means the Book keeps the script it was bound with. The Drawer's
@@ -256,6 +330,27 @@ final class AppModel {
         spreadLayout = defaults.object(forKey: "ink.spread") as? Bool ?? true
         reduceMotionOverride = defaults.bool(forKey: "ink.reduceMotion")
         hiddenBooks = Set((defaults.stringArray(forKey: "ink.hiddenBooks") ?? []).map { BookID(rawValue: $0) })
+        // Arrivals. A notebook that predates staging keeps every book it
+        // already had — arrival may only ever ADD to a shelf, never empty one.
+        if let stored = defaults.stringArray(forKey: "ink.arrivedBooks") {
+            arrivedBooks = Set(stored.map { BookID(rawValue: $0) })
+        } else if seenOnboarding {
+            // An existing notebook keeps all eight — and the blank book
+            // arrives with the update, the same gift new writers earn.
+            arrivedBooks = Set(Book.all.map(\.id)).union([.custom])
+        } else {
+            arrivedBooks = Self.firstShelf
+        }
+        customBinding = defaults.data(forKey: "ink.customBinding")
+            .flatMap { try? JSONDecoder().decode(CustomBinding.self, from: $0) }
+        customNameInk = defaults.data(forKey: "ink.customNameInk")
+        answeredBooks = Set((defaults.stringArray(forKey: "ink.answeredBooks") ?? []).map { BookID(rawValue: $0) })
+        answeredCount = defaults.object(forKey: "ink.answeredCount") as? Int ?? 0
+        // Seeded to today on first run: the first night must pass before the
+        // first arrival, or a book appears mid-first-session with no night in
+        // between.
+        lastArrivalDay = defaults.string(forKey: "ink.arrivalDay") ?? Self.dayStamp(.now)
+        answeredAtLastArrival = defaults.object(forKey: "ink.answeredAtArrival") as? Int ?? 0
         // Unknown faces (a renamed hand, a forged plist) fall back silently
         // to the Book's own rather than to San Francisco.
         let storedHands = defaults.dictionary(forKey: "ink.bookHands") as? [String: String] ?? [:]
@@ -279,7 +374,7 @@ final class AppModel {
         // Only a Book the shelf actually carries may speak the ritual.
         let storedVoice = defaults.string(forKey: "ink.lastOpenedBook").map { BookID(rawValue: $0) }
         lastOpenedBookID = storedVoice.flatMap { id in
-            Book.all.contains { $0.id == id } ? id : nil
+            id == .custom || Book.all.contains { $0.id == id } ? id : nil
         }
         keeperClipConsentGranted = defaults.bool(forKey: "ink.keeperClipConsent")
         signedName = defaults.string(forKey: "ink.signedName") ?? ""
@@ -301,6 +396,9 @@ final class AppModel {
         // the engine honors it, and the persisted key goes with it.
         defaults.removeObject(forKey: "ink.replyLength")
         observeCommerce()
+        // A launch is a wake: if a night has passed and pages were written,
+        // the shelf is different this morning than it was.
+        arrivalsOnWake()
     }
 
     deinit {
@@ -456,14 +554,99 @@ final class AppModel {
 
     var activeBook: Book { book(activeBookID) }
 
-    var visibleBooks: [Book] { Book.all.filter { !hiddenBooks.contains($0.id) } }
+    var visibleBooks: [Book] {
+        var books = Book.all.filter { arrivedBooks.contains($0.id) && !hiddenBooks.contains($0.id) }
+        if arrivedBooks.contains(.custom) && !hiddenBooks.contains(.custom) {
+            // The writer's own book stands at the warm end of the row, blank
+            // until it is bound.
+            books.append(Book.custom(customBinding))
+        }
+        return books
+    }
+
+    // MARK: - Arrivals
+
+    private static func dayStamp(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)"
+    }
+
+    /// The page completed an exchange — the only signal arrivals listen to.
+    func noteAnswered(_ id: BookID) {
+        answeredBooks.insert(id)
+        answeredCount += 1
+    }
+
+    /// May this book arrive next? The blank book waits for the loop to be
+    /// learned in two different Books; everything else needs only the night.
+    private func eligibleToArrive(_ id: BookID) -> Bool {
+        id == .custom ? answeredBooks.count >= 2 : true
+    }
+
+    /// A night passes. Called on launch and on every return to the
+    /// foreground: if today is a new day AND the writer has answered a page
+    /// since the last arrival, one more book stands on the ledge — quietly,
+    /// with no badge and no announcement. The card under its spine does the
+    /// telling when the writer notices.
+    func arrivalsOnWake() {
+        let today = Self.dayStamp(.now)
+        guard lastArrivalDay != today,
+              answeredCount > answeredAtLastArrival,
+              let next = Self.arrivalOrder.first(where: {
+                  !arrivedBooks.contains($0) && eligibleToArrive($0)
+              })
+        else { return }
+        arrivedBooks.insert(next)
+        lastArrivalDay = today
+        answeredAtLastArrival = answeredCount
+    }
+
+    /// The Drawer's override: any book, brought to the shelf right now. The
+    /// staging is a pace, never a wall.
+    func bringToShelf(_ id: BookID) {
+        arrivedBooks.insert(id)
+        hiddenBooks.remove(id)
+    }
+
+    // MARK: - Binding the writer's own Book
+
+    /// The conversation finished: the book takes its dye and its name. The
+    /// draft dies here — it has become the binding.
+    func bind(_ binding: CustomBinding, nameInk: Data?) {
+        customBinding = binding
+        customNameInk = nameInk
+        bindingDraft = []
+    }
+
+    /// One bookplate line, rewritten. Empty strings are honest values —
+    /// writing nothing over a line clears it back to the proxy's fallback.
+    func amendBinding(_ change: (inout CustomBinding) -> Void) {
+        guard var binding = customBinding else { return }
+        change(&binding)
+        customBinding = binding
+    }
+
+    /// The seal broken: the plate lifts away and the blank book returns.
+    /// The book's PAGES survive — only the voice is unbound.
+    func unbindCustomBook() {
+        customBinding = nil
+        customNameInk = nil
+        bindingDraft = []
+    }
+
+    /// A rewritten name retires the drawn one — the spine may not carry
+    /// strokes that spell a different word than the plate.
+    func clearCustomNameInk() {
+        customNameInk = nil
+    }
 
     // MARK: - Hands
 
     /// The Book as it currently dresses: its preset identity, wearing the
-    /// writer's chosen hand when one is set.
+    /// writer's chosen hand when one is set. The writer's own Book has no
+    /// preset — it dresses from the binding.
     func book(_ id: BookID) -> Book {
-        let preset = Book.by(id: id)
+        let preset = id == .custom ? Book.custom(customBinding) : Book.by(id: id)
         guard let choice = bookHands[id], let hand = Hand.by(id: choice),
               hand.id != preset.hand
         else { return preset }
@@ -650,6 +833,7 @@ final class AppModel {
     var backLabel: String {
         switch trail.last {
         case .page: activeBook.name
+        case .binding: "the binding"
         case .remembered: "remembered"
         case .memory: "the memory"
         case .drawer: "the drawer"
@@ -674,7 +858,11 @@ final class AppModel {
     func open(book: Book) {
         activeBookID = book.id
         focusedBookID = nil
-        if book.locked && !keeperUnlocked {
+        if book.blank {
+            // The unwritten book opens onto its own first question, not a
+            // page — binding IS this book's first visit.
+            go(.binding)
+        } else if book.locked && !keeperUnlocked {
             go(.keeperGate)
         } else {
             // Recorded only when the page actually opens — a Book that turned
@@ -690,7 +878,9 @@ final class AppModel {
     /// no way around it. A Book the shelf no longer carries, or a tap landing
     /// mid-onboarding, is quietly ignored.
     func openFromRitual(_ id: BookID) {
-        guard screen != .onboarding, Book.all.contains(where: { $0.id == id }) else { return }
+        guard screen != .onboarding,
+              id == .custom || Book.all.contains(where: { $0.id == id })
+        else { return }
         open(book: book(id))
     }
 

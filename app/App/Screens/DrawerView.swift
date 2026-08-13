@@ -155,6 +155,10 @@ struct DrawerView: View {
 
                         booksAndShelf
 
+                        if model.customBinding != nil {
+                            bookplate
+                        }
+
                         // No account section: v1 has no sign-in of any kind —
                         // the notebook works anonymously, and a Sign in with
                         // Apple button with nothing behind it (task F4) may
@@ -569,7 +573,7 @@ struct DrawerView: View {
             HStack(alignment: .firstTextBaseline) {
                 SmallCapsLabel(text: "Books & Shelf", size: 11, tracking: 2.2, color: room.dim)
                 Spacer()
-                Text("\(Book.all.count - model.hiddenBooks.count) on the shelf · \(model.hiddenBooks.count) hidden")
+                Text(shelfCountLine)
                     .font(InkFont.body(12))
                     .foregroundStyle(room.dim)
             }
@@ -577,13 +581,14 @@ struct DrawerView: View {
 
             RoomCard {
                 VStack(spacing: 0) {
-                    ForEach(Array(Book.all.enumerated()), id: \.element.id) { index, book in
-                        bookRow(book, divider: index < Book.all.count - 1)
+                    let listing = shelfListing
+                    ForEach(Array(listing.enumerated()), id: \.element.id) { index, book in
+                        bookRow(book, divider: index < listing.count - 1)
                     }
                 }
             }
 
-            Text("Hidden books stay in your notebook — they only leave the shelf.")
+            Text("Hidden books stay in your notebook — they only leave the shelf. The rest arrive on their own, one night at a time, as you write.")
                 .font(InkFont.bodyItalic(13))
                 .foregroundStyle(room.dim)
                 .padding(.leading, 4)
@@ -591,9 +596,26 @@ struct DrawerView: View {
         .padding(.bottom, 22)
     }
 
+    /// Every book the notebook can hold: the eight shipped, and the
+    /// writer's own — blank or bound as it currently stands.
+    private var shelfListing: [Book] {
+        Book.all + [model.book(.custom)]
+    }
+
+    private var shelfCountLine: String {
+        let waiting = shelfListing.count - model.arrivedBooks.count
+        let onShelf = model.visibleBooks.count
+        return waiting > 0
+            ? "\(onShelf) on the shelf · \(waiting) yet to arrive"
+            : "\(onShelf) on the shelf · \(model.hiddenBooks.count) hidden"
+    }
+
     private func bookRow(_ book: Book, divider: Bool) -> some View {
+        let arrived = model.arrivedBooks.contains(book.id)
         let hidden = model.hiddenBooks.contains(book.id)
-        let state = hidden ? "Hidden from the shelf"
+        let state = !arrived ? "Not yet arrived — it comes with use"
+            : book.blank ? "Blank — open it on the shelf, and it asks who it should be"
+            : hidden ? "Hidden from the shelf"
             : book.locked ? "Private · opens with Face ID"
             // No "tonight": the suggestion is hardcoded and does not rotate
             // (audit L-32), so the claim stays temporal-free until it can be
@@ -622,27 +644,217 @@ struct DrawerView: View {
                     .font(InkFont.display(14))
                     .foregroundStyle(Ink.goldTitleTop)
             )
-            .opacity(hidden ? 0.4 : 1)
+            .opacity(hidden || !arrived ? 0.4 : 1)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(book.name)
+                Text(book.blank ? "The unwritten book" : book.name)
                     .font(InkFont.body(16))
                     .foregroundStyle(room.text)
-                    .opacity(hidden ? 0.6 : 1)
+                    .opacity(hidden || !arrived ? 0.6 : 1)
                 Text(state)
                     .font(InkFont.bodyItalic(12.5))
-                    .foregroundStyle(hidden ? room.dim : room.accent)
+                    .foregroundStyle(hidden || !arrived ? room.dim : room.accent)
             }
             Spacer(minLength: 8)
-            GoldToggle(isOn: !hidden) {
-                withAnimation { model.toggleShelf(book: book) }
+            GoldToggle(isOn: arrived && !hidden) {
+                // The toggle is the arrival override too: a book not yet on
+                // the shelf is BROUGHT, never merely unhidden — the staging
+                // is a pace, not a wall.
+                withAnimation {
+                    if arrived {
+                        model.toggleShelf(book: book)
+                    } else {
+                        model.bringToShelf(book.id)
+                    }
+                }
             }
-            .accessibilityLabel("\(book.name) on the shelf")
+            .accessibilityLabel(
+                arrived ? "\(book.name) on the shelf" : "Bring \(book.name) to the shelf now"
+            )
         }
         .padding(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
         .overlay(alignment: .bottom) {
             if divider { hairline }
         }
+    }
+
+    // MARK: - The bookplate (the writer's own Book)
+
+    /// Which plate line is being rewritten, by binding key.
+    @State private var plateEditing: String?
+    @State private var plateDraft = ""
+    @State private var unbindAsking = false
+    @State private var unbindHold: CGFloat = 0
+    @FocusState private var plateFieldFocused: Bool
+
+    private var plateRows: [(key: String, label: String, value: String)] {
+        guard let b = model.customBinding else { return [] }
+        return [
+            ("you", "it calls you", b.you),
+            ("me", "you call it", b.me),
+            ("where", "it writes from", b.place),
+            ("temper", "its temper", b.temper),
+            ("tongue", "it answers in", b.tongue),
+            ("fact", "it knows", b.fact),
+            ("length", "its replies run", b.length),
+            ("never", "it never", b.never),
+        ]
+    }
+
+    /// A card pasted inside the front cover, not a preferences screen: every
+    /// line of the binding, rewritable by writing over it — and the seal
+    /// that unbinds, which a tap will not break.
+    private var bookplate: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SmallCapsLabel(text: "Your Book", size: 11, tracking: 2.2, color: room.dim)
+                .padding(.horizontal, 4)
+
+            RoomCard {
+                VStack(spacing: 0) {
+                    ForEach(Array(plateRows.enumerated()), id: \.element.key) { index, row in
+                        plateRow(row, divider: index < plateRows.count - 1)
+                    }
+
+                    if unbindAsking {
+                        unbindConfirm
+                    } else {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.3)) { unbindAsking = true }
+                        } label: {
+                            Text("unbind this book")
+                                .font(InkFont.bodyItalic(14))
+                                .foregroundStyle(Ink.wax)
+                                .padding(EdgeInsets(top: 12, leading: 18, bottom: 14, trailing: 18))
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                    }
+                }
+            }
+
+            Text("Its pages stay in your notebook whatever you rewrite — unbinding blanks the voice, never the ink.")
+                .font(InkFont.bodyItalic(13))
+                .foregroundStyle(room.dim)
+                .padding(.leading, 4)
+        }
+        .padding(.bottom, 22)
+    }
+
+    private func plateRow(
+        _ row: (key: String, label: String, value: String), divider: Bool
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            SmallCapsLabel(text: row.label, size: 10.5, tracking: 1.6, color: room.dim)
+                .frame(width: 108, alignment: .leading)
+            if plateEditing == row.key {
+                TextField("", text: $plateDraft)
+                    .font(InkFont.hand("Caveat-Regular", 22))
+                    .foregroundStyle(room.text)
+                    .focused($plateFieldFocused)
+                    .submitLabel(.done)
+                    .onSubmit { commitPlateRow(row.key) }
+                    .frame(minHeight: 44)
+            } else {
+                Button {
+                    plateDraft = row.value
+                    plateEditing = row.key
+                    plateFieldFocused = true
+                } label: {
+                    Text(row.value.isEmpty ? "—" : row.value)
+                        .font(InkFont.hand("Caveat-Regular", 22))
+                        .foregroundStyle(row.value.isEmpty ? room.dim : room.text)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("\(row.label): \(row.value.isEmpty ? "not set" : row.value). Write over it to change it.")
+            }
+        }
+        .padding(EdgeInsets(top: 4, leading: 18, bottom: 4, trailing: 18))
+        .overlay(alignment: .bottom) {
+            if divider { hairline }
+        }
+    }
+
+    private func commitPlateRow(_ key: String) {
+        let value = plateDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.amendBinding { binding in
+            switch key {
+            case "you": binding.you = value
+            case "me": binding.me = value
+            case "where": binding.place = value
+            case "temper": binding.temper = value
+            case "tongue": binding.tongue = value
+            case "fact": binding.fact = value
+            case "length": binding.length = value
+            case "never": binding.never = value
+            default: break
+            }
+        }
+        // A rewritten name retires the drawn title — the spine may not spell
+        // a different word than the plate.
+        if key == "me" { model.clearCustomNameInk() }
+        plateEditing = nil
+    }
+
+    /// Breaking the seal takes a held press, never a tap: the fill climbs
+    /// while the thumb stays down and falls back the moment it lifts.
+    private var unbindConfirm: some View {
+        HStack(spacing: 18) {
+            ZStack(alignment: .bottom) {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color(hex: 0x9A4038), Ink.wax, Color(hex: 0x4F1C1A)],
+                            center: UnitPoint(x: 0.32, y: 0.26),
+                            startRadius: 0, endRadius: 46
+                        )
+                    )
+                Circle()
+                    .trim(from: 0, to: unbindHold)
+                    .stroke(Ink.candleBright.opacity(0.8), lineWidth: 3)
+                    .rotationEffect(.degrees(-90))
+                    .padding(2)
+                Text("W")
+                    .font(InkFont.display(20))
+                    .foregroundStyle(Color(hex: 0xF6E2C0).opacity(0.85))
+                    .frame(maxHeight: .infinity)
+            }
+            .frame(width: 64, height: 64)
+            .onLongPressGesture(minimumDuration: 1.2, maximumDistance: 40) {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    model.unbindCustomBook()
+                    unbindAsking = false
+                    unbindHold = 0
+                }
+            } onPressingChanged: { pressing in
+                if pressing {
+                    withAnimation(.linear(duration: 1.2)) { unbindHold = 1 }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) { unbindHold = 0 }
+                }
+            }
+            .accessibilityLabel("Press and hold to unbind this book")
+            .accessibilityHint("Hold for a moment; letting go keeps the binding.")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("break the seal to unbind — a tap will not do it")
+                    .font(InkFont.bodyItalic(14))
+                    .foregroundStyle(room.text)
+                Button {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        unbindAsking = false
+                        unbindHold = 0
+                    }
+                } label: {
+                    SmallCapsLabel(text: "leave it bound", size: 11, tracking: 1.5, color: room.accent)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(EdgeInsets(top: 12, leading: 18, bottom: 12, trailing: 18))
     }
 
     // MARK: - Delete confirm

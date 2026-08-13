@@ -39,7 +39,8 @@ extension Book {
             accentHex: accentHex, paperHex: paperHex,
             hand: hand.id, handScale: hand.scale,
             whisper: whisper, opener: opener, starterPrompt: starterPrompt,
-            develops: develops, locked: locked, suggested: suggested, resting: resting
+            develops: develops, locked: locked, suggested: suggested, resting: resting,
+            blank: blank
         )
     }
 }
