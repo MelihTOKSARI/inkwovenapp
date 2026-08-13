@@ -12,7 +12,7 @@
 | Tier | Price | What's included |
 |---|---|---|
 | Free | $0 | All 8 Books · 5 magic moments/day (ink replies; ~1 image/day within them) · 30-day page archive · Face ID lock |
-| Inkwoven Plus | **$4.99/wk (3-day trial) or $12.99/mo** | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
+| Inkwoven Plus | **$4.99/wk (3-day trial) or $9.99/mo** ($12.99 planned post-approval) | Unlimited ink replies · **8 images/day soft cap — past it, in-fiction slowdown ("the ink must rest") with growing cooldowns, never a hard error; a real server-side ledger, unit-tested, tunable without release** · full archive · **cross-page memory (the notebook remembers you)** · all hands/inks · unlimited notebooks |
 | **Moving-picture credits (the Vials)** | 4 / 11 / 28 at $4.99 / $10.99 / $24.99 | **LAUNCH-BLOCKING — the hero feature.** Consumable; never bundled unlimited (real unit cost ~$0.46/clip delivered). **2 free clips per user, ever**, so everyone reaches the hero moment; global monthly spend ceiling enforced server-side. |
 | Content IAP (the Bindery) | — | **Cut from v1.** Ships as a try-on room with no SKUs; a storefront where nothing can be bought is a 2.1 rejection. |
 

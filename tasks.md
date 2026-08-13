@@ -99,12 +99,16 @@
 > in ASC). Image soft cap 20 → 8, from the flux-2 cost model — rationale and unit
 > economics in `design/app-store-assets/subscriptions.md`.
 >
-> **Prices settled, 2026-08-10 — final for ASC entry:** `plus_weekly` **$4.99/wk** with a
-> 3-day free trial (unchanged), `plus_monthly` **$9.99 → $12.99**, vial prices unchanged at
-> **$4.99 / $10.99 / $24.99** but regraded **3/8/20 → 4/11/28**. `video-in-plus.md` §6 is
-> the arithmetic; $9.99 loses money on the heavy-book full-limit case once Plus carries a
-> video allowance. Landed in `Products.swift`, `proxy/src/server.js` and
-> `app/Inkwoven.storekit`. Everything else in `video-in-plus.md` is still a proposal.
+> **Prices settled and LIVE in App Store Connect, 2026-08-10.** `plus_weekly` **$4.99/wk**
+> with a 3-day free trial, `plus_monthly` **$9.99**, and the three vials at
+> **$4.99 / $10.99 / $24.99** regraded **3/8/20 → 4/11/28**. All five products exist, are
+> priced across 175 storefronts, and are localized.
+>
+> **Monthly stays at $9.99 for v1.** Apple only offers *Plan Subscription Price Change*
+> once a subscription is approved, so the $12.99 in `video-in-plus.md` §6 cannot be
+> entered before launch — and it is unneeded anyway, since the bundled video allowance
+> that justifies it is unshipped. Raise it post-approval, grandfathering existing
+> subscribers. Detail in `design/app-store-assets/subscriptions.md` §4.
 
 - [ ] G1 Entitlement gating: 5 moments/day, **Plus image ledger (8/day soft cap → in-fiction slowdown with growing cooldowns, never a hard error; cap + cooldown curve server-tunable)**, 30-day archive, memory=Plus; unit-tested — **M**
   - AC: free user's 6th moment → paywall before any model call. Plus user's 9th image of the day → "the ink must rest" cooldown path, no error state, event logged.

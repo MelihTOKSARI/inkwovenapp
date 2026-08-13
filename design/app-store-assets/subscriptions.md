@@ -103,20 +103,28 @@ surprise charge. Three days is the standard pairing for weekly.
 | Reference name | `Plus Monthly` |
 | Type | Auto-renewable subscription |
 | Duration | 1 month |
-| Price | **$12.99 USD** |
+| Price | **$9.99 USD at launch → $12.99 planned** (see the note in §4) |
 | Introductory offer | **none** |
 | Family Sharing | Off |
 | Display name | `Inkwoven Plus Monthly` (21 / 30) |
 | Description | `Unlimited pages and your full archive.` (38 / 45) |
 
-> **Repriced 2026-08-10: $9.99 → $12.99.** At $9.99 the heavy-book full-limit case loses
-> $1.06/month once the text ceiling rises to 100/day and Plus carries a bundled video
-> allowance — the arithmetic is `video-in-plus.md` §6, and it is the reason for the move.
-> The weekly plan is unchanged at $4.99. The margin tables in §6 below still describe
-> $9.99 against the pre-video cost model; treat them as the reasoning, not the numbers.
+> **Launching at $9.99; $12.99 is planned, not shipped (2026-08-10).** The record in App
+> Store Connect was created at $9.99, and Apple only offers "Plan Subscription Price
+> Change" once a subscription has been **approved** — the option is simply absent from the
+> Subscription Prices menu before then. Deleting and recreating would burn the id
+> `plus_monthly` forever, so v1 ships at $9.99.
+>
+> That is also the right answer on the merits: the $12.99 case in `video-in-plus.md` §6
+> rests on Plus carrying a bundled video allowance, and the three-stirrings work is
+> unshipped. At launch there is no bundled video, so $9.99 is solvent.
+>
+> **Raise it to $12.99 when the allowance ships**, via Subscription Prices → **+** →
+> *Plan Subscription Price Change*, choosing **"Keep the current price for existing
+> subscribers"** so launch subscribers are grandfathered. The weekly plan is unchanged.
 
 **Monthly is the value plan and should be presented as such.** $4.99/week annualises to
-$21.62/month, so monthly is a **40% saving**. Show that comparison plainly on the paywall.
+$21.62/month, so monthly is a **54% saving**. Show that comparison plainly on the paywall.
 (The paywall computes this from `StorePrice.amount`, never from this sentence — but the
 App Store description must agree with what the paywall renders.)
 
@@ -126,7 +134,7 @@ Weekly plans draw more App Review scrutiny than any other duration — it is the
 the scam-app playbook, and 3.1.2 rejections cluster there. Three rules keep you clear:
 
 1. **Never make weekly the pre-selected plan while presenting it as the cheap option.**
-   $4.99 looks smaller than $12.99 and costs two-thirds more per month. If weekly is
+   $4.99 looks smaller than $9.99 and costs more than twice as much. If weekly is
    pre-selected, the monthly saving must be visible in the same view without scrolling.
 2. **State the renewal period next to the price**, every time: "$4.99 / week", never "$4.99".
 3. **The trial terms appear before purchase, not after** — "Free for 3 days, then $4.99 a
@@ -349,7 +357,7 @@ Never put the `sk_` key in the app or the `appl_` key on the server.
 - [ ] Paid Apps agreement **Active** in Agreements, Tax, and Banking
 - [ ] Subscription group `Plus` created, display name `Inkwoven Plus`
 - [ ] `plus_weekly` — $4.99, 1 week, **3-day free trial**, all territories
-- [ ] `plus_monthly` — **$12.99**, 1 month, no intro offer
+- [x] `plus_monthly` — **$9.99** at launch ($12.99 planned post-approval), 1 month, no intro offer
 - [ ] Both IDs verified character for character against `Products.swift`
 - [ ] Localized display name + description on both (out of Missing Metadata)
 - [ ] Review screenshot attached to both, showing the new two-plan paywall

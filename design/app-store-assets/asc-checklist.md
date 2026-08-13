@@ -9,11 +9,44 @@ Fixed facts used throughout: bundle ID `com.empath.inkwoven`, version `1.0`,
 build `1`, signing team `77G7KM4549` (already configured in the Xcode project),
 developer account: Melih Toksari (individual).
 
+**App Store Connect Apple ID: `6797229938`.** Subscription group `Plus`: `22281455`.
+
 ---
 
-## 1. Create the app record
+## Status as of 2026-08-10
 
-- [ ] App Store Connect → My Apps → **+** → New App.
+Verified directly in App Store Connect, superseding the "nothing exists yet" note that
+used to sit in `subscriptions.md` §2.
+
+| | State |
+|---|---|
+| App record | **Created** — iOS 1.0, *Prepare for Submission* |
+| Paid Applications agreement | **Active** (all countries), banking + W-8BEN active |
+| Small Business Program | **Enrolled** — proceeds read 85% of price on every product |
+| Subscription group `Plus` | **Created**, display name `Inkwoven Plus` |
+| `plus_weekly` (`6797239012`) | **Complete** — $4.99, 3-day free trial on all 175, localized |
+| `plus_monthly` (`6797239004`) | **Complete at $9.99** — localized, no intro offer. $12.99 deferred; see `subscriptions.md` §4 |
+| `plus_annual_59_99` | **Dead record.** The annual plan was dropped 2026-08-01 and no code knows this id. Left in place deliberately — deleting frees nothing, since Apple never reuses a product id. **Never attach it to a version.** |
+| `vials_small` (`6801301333`) | **Complete** — $4.99, `Four Vials`, all 175 |
+| `vials_medium` (`6801302996`) | **Complete** — $10.99, `Eleven Vials`, all 175 |
+| `vials_large` (`6801304501`) | **Complete** — $24.99, `Twenty-Eight Vials`, all 175 |
+
+**Still owed on the paid layer, and only a human can do it:**
+
+- [ ] A **review screenshot** on each of the five products. Without one they stay in
+      *Missing Metadata* and cannot be submitted (`subscriptions.md` §5).
+- [ ] **Attach all five to version 1.0 and submit together.** A first subscription or
+      consumable cannot be approved on its own — ship without them attached and the app
+      goes live with an empty paywall.
+- [ ] Vial creation was gated in `credits.md` §1 on the physical-iPad video pass and the
+      fal budget cap. The records now exist; **do not submit them until those close** —
+      selling credits for a modality that cannot execute is a 2.1 rejection.
+
+---
+
+## 1. Create the app record — DONE
+
+- [x] App Store Connect → My Apps → **+** → New App.
 - [ ] Platform: iOS. Name: **Inkwoven** — if the name is taken, resolve *now*
       (the listing, subtitle, and keyword logic in `listing.md` all assume the
       name "Inkwoven" indexes; a fallback name changes the keyword line too).

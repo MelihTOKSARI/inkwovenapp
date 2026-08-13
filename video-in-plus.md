@@ -3,14 +3,21 @@
 **Status:** Proposal v2 — **prices accepted 2026-08-10**, mechanics still proposed
 **Date:** 2026-08-09 · **Decision owner:** Melih
 
-> **Accepted 2026-08-10 (prices only).** `plus_monthly` $9.99 → **$12.99** and
-> `VIAL_GRANTS` 3/8/20 → **4/11/28** are landed in code, the StoreKit catalog and the
-> App Store Connect field sheets — they had to settle before anything could be typed into
-> App Store Connect, and they are effectively permanent once submitted. **Everything else
-> here — the three stirrings, joining, the split free pool, the deleted cooldown ladder,
-> the PixVerse repin and the §8 prerequisites — remains an unshipped proposal.** The vial
-> grades are sized on the $0.249 clip the repin buys; on the outgoing Kling route they
-> still clear 57 / 47 / 40%, so the order is safe but the repin is owed.
+> **Partly accepted 2026-08-10.** `VIAL_GRANTS` 3/8/20 → **4/11/28** is landed in code,
+> the StoreKit catalog and App Store Connect — the three consumables are live there at
+> unchanged prices. The grades are sized on the $0.249 clip the PixVerse repin buys; on
+> the outgoing Kling route they still clear 57 / 47 / 40%, so shipping them ahead of the
+> repin is safe but the repin is owed.
+>
+> **`plus_monthly` stays at $9.99 for v1** — deferred, not rejected. App Store Connect
+> offers *Plan Subscription Price Change* only once a subscription is approved, so
+> $12.99 cannot be entered pre-launch. It is also unnecessary until the allowance below
+> ships: with no bundled video, $9.99 is solvent. Raise it when §3 lands, grandfathering
+> existing subscribers.
+>
+> **Everything else here — the three stirrings, joining, the split free pool, the deleted
+> cooldown ladder, the PixVerse repin and the §8 prerequisites — remains an unshipped
+> proposal.**
 **Headline:** 3 stirrings per rolling 7 days in Plus, 5 seconds each, joinable. Monthly $9.99 → $12.99.
 
 > **Provenance.** The repo-side numbers in §8 were read directly from this codebase and are
