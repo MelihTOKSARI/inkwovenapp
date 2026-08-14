@@ -155,7 +155,11 @@ jobs:
           [ "$RUNTIME_UID" != "0" ] || { echo "::error::container runs as root"; exit 1; }
       - name: Assert devDependencies absent
         run: |
-          if docker run --rm inkwoven-proxy:ci test -d node_modules/@flydotio; then
+          # Assert on the package payload, not the scope directory: `npm ci
+          # --omit=dev` still creates an empty `node_modules/@flydotio` (and
+          # `@inquirer`) for the omitted scoped packages, so `test -d` on the
+          # scope alone fails a perfectly clean image.
+          if docker run --rm inkwoven-proxy:ci test -e node_modules/@flydotio/dockerfile/package.json; then
             echo "::error::devDependencies leaked into the runtime image"
             exit 1
           fi
