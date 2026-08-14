@@ -149,17 +149,15 @@ final class AppModel {
     }
 
     /// A fresh shelf: the three Books whose verbs need no setup — ask, draw,
-    /// tell the day. Everything else asks the writer to supply a premise, a
-    /// hero, a problem or an addressee, which is exactly the cliff this
-    /// staging removes.
-    static let firstShelf: Set<BookID> = [.oracle, .artist, .keeper]
+    /// tell the day — and the blank book beside them, waiting to be bound.
+    /// Everything else asks the writer to supply a premise, a hero, a
+    /// problem or an addressee, which is exactly the cliff this staging
+    /// removes.
+    static let firstShelf: Set<BookID> = [.oracle, .artist, .keeper, .custom]
 
-    /// The order the rest arrive in. The blank book comes first — it is the
-    /// gift for having learned the loop — but only once two different Books
-    /// have answered the writer; until then the next shipped Book arrives
-    /// instead, so a writer devoted to one Book is never left waiting.
+    /// The order the rest arrive in, easiest verb first.
     static let arrivalOrder: [BookID] = [
-        .custom, .storyteller, .gameMaster, .tutor, .correspondent, .parlor,
+        .storyteller, .gameMaster, .tutor, .correspondent, .parlor,
     ]
 
     // MARK: - The writer's own Book
@@ -577,12 +575,6 @@ final class AppModel {
         answeredCount += 1
     }
 
-    /// May this book arrive next? The blank book waits for the loop to be
-    /// learned in two different Books; everything else needs only the night.
-    private func eligibleToArrive(_ id: BookID) -> Bool {
-        id == .custom ? answeredBooks.count >= 2 : true
-    }
-
     /// A night passes. Called on launch and on every return to the
     /// foreground: if today is a new day AND the writer has answered a page
     /// since the last arrival, one more book stands on the ledge — quietly,
@@ -592,9 +584,7 @@ final class AppModel {
         let today = Self.dayStamp(.now)
         guard lastArrivalDay != today,
               answeredCount > answeredAtLastArrival,
-              let next = Self.arrivalOrder.first(where: {
-                  !arrivedBooks.contains($0) && eligibleToArrive($0)
-              })
+              let next = Self.arrivalOrder.first(where: { !arrivedBooks.contains($0) })
         else { return }
         arrivedBooks.insert(next)
         lastArrivalDay = today
