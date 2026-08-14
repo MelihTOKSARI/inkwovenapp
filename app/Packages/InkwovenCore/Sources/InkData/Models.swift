@@ -155,9 +155,16 @@ public final class CreditTransaction {
 }
 
 public enum InkStore {
-    public static let schema = Schema([
-        Notebook.self, BookState.self, Page.self, Reply.self, MemoryEntry.self, CreditTransaction.self,
-    ])
+    /// Computed, not a stored `static let`: `Schema` is not `Sendable` under
+    /// the 6.1 SDK, so a stored global trips strict-concurrency checking there
+    /// while compiling clean on 6.3. Building it per call costs nothing — it is
+    /// read once, at container creation — and keeps one source that both
+    /// toolchains accept without an unsafe opt-out.
+    public static var schema: Schema {
+        Schema([
+            Notebook.self, BookState.self, Page.self, Reply.self, MemoryEntry.self, CreditTransaction.self,
+        ])
+    }
 
     /// In-memory for tests; on-device the app shell configures CloudKit
     /// mirroring (private database) on this same schema.
