@@ -19,8 +19,34 @@ import InkNet
 /// (the simulator, an old device) or when the PROXY offers no handshake at
 /// all — the proxy is what decides whether that is acceptable, and in
 /// `appattest` mode it simply is not. Nothing here grants itself anything.
+/// DeviceCheck's service behind a `Sendable` face.
+///
+/// Every call below is already async and safe to make from any thread, but the
+/// 6.1 SDK ships `DCAppAttestService` with no `Sendable` annotation — so the
+/// actor below, holding one as isolated state, cannot hand it to its own async
+/// calls without the compiler reading a data race. The 6.3 SDK annotates it and
+/// the same code compiles untouched; this box states the fact for both. The
+/// forwarding methods run nonisolated, so the service never crosses a boundary.
+private struct AttestService: @unchecked Sendable {
+    let wrapped: DCAppAttestService
+
+    var isSupported: Bool { wrapped.isSupported }
+
+    func generateKey() async throws -> String {
+        try await wrapped.generateKey()
+    }
+
+    func attestKey(_ keyID: String, clientDataHash: Data) async throws -> Data {
+        try await wrapped.attestKey(keyID, clientDataHash: clientDataHash)
+    }
+
+    func generateAssertion(_ keyID: String, clientDataHash: Data) async throws -> Data {
+        try await wrapped.generateAssertion(keyID, clientDataHash: clientDataHash)
+    }
+}
+
 actor AppAttestIdentity: AuthTokenProviding {
-    private let service: DCAppAttestService
+    private let service: AttestService
     private let endpoints: ProxyEndpoints
     private let session: URLSession
     private let fallback: any AuthTokenProviding
@@ -51,7 +77,7 @@ actor AppAttestIdentity: AuthTokenProviding {
         self.endpoints = endpoints
         self.session = session
         self.fallback = fallback
-        self.service = service
+        self.service = AttestService(wrapped: service)
     }
 
     func token() async throws -> String {
