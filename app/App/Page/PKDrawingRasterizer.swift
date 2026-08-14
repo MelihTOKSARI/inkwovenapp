@@ -14,7 +14,12 @@ enum RasterizeError: Error {
 struct PKDrawingRasterizer: DrawingRasterizing, @unchecked Sendable {
     let drawing: PKDrawing
 
-    private static let ciContext = CIContext()
+    /// One shared context on purpose: CIContext builds and caches GPU state at
+    /// init, so making a fresh one per rasterize would cost far more than the
+    /// filter it runs. `nonisolated(unsafe)` rather than a computed property
+    /// because Core Image documents a context as safe to share across threads —
+    /// the 6.1 compiler simply has no annotation to read that from.
+    private nonisolated(unsafe) static let ciContext = CIContext()
 
     func rasterize(cropRect: CGRect, targetPixelSize: CGSize) throws -> Data {
         let scale = max(targetPixelSize.width / max(cropRect.width, 1), 0.01)
