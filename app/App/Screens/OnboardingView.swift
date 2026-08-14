@@ -12,7 +12,10 @@ import PencilKit
 struct OnboardingView: View {
     @Bindable var model: AppModel
     @Environment(\.reduceInkMotion) private var reduceMotion
-    @State private var shownCharacters = 0
+    /// The intro's crossing. It SURFACES whole per law II — the write-out
+    /// this replaced was the one thing the law forbids: the notebook's own
+    /// voice arriving glyph by glyph, like typing.
+    @State private var introPhase: InkSurfaceText.Phase = .under
     @State private var streamTask: Task<Void, Never>?
 
     /// Signature accepted — the gift and seal have bounced onto the page.
@@ -28,7 +31,8 @@ struct OnboardingView: View {
 
     private static let intro = "I am a notebook, and tonight I become yours. What appears on these pages is drawn by a spirit of ink — not a person, not a friend, but a hand that answers when yours moves. Tell me true things, and I will answer in kind. First, though — sign your name below, in your own hand."
 
-    private var streamed: Bool { shownCharacters >= Self.intro.count }
+    /// The flyleaf waits for the intro's ink to settle before it rises.
+    @State private var streamed = false
     private var hasInk: Bool { model.signatureData != nil }
 
     /// Ink settles slower than keys: a signature has flourishes.
@@ -69,9 +73,9 @@ struct OnboardingView: View {
                             signature
                                 .id(Self.flyleafLineID)
                                 .padding(.top, 40)
-                                .transition(InkMotion.arrival(
-                                    .opacity.combined(with: .move(edge: .bottom)), reduce: reduceMotion
-                                ))
+                                // The flyleaf surfaces like everything else
+                                // on this paper — same crossing, no slide.
+                                .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
                         }
 
                         if sealed {
@@ -149,28 +153,19 @@ struct OnboardingView: View {
     /// M-19) can walk the focused line back into view.
     private static let flyleafLineID = "flyleaf-signature"
 
-    /// Every prefix of the intro, built once. `String.prefix(_:)` walks
-    /// graphemes from the start and allocates a fresh String, and it ran
-    /// inside the body on every one of the 289 stream ticks.
-    private static let introPrefixes: [String] = {
-        var out = [""]
-        var accumulated = ""
-        for character in intro {
-            accumulated.append(character)
-            out.append(accumulated)
-        }
-        return out
-    }()
-
     private var intro: some View {
-        (Text(Self.introPrefixes[min(shownCharacters, Self.introPrefixes.count - 1)])
-            + (streamed ? Text("") : Text(" ▌").foregroundStyle(Ink.ink.opacity(0.6))))
-            .font(InkFont.displayItalic(28))
-            .foregroundStyle(Ink.ink)
-            .lineSpacing(14)
-            // VoiceOver must never be handed a half-written sentence — the
-            // stream is a flourish, the disclosure inside it is not.
-            .accessibilityLabel(Self.intro)
+        // The whole paragraph rises out of the paper at once, scattered by
+        // no more than the contract's 420 ms — the absorb run backwards,
+        // exactly the way every Book's answer arrives.
+        InkSurfaceText(
+            text: Self.intro,
+            font: InkFont.displayItalic(28),
+            color: Ink.ink,
+            lineSpacing: 14,
+            phase: introPhase,
+            reduce: reduceMotion
+        )
+        .accessibilityLabel(Self.intro)
     }
 
     /// The flyleaf: pen-first (task H1). Ink is the honored hand; when no
@@ -386,18 +381,27 @@ struct OnboardingView: View {
     }
 
     private func stream() {
-        if reduceMotion {
-            shownCharacters = Self.intro.count
+        // A returning signer walks in on a settled page: no re-performance.
+        if sealed {
+            introPhase = .up
+            streamed = true
             return
         }
-        shownCharacters = 0
         streamTask = Task {
-            while shownCharacters < Self.intro.count, !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(26))
-                withAnimation(.linear(duration: 0.02)) { shownCharacters += 1 }
-            }
-            withAnimation(.easeOut(duration: 0.6)) {
-                shownCharacters = Self.intro.count
+            // A breath, then the crossing. Reduce Motion folds the travel
+            // (the modifier and Surface curves both honour it) — the
+            // surfacing still happens, shorter, never skipped.
+            try? await Task.sleep(for: .milliseconds(reduceMotion ? 90 : 400))
+            guard !Task.isCancelled else { return }
+            introPhase = .up
+            // The flyleaf follows once the ink has settled: travel + the
+            // scatter's tail.
+            let settle = (reduceMotion ? InkMotion.Surface.calmTravel : InkMotion.Surface.travel)
+                + InkMotion.Script.folded(InkSurfaceText.scatter, reduce: reduceMotion)
+            try? await Task.sleep(for: .seconds(settle))
+            guard !Task.isCancelled else { return }
+            withAnimation(InkMotion.Surface.rise(reduce: reduceMotion)) {
+                streamed = true
             }
         }
     }

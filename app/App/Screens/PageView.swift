@@ -574,18 +574,22 @@ struct PageView: View {
                 Text(book.opener)
                     .font(book.handFont(26))
                     .foregroundStyle(book.ink)
-                    .opacity(showOpening ? 0.92 : 0)
+                    .opacity(0.92)
+                    // The opener is ink: the first stroke DRINKS it — blur
+                    // up, a small sink — never a fade. Layout is kept while
+                    // it is under, so the typed hand's inset never jumps.
+                    .inkSubmerged(!showOpening)
                     .lineSpacing(6)
                     .onGeometryChange(for: CGFloat.self) { proxy in
                         proxy.size.height
                     } action: { openerHeight = $0 }
                 if showOpening {
                     starterOpening
-                        .transition(.opacity)
+                        .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
                 }
             }
             .allowsHitTesting(false)
-            .inkAnimation(.easeOut(duration: 0.4), value: showOpening, reduce: reduceMotion)
+            .animation(InkMotion.Surface.sink(reduce: reduceMotion), value: showOpening)
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
             } action: { topBlockHeight = $0 }
@@ -599,7 +603,9 @@ struct PageView: View {
                 // beat; the regular marginalia returns when it fades.
                 if let ack = reportAck {
                     QuietBanner(text: ack)
-                        .transition(.opacity)
+                        // Marginalia is ink too: it surfaces and is drunk,
+                        // never popped or faded.
+                        .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
                 } else {
                     statusNote
                 }
@@ -698,13 +704,13 @@ struct PageView: View {
             // returns with one `true` in `RestWindowAffordances`.
             if RestWindowAffordances.shown {
                 SettleBounce()
-                    .transition(.opacity)
+                    .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
             } else {
                 offlineNote
             }
         case .held:
             QuietBanner(text: "the page waits — nothing sends until you lift the hold")
-                .transition(.opacity)
+                .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
         default:
             // `.sending` and `.answering` land here and stay quiet: the wait
             // used to be narrated ("the ink drinks into the page…"), and the
@@ -723,7 +729,7 @@ struct PageView: View {
     private var offlineNote: some View {
         if net.isOffline {
             QuietBanner(text: "the road is dark — write on; your ink is kept, and sends when the way opens")
-                .transition(.opacity)
+                .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
         } else {
             EmptyView()
         }
@@ -744,7 +750,7 @@ struct PageView: View {
             QuietBanner(text: cooldownCopy(seconds))
                 .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
                 .background(parchmentCard)
-                .transition(.opacity)
+                .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
         case .declined:
             VStack(alignment: .leading, spacing: 12) {
                 QuietBanner(text: declineCopy)
@@ -769,7 +775,7 @@ struct PageView: View {
             }
             .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
             .background(parchmentCard)
-            .transition(.opacity)
+            .transition(InkMotion.arrival(.inkSurface, reduce: reduceMotion))
         default:
             EmptyView()
         }

@@ -120,12 +120,12 @@ struct BindingView: View {
                 if question.key == "temper" {
                     waxCards
                         .padding(.top, 26)
-                        .surfaced(questionSurfaced && canWrite, reduce: reduceMotion)
+                        .inkSubmerged(!(questionSurfaced && canWrite))
                 }
                 if question.key == "tongue" {
                     ribbons
                         .padding(.top, 26)
-                        .surfaced(questionSurfaced && canWrite, reduce: reduceMotion)
+                        .inkSubmerged(!(questionSurfaced && canWrite))
                 }
 
                 gutter
@@ -173,13 +173,23 @@ struct BindingView: View {
         return answer.text
     }
 
+    /// The question's crossing, worded for InkSurfaceText: absorbing sinks
+    /// word by word on the scatter; otherwise it is up or still under.
+    private var questionPhase: InkSurfaceText.Phase {
+        if phase == .absorbing { return .absorbed }
+        return questionSurfaced ? .up : .under
+    }
+
     private var questionText: some View {
-        Text(question.ask)
-            .font(InkFont.hand("Fondamento-Regular", 36))
-            .foregroundStyle(Ink.ink)
-            .lineSpacing(8)
-            .surfaced(questionSurfaced, reduce: reduceMotion)
-            .accessibilityLabel("The book asks: \(question.ask)")
+        InkSurfaceText(
+            text: question.ask,
+            font: InkFont.hand("Fondamento-Regular", 36),
+            color: Ink.ink,
+            lineSpacing: 8,
+            phase: questionPhase,
+            reduce: reduceMotion
+        )
+        .accessibilityLabel("The book asks: \(question.ask)")
     }
 
     /// One ruled line the pen answers on — ink when a pencil is about, the
@@ -210,7 +220,7 @@ struct BindingView: View {
             .overlay(alignment: .bottom) {
                 Rectangle().fill(Ink.ink.opacity(0.4)).frame(height: 1.5)
             }
-            .surfaced(questionSurfaced, reduce: reduceMotion)
+            .inkSubmerged(!questionSurfaced)
         }
         .animation(.easeOut(duration: 0.3), value: hasAnything)
     }
@@ -620,24 +630,3 @@ private struct CeremonySpine: View {
     }
 }
 
-/// The law of the ink, as a modifier: up = standing on the page; down =
-/// under the paper — 7px of haze, 7pt below the surface, whether it is being
-/// drunk or has yet to rise. One gesture, two directions, the same numbers
-/// every page uses.
-private struct SurfacedInk: ViewModifier {
-    let up: Bool
-    let reduce: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(up ? 1 : 0)
-            .blur(radius: up || reduce ? 0 : InkMotion.Surface.haze)
-            .offset(y: up || reduce ? 0 : InkMotion.Surface.depth)
-    }
-}
-
-private extension View {
-    func surfaced(_ up: Bool, reduce: Bool) -> some View {
-        modifier(SurfacedInk(up: up, reduce: reduce))
-    }
-}

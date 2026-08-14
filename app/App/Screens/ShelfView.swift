@@ -340,6 +340,10 @@ struct RiddleDiaryLine: View {
     @State private var lineIndex = 0
     @State private var shownCount = 0
     @State private var absorbed = true
+    /// The ink hand's crossing. Law II: the notebook's own lines SURFACE
+    /// whole — scattered, never typed. Only the "you" hand writes out,
+    /// because it is playing the writer.
+    @State private var inkPhase: InkSurfaceText.Phase = .under
     @State private var blotPulse = false
     @State private var nibPulse = false
 
@@ -414,21 +418,26 @@ struct RiddleDiaryLine: View {
     }
 
     private func lineText(_ line: Line) -> some View {
-        let shown = line.prefixes[min(shownCount, line.prefixes.count - 1)]
-        return Group {
+        Group {
             if line.hand == .you {
-                Text(shown)
+                Text(line.prefixes[min(shownCount, line.prefixes.count - 1)])
                     .font(InkFont.hand("Caveat-Regular", 26))
                     .foregroundStyle(Color(hex: 0xCDBB97))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
             } else {
-                Text(shown)
-                    .font(InkFont.hand("Tangerine-Bold", 40))
-                    .foregroundStyle(room.heading)
-                    .shadow(color: Color(hex: 0xE8B84B, opacity: 0.3), radius: 13)
+                InkSurfaceText(
+                    text: line.text,
+                    font: InkFont.hand("Tangerine-Bold", 40),
+                    color: room.heading,
+                    lineSpacing: 4,
+                    centered: true,
+                    phase: inkPhase,
+                    reduce: reduceMotion
+                )
+                .shadow(color: Color(hex: 0xE8B84B, opacity: 0.3), radius: 13)
             }
         }
-        .multilineTextAlignment(.center)
-        .lineSpacing(4)
     }
 
     /// Faint candle-glow pooling beneath the writing, breathing slowly.
@@ -479,17 +488,33 @@ struct RiddleDiaryLine: View {
 
     private func runExchange(_ lines: [Line]) async {
         var index = 0
+        let travel = reduceMotion ? InkMotion.Surface.calmTravel : InkMotion.Surface.travel
+        let scatterTail = InkMotion.Script.folded(InkSurfaceText.scatter, reduce: reduceMotion)
         try? await Task.sleep(for: .milliseconds(700))
         while !Task.isCancelled {
             let line = lines[index]
             lineIndex = index
-            withAnimation(nil) { absorbed = false }
+            withAnimation(nil) {
+                absorbed = false
+                inkPhase = .under
+            }
 
-            if reduceMotion {
+            if line.hand == .ink {
+                // The book's line SURFACES — the whole block at once, blur
+                // falling away, scattered within the contract's window.
+                // Never typed: that is the writer's gesture alone.
+                shownCount = line.text.count
+                try? await Task.sleep(for: .milliseconds(60))
+                if Task.isCancelled { return }
+                inkPhase = .up
+                try? await Task.sleep(for: .seconds(travel + scatterTail))
+                if Task.isCancelled { return }
+            } else if reduceMotion {
                 shownCount = line.text.count
             } else {
                 shownCount = 0
-                // one character every 38 ms, as the design's rAF pacing
+                // one character every 38 ms, as the design's rAF pacing —
+                // the one hand allowed to write out, because it IS a hand
                 for n in 1...line.text.count {
                     try? await Task.sleep(for: .milliseconds(38))
                     if Task.isCancelled { return }
@@ -503,7 +528,14 @@ struct RiddleDiaryLine: View {
             try? await Task.sleep(for: .seconds(hold))
             if Task.isCancelled { return }
 
-            withAnimation(.easeIn(duration: 1.4)) { absorbed = true }
+            if line.hand == .ink {
+                // Drunk word by word on the same scatter — the surfacing
+                // reversed, exactly.
+                inkPhase = .absorbed
+                try? await Task.sleep(for: .seconds(travel + scatterTail))
+            } else {
+                withAnimation(.easeIn(duration: 1.4)) { absorbed = true }
+            }
             let gap: Double = line.hand == .you ? 1.55 : 1.9
             try? await Task.sleep(for: .seconds(gap))
             if Task.isCancelled { return }

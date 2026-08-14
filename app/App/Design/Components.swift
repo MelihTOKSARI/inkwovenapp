@@ -105,7 +105,7 @@ enum InkMotion {
 /// toggled (the ink reply, the develop frame). Enters from `depth` below,
 /// hazy and absent, and arrives sharp: the same crossing `Surface.sink`
 /// performs in the other direction.
-private struct SurfaceCrossing: ViewModifier {
+struct SurfaceCrossing: ViewModifier {
     var submerged: Bool
 
     func body(content: Content) -> some View {
@@ -113,6 +113,15 @@ private struct SurfaceCrossing: ViewModifier {
             .opacity(submerged ? 0 : 1)
             .blur(radius: submerged ? InkMotion.Surface.haze : 0)
             .offset(y: submerged ? InkMotion.Surface.depth : 0)
+    }
+}
+
+extension View {
+    /// The crossing as a toggle, for ink that must keep its layout while
+    /// under the paper (the opener, a held question). `true` = drunk: hazy,
+    /// sunk, gone — never merely faded.
+    func inkSubmerged(_ submerged: Bool) -> some View {
+        modifier(SurfaceCrossing(submerged: submerged))
     }
 }
 
