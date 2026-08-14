@@ -1,2 +1,5 @@
 .DS_Store
 .claude/worktrees/
+
+# CI captures xcodebuild output to a file so failures can print diagnostics
+app/xcodebuild.log

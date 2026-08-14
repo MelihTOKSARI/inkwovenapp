@@ -109,13 +109,24 @@ jobs:
       - name: xcodebuild test (app target)
         working-directory: app
         run: |
+          # Capture the whole log, then print the diagnostics on failure. Piping
+          # xcodebuild straight into `tail -100` meant the trailing "build
+          # commands failed" summary displaced the compiler errors themselves,
+          # so a red run said only *that* it broke, never *where*.
           set -o pipefail
           xcodebuild test \
             -project Inkwoven.xcodeproj \
             -scheme Inkwoven \
             -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
             -only-testing:InkwovenTests \
-            CODE_SIGNING_ALLOWED=NO | tail -100
+            CODE_SIGNING_ALLOWED=NO > xcodebuild.log 2>&1 || {
+              echo "::group::compiler diagnostics"
+              grep -E "error:|XCTAssert|failed with exit code" xcodebuild.log | sort -u || true
+              echo "::endgroup::"
+              tail -100 xcodebuild.log
+              exit 1
+            }
+          tail -20 xcodebuild.log
 
   proxy:
     runs-on: ubuntu-latest
